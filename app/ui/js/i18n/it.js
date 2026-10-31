@@ -934,6 +934,7 @@ export const it = {
   "shortcuts.action.undo": "Annulla l'ultimo batch applicato",
   "shortcuts.action.clearTags": "Cancella i tag dei file selezionati",
   "shortcuts.action.detectBpm": "Rileva il BPM dei file selezionati",
+  "shortcuts.action.trash": "Sposta i file selezionati nel Cestino",
   "shortcuts.action.open": "Apri una cartella",
   "shortcuts.action.reread": "Rileggi la cartella aperta",
   "shortcuts.action.filter": "Vai al filtro",

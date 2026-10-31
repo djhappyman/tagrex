@@ -934,6 +934,7 @@ export const fr = {
   "shortcuts.action.undo": "Annuler le dernier lot appliqué",
   "shortcuts.action.clearTags": "Effacer les tags des fichiers sélectionnés",
   "shortcuts.action.detectBpm": "Détecter le BPM des fichiers sélectionnés",
+  "shortcuts.action.trash": "Placer les fichiers sélectionnés dans la corbeille",
   "shortcuts.action.open": "Ouvrir un dossier",
   "shortcuts.action.reread": "Relire le dossier ouvert",
   "shortcuts.action.filter": "Aller au filtre",

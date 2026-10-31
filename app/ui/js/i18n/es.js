@@ -932,6 +932,7 @@ export const es = {
   "shortcuts.action.undo": "Deshacer el último lote aplicado",
   "shortcuts.action.clearTags": "Borrar las etiquetas de los archivos seleccionados",
   "shortcuts.action.detectBpm": "Detectar el BPM de los archivos seleccionados",
+  "shortcuts.action.trash": "Mover los archivos seleccionados a la Papelera",
   "shortcuts.action.open": "Abrir una carpeta",
   "shortcuts.action.reread": "Volver a leer la carpeta abierta",
   "shortcuts.action.filter": "Ir al filtro",

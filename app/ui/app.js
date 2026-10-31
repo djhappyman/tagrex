@@ -3356,7 +3356,16 @@ syncCssLabels();
 initTooltips();
 // Keyboard shortcuts (#432): one registry, rebindable in Settings. Select-all
 // has no button to press, so it hands its own handler in.
-initShortcuts({ selectAll: selectAllRows });
+initShortcuts({
+  selectAll: selectAllRows,
+  // The same as the file menu's Move to Trash (#600), with its confirmation, on
+  // the selection; inert while a plan is staged, like the menu.
+  trash: () => {
+    if (diffByPath) return;
+    const paths = selectedPaths();
+    if (paths.length) trashFiles(paths);
+  },
+});
 initHealth(() => {
   renderTracks();
   updateStatus();

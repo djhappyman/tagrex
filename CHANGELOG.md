@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Delete moves the selected files to the Trash.** The same confirmation as
+  the file menu's Move to Trash, with the focus on Cancel; Del on Windows and
+  Linux, fn+⌫ or the Delete key on a Mac (⌘⌫ stays Discard). It does nothing
+  in a text field or while a change is staged, can be rebound in Settings ›
+  Shortcuts, and shows beside Move to Trash in the menu. (#600)
+
 ### Fixed
 
 - **A saved mask can be updated in place.** Put a saved mask in a field from

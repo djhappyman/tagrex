@@ -933,6 +933,7 @@ export const ru = {
   "shortcuts.action.undo": "Отменить последнее применение",
   "shortcuts.action.clearTags": "Очистить теги выбранных файлов",
   "shortcuts.action.detectBpm": "Определить BPM выбранных файлов",
+  "shortcuts.action.trash": "Переместить выбранные файлы в Корзину",
   "shortcuts.action.open": "Открыть папку",
   "shortcuts.action.reread": "Перечитать открытую папку",
   "shortcuts.action.filter": "Перейти к фильтру",

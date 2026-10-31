@@ -63,6 +63,9 @@ const ACTIONS = [
     run: () => press("clear-tags", "fields-clear"),
   },
   { id: "detectBpm", combo: "Mod+Shift+KeyB", buttons: ["detect-bpm"], run: () => press("detect-bpm") },
+  // Move the selection to the Trash (#600), the file managers' own key on Windows
+  // and Linux. Not ⌘⌫: that discards a staged plan. The handler is app.js's.
+  { id: "trash", combo: "Delete" },
   { id: "open", combo: "Mod+KeyO", typing: true, buttons: ["lib-action"], run: () => press("lib-action") },
   { id: "reread", combo: "Mod+KeyR", typing: true, buttons: ["lib-refresh"], run: () => press("lib-refresh") },
   {

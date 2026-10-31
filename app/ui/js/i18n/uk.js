@@ -934,6 +934,7 @@ export const uk = {
   "shortcuts.action.undo": "Скасувати останнє застосування",
   "shortcuts.action.clearTags": "Очистити теги вибраних файлів",
   "shortcuts.action.detectBpm": "Визначити BPM вибраних файлів",
+  "shortcuts.action.trash": "Перемістити вибрані файли до Кошика",
   "shortcuts.action.open": "Відкрити папку",
   "shortcuts.action.reread": "Перечитати відкриту папку",
   "shortcuts.action.filter": "Перейти до фільтра",

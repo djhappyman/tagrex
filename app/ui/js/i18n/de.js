@@ -930,6 +930,7 @@ export const de = {
   "shortcuts.action.undo": "Zuletzt angewendeten Stapel rückgängig machen",
   "shortcuts.action.clearTags": "Tags der gewählten Dateien löschen",
   "shortcuts.action.detectBpm": "BPM der ausgewählten Dateien ermitteln",
+  "shortcuts.action.trash": "Ausgewählte Dateien in den Papierkorb legen",
   "shortcuts.action.open": "Einen Ordner öffnen",
   "shortcuts.action.reread": "Geöffneten Ordner neu einlesen",
   "shortcuts.action.filter": "Zum Filter springen",
