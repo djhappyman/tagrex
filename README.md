@@ -71,6 +71,11 @@ sudo apt install ./TagRex_*_amd64.deb     # Debian, Ubuntu (arm64.deb on ARM)
 sudo dnf install ./TagRex-*.x86_64.rpm    # Fedora (aarch64.rpm on ARM)
 ```
 
+**Updates.** Once installed, TagRex tells you when a newer release is out and
+can install it itself: it downloads the update, checks its signature, installs
+it and restarts. See [Settings](docs/guide/settings.md#network) to switch the
+check off.
+
 ## What it does
 
 **A folder is the library.** Point TagRex at one and it recurses: type or browse

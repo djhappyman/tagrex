@@ -103,9 +103,12 @@
         </nav>
         <div class="spacer" data-tauri-drag-region></div>
         <!-- A newer release exists (#435): a note, not a dialog, in the top bar beside the
-             modes. Opens the releases page; the cross skips this version. Shown by updatecheck.js. -->
+             modes. Opens the releases page, or installs the release when it can be installed
+             from here (#602), with the page behind the second button; the cross skips this
+             version. Shown by updatecheck.js. -->
         <span id="update-pill" class="update-pill" hidden>
           <button id="update-open" class="update-open" type="button"></button>
+          <button id="update-notes" class="update-notes icon" type="button" hidden data-i18n-title="update.notes" title="What's new in this version" data-i18n-aria-label="update.notes" aria-label="What's new in this version"><svg class="ico"><use href="#i-doc"/></svg></button>
           <button id="update-skip" class="update-skip icon" type="button" data-i18n-title="update.skip" title="Don't tell me about this version" data-i18n-aria-label="update.skip" aria-label="Don't tell me about this version"><svg class="ico"><use href="#i-close"/></svg></button>
         </span>
         <!-- App-level actions (#343): undo and settings, and — past a hairline —

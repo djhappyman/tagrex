@@ -6744,6 +6744,27 @@ body.drag-active #drop-overlay {
   box-shadow: none;
   color: var(--muted);
 }
+.update-pill .update-skip[hidden],
+.update-pill .update-notes[hidden] {
+  display: none;
+}
+/* The release page beside an installable update (#602): the cross's size, the
+   ink of the note. */
+.update-pill .update-notes {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--accent-ink);
+}
+/* Downloading (#602): the note holds the progress, so it keeps its full ink
+   instead of dimming like an unavailable button. */
+.update-pill .update-open:disabled {
+  opacity: 1;
+  cursor: progress;
+}
 
 /* Settings: "Check now" sits right after the update checkbox on the same line;
    what the check found appears on a line of its own below, and only once there

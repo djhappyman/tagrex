@@ -1308,7 +1308,16 @@ function mockInvoke(cmd, args) {
         },
       ]);
     case "check_for_update":
+      // `mockInvoke.state.update = { latest, installable }` stands in for a newer
+      // release (#602); without it there is none.
+      if (mockInvoke.state?.update) {
+        return Promise.resolve({ current: "0.20.0", newer: true, ...mockInvoke.state.update });
+      }
       return Promise.resolve(args.automatic ? null : { current: "0.20.0", latest: "0.20.0", newer: false });
+    case "install_update":
+      // There is no updater in a browser: a moment of "downloading", then the
+      // error path, which is the only one the page can show.
+      return new Promise((_, reject) => setTimeout(() => reject("Could not install the update: not in the app"), 800));
     case "open_releases_page":
       return Promise.resolve();
     case "load_settings":

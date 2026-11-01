@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Linux, fn+⌫ or the Delete key on a Mac (⌘⌫ stays Discard). It does nothing
   in a text field or while a change is staged, can be rebound in Settings ›
   Shortcuts, and shows beside Move to Trash in the menu. (#600)
+- **TagRex updates itself.** When a newer release is out, the note in the top
+  bar reads Update to TagRex X: it asks first, downloads the update with its
+  progress in the note, checks the signature against the key built into the
+  app, installs it and restarts. macOS replaces the app in place, Windows runs
+  the installer, Linux installs the new `.deb` or `.rpm` after the system's
+  password prompt. Not while changes are staged or a BPM run is writing; the
+  document button beside the note opens the release page. (#602)
 - **Every release carries signed update bundles and a `latest.json`.** The
   macOS app as `.app.tar.gz`, the Windows installers and the Linux packages
   are signed with the project's update key, and one manifest names each

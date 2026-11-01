@@ -45,12 +45,22 @@ not about avoiding errors.
 **Check for updates** — on by default. When TagRex starts it makes one request
 to GitHub's public Releases API for the latest published release and compares
 its version with the one you are running. If a newer one exists, a quiet note
-appears in the status bar; it opens the releases page, and the cross beside it
-stops the note for that version. Nothing is downloaded or installed, and the
-request carries nothing about you or your files beyond what any HTTPS request
-does: your address and a user agent naming the TagRex version. The proxy above
-applies to it. Switched off, the app makes no such request. **Check now** asks
-once regardless and tells you what it found.
+appears in the top bar, and the cross beside it stops the note for that version.
+The request carries nothing about you or your files beyond what any HTTPS
+request does: your address and a user agent naming the TagRex version. The proxy
+above applies to it. Switched off, the app makes no such request. **Check now**
+asks once regardless and tells you what it found.
+
+When the release can be installed from inside the app, the note reads **Update
+to TagRex X** and the document button beside it opens the release page. Clicking
+the note asks first, then downloads the update, checks its signature against the
+key built into TagRex, installs it and restarts. Nothing is downloaded until you
+ask. macOS replaces the app where it is; Windows runs the installer, which shows
+its own progress; on Linux the system asks for your password to install the new
+`.deb` or `.rpm`. Apply or discard your changes, and let a BPM run finish, before
+updating. Where there is nothing to install (a release without update bundles,
+or a copy that was not installed from a package), the note opens the release
+page instead.
 
 ## Tag defaults
 

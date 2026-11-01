@@ -1,13 +1,21 @@
 //! Telling the user that a newer TagRex exists (#435).
 //!
-//! Notify only: one request to the GitHub Releases API for the latest published
-//! release, compared with the running version. Nothing is downloaded or
-//! installed, and nothing about the user or their files is sent beyond what any
-//! HTTPS request carries (an address and a user agent naming the version).
+//! One request to the GitHub Releases API for the latest published release,
+//! compared with the running version. Nothing about the user or their files is
+//! sent beyond what any HTTPS request carries (an address and a user agent
+//! naming the version).
+//!
+//! When that release is newer, the updater plugin reads its `latest.json` too
+//! (#602): if the release has a signed bundle for this platform and install
+//! type, the notice can offer to install it. Nothing is downloaded until the
+//! user asks for it.
 
+use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
+use tauri::{AppHandle, Url};
+use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// Where the releases are, and the page the notice opens.
 const LATEST_API: &str = "https://api.github.com/repos/tagrex/tagrex/releases/latest";
@@ -21,7 +29,14 @@ pub struct UpdateCheckDto {
     pub latest: String,
     /// Whether `latest` is newer than `current`.
     pub newer: bool,
+    /// Whether `latest` can be installed from inside the app (#602): its release
+    /// has a signed update bundle for this platform and install type.
+    pub installable: bool,
 }
+
+/// The update the last check found installable (#602), held for Install.
+#[derive(Default)]
+pub struct PendingUpdate(pub Mutex<Option<Update>>);
 
 /// `0.21.0`, `v0.21.0` or `0.21.0-rc1` as numbers, the pre-release suffix
 /// dropped. `None` for anything that does not start with a dotted number.
@@ -80,12 +95,43 @@ pub fn check(proxy: &str) -> Result<UpdateCheckDto, String> {
         newer: is_newer(&latest, current),
         current: current.to_string(),
         latest,
+        installable: false,
     })
+}
+
+/// The proxy of the network settings as the updater's client takes it: a URL,
+/// `http://` assumed when the setting is a bare `host:port`.
+fn proxy_url(proxy: &str) -> Option<Url> {
+    let proxy = proxy.trim();
+    if proxy.is_empty() {
+        return None;
+    }
+    Url::parse(proxy)
+        .ok()
+        .filter(|url| url.has_host())
+        .or_else(|| Url::parse(&format!("http://{proxy}")).ok())
+}
+
+/// The installable update for `latest`, read from its release's `latest.json`
+/// (#602). `None` whenever that is not on offer, for whatever reason: a release
+/// published before there were update bundles, no bundle for this target (a
+/// build that was not installed from a package), a `latest.json` that names
+/// another version, or no answer at all. The notice then stays what it was, a
+/// way to the release page.
+pub async fn installable(app: &AppHandle, proxy: &str, latest: &str) -> Option<Update> {
+    let mut builder = app.updater_builder().timeout(Duration::from_secs(10));
+    if let Some(url) = proxy_url(proxy) {
+        builder = builder.proxy(url);
+    }
+    let update = builder.build().ok()?.check().await.ok()??;
+    let same = parse_version(&update.version).is_some()
+        && parse_version(&update.version) == parse_version(latest);
+    same.then_some(update)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{is_newer, parse_version};
+    use super::{is_newer, parse_version, proxy_url};
 
     #[test]
     fn versions_read_with_or_without_a_v_and_a_suffix() {
@@ -112,6 +158,19 @@ mod tests {
     fn the_latest_release_can_be_read_from_github() {
         let found = super::check("").expect("GitHub answers");
         assert!(super::parse_version(&found.latest).is_some(), "{found:?}");
+    }
+
+    #[test]
+    fn a_bare_proxy_is_read_as_an_http_one() {
+        assert_eq!(proxy_url(""), None);
+        assert_eq!(
+            proxy_url("proxy.local:3128").map(|url| url.to_string()),
+            Some("http://proxy.local:3128/".to_string())
+        );
+        assert_eq!(
+            proxy_url("socks5://127.0.0.1:1080").map(|url| url.to_string()),
+            Some("socks5://127.0.0.1:1080".to_string())
+        );
     }
 
     #[test]

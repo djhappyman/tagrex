@@ -54,6 +54,9 @@ const APPLY_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_m
 /// Emitted while BPM detection runs (#536): `{ done, total, path }`, before each
 /// file and once at the end.
 const BPM_PROGRESS_EVENT: &str = "tagrex://bpm-progress";
+/// Emitted while an update downloads (#602): `{ downloaded, total }` in bytes,
+/// `total` null when the server does not say.
+const UPDATE_PROGRESS_EVENT: &str = "tagrex://update-progress";
 
 /// The paths in a command line. Windows and Linux hand a folder over as an
 /// argument; macOS does not, and passes `-psn_…` of its own when Finder starts
@@ -1252,18 +1255,68 @@ fn read_settings(app: &tauri::AppHandle) -> SettingsDto {
 /// start-up check: it does nothing at all when the setting is off, so switching
 /// it off is enough to keep the app from making the request. The button in
 /// Settings asks regardless. `async` because the request blocks.
+///
+/// A newer release is also looked up in its `latest.json` (#602); when it can be
+/// installed from here, it is kept for [`install_update`] and the answer says so.
 #[tauri::command]
 async fn check_for_update(
     app: tauri::AppHandle,
+    pending: State<'_, update::PendingUpdate>,
     automatic: bool,
 ) -> Result<Option<update::UpdateCheckDto>, ErrorDto> {
     let settings = read_settings(&app);
     if automatic && !settings.check_updates {
         return Ok(None);
     }
-    update::check(&settings.proxy)
-        .map(Some)
-        .map_err(|detail| ErrorDto::plain(format!("Could not check for updates: {detail}")))
+    let mut found = update::check(&settings.proxy)
+        .map_err(|detail| ErrorDto::plain(format!("Could not check for updates: {detail}")))?;
+    let ready = if found.newer {
+        update::installable(&app, &settings.proxy, &found.latest).await
+    } else {
+        None
+    };
+    found.installable = ready.is_some();
+    *pending.0.lock().unwrap() = ready;
+    Ok(Some(found))
+}
+
+/// Download the update the last check found, check its signature against the
+/// key built into the app, install it and restart (#602). On Windows the
+/// installer takes over and the app quits for it, so this never returns there;
+/// elsewhere it returns only with an error, the update kept for another try.
+/// The frontend refuses to start it while there is anything unapplied.
+#[tauri::command]
+async fn install_update(
+    app: tauri::AppHandle,
+    pending: State<'_, update::PendingUpdate>,
+) -> Result<(), ErrorDto> {
+    let update = pending
+        .0
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| ErrorDto::plain("There is no update to install. Check again."))?;
+    let mut downloaded: u64 = 0;
+    let mut reported: Option<std::time::Instant> = None;
+    update
+        .download_and_install(
+            |chunk, total| {
+                downloaded += chunk as u64;
+                if reported.is_some_and(|at| at.elapsed() < APPLY_PROGRESS_INTERVAL) {
+                    return;
+                }
+                reported = Some(std::time::Instant::now());
+                let _ = tauri::Emitter::emit(
+                    &app,
+                    UPDATE_PROGRESS_EVENT,
+                    serde_json::json!({ "downloaded": downloaded, "total": total }),
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|error| ErrorDto::plain(format!("Could not install the update: {error}")))?;
+    app.restart()
 }
 
 /// Open the releases page in the system browser (#435). No argument: the address
@@ -1425,6 +1478,9 @@ fn main() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // Installing a newer release in place (#602); the key and the address of
+        // latest.json are under `plugins.updater` in tauri.conf.json.
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // Size, position and maximized/fullscreen of the main window (#434).
         // Not DECORATIONS or VISIBLE: the overlay title bar and the first show
         // are the app's to decide. Only "main": the Beatport sign-in window is a
@@ -1444,6 +1500,7 @@ fn main() {
         .manage(ProviderState::default())
         .manage(ApplyControl::default())
         .manage(BpmControl::default())
+        .manage(update::PendingUpdate::default())
         // What the app was started with, waiting for the frontend to ask (#51).
         .manage(PendingOpen::new(paths_from_args(
             std::env::args_os().skip(1),
@@ -1524,6 +1581,7 @@ fn main() {
             beatport_token,
             load_settings,
             check_for_update,
+            install_update,
             open_releases_page,
             save_settings,
             player_play,
