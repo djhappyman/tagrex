@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   Linux, fn+⌫ or the Delete key on a Mac (⌘⌫ stays Discard). It does nothing
   in a text field or while a change is staged, can be rebound in Settings ›
   Shortcuts, and shows beside Move to Trash in the menu. (#600)
+- **Every release carries signed update bundles and a `latest.json`.** The
+  macOS app as `.app.tar.gz`, the Windows installers and the Linux packages
+  are signed with the project's update key, and one manifest names each
+  platform's bundle and signature, which is what the app reads to update
+  itself. (#601)
 
 ### Fixed
 

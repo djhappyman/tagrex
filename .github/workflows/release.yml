@@ -36,7 +36,9 @@ jobs:
           # half too, so Intel Macs need no runner of their own.
           - name: macos-universal
             runner: macos-15
-            bundles: dmg
+            # `app` too: the in-app updater installs the app bundle itself, as a
+            # signed .app.tar.gz (#601).
+            bundles: app,dmg
             target: universal-apple-darwin
           # ARM64
           - name: windows-arm64
@@ -85,8 +87,24 @@ jobs:
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
 
+      # The overlay switches on the in-app updater's bundles (#601): each one is
+      # signed with the update key from the repository secrets, next to it as
+      # `.sig`. Only here, so a local build needs no key.
       - name: Build the app bundle
-        run: cargo tauri build --bundles ${{ matrix.bundles }} ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: cargo tauri build --bundles ${{ matrix.bundles }} --config app/tauri.updater.conf.json ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+
+      # The macOS update bundle comes out as plain `TagRex.app.tar.gz`; it gets
+      # the version and architecture in its name, like the image beside it.
+      - name: Name the macOS update bundle
+        if: startsWith(matrix.name, 'macos-')
+        run: |
+          bundle=$(echo target/*/release/bundle)
+          name=$(basename "$bundle"/dmg/*.dmg .dmg)
+          mv "$bundle/macos/TagRex.app.tar.gz" "$bundle/macos/$name.app.tar.gz"
+          mv "$bundle/macos/TagRex.app.tar.gz.sig" "$bundle/macos/$name.app.tar.gz.sig"
 
       - name: Upload bundles as artifacts
         uses: actions/upload-artifact@v7
@@ -95,9 +113,11 @@ jobs:
           if-no-files-found: error
           path: |
             target/**/release/bundle/**/*.dmg
+            target/**/release/bundle/**/*.app.tar.gz
             target/**/release/bundle/**/*.exe
             target/**/release/bundle/**/*.deb
             target/**/release/bundle/**/*.rpm
+            target/**/release/bundle/**/*.sig
 
       # The release page's text is the changelog's own section for this version
       # (#261). The file already says what changed, in the words it was written
@@ -138,6 +158,32 @@ jobs:
           body_path: RELEASE_NOTES.md
           files: |
             target/**/release/bundle/**/*.dmg
+            target/**/release/bundle/**/*.app.tar.gz
             target/**/release/bundle/**/*.exe
             target/**/release/bundle/**/*.deb
             target/**/release/bundle/**/*.rpm
+
+  # What the in-app updater reads (#601): one latest.json naming each platform's
+  # update bundle and its signature. After every build, so a release whose build
+  # failed somewhere gets no manifest and the app keeps offering the page.
+  manifest:
+    name: latest.json
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the bundles
+        uses: actions/download-artifact@v8
+        with:
+          pattern: tagrex-*
+          path: bundles
+
+      - name: Write latest.json
+        run: python3 .github/scripts/updater-manifest.py bundles "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" latest.json
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: latest.json
