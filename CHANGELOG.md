@@ -139,6 +139,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   each called two different things. Russian and Ukrainian also counted
   merged field changes in the wrong case
   ([#635](https://github.com/tagrex/tagrex/issues/635)).
+- German: the interface addressed the user both as *du* and as *Sie*, and
+  called a track *Titel* or *Track*, a preset *Preset* or *Voreinstellung*
+  and a release *Release* or *Veröffentlichung*. It now says *du*, *Track*,
+  *Preset* and *Release* throughout, and a vinyl disc is no longer a CD
+  ([#636](https://github.com/tagrex/tagrex/issues/636)).
 
 ## [1.1.1] - 2026-11-02
 
