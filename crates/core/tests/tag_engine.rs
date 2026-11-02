@@ -4095,3 +4095,146 @@ fn a_vinyl_track_position_survives_a_save() {
         "APE"
     );
 }
+
+/// What the file's primary tag holds for `key`, value by value, as the backend
+/// reads it.
+fn generic_values(path: &std::path::Path, key: lofty::tag::ItemKey) -> Vec<String> {
+    use lofty::file::TaggedFileExt;
+    let tagged = lofty::probe::Probe::open(path).unwrap().read().unwrap();
+    tagged
+        .primary_tag()
+        .map(|tag| tag.get_strings(key).map(str::to_string).collect())
+        .unwrap_or_default()
+}
+
+/// Seed several `ARTISTS` and label values through the backend's generic tag,
+/// which writes each format's own way of holding them.
+fn seed_several_values(path: &std::path::Path) {
+    use lofty::config::WriteOptions;
+    use lofty::file::TaggedFileExt;
+    use lofty::prelude::TagExt;
+    use lofty::tag::{ItemKey, ItemValue, Tag, TagItem};
+    let tagged = lofty::probe::Probe::open(path).unwrap().read().unwrap();
+    let mut tag = tagged
+        .primary_tag()
+        .cloned()
+        .unwrap_or_else(|| Tag::new(tagged.primary_tag_type()));
+    for (key, value) in [
+        (ItemKey::TrackArtists, "A"),
+        (ItemKey::TrackArtists, "B"),
+        (ItemKey::Label, "X"),
+        (ItemKey::Label, "Y"),
+    ] {
+        tag.push(TagItem::new(key, ItemValue::Text(value.to_string())));
+    }
+    tag.save_to_path(path, WriteOptions::default()).unwrap();
+}
+
+/// #649: a field the app reads as one value but the file holds several of was
+/// cut to the last one by an edit to any other field. Untouched, it keeps them
+/// all; edited, it is the one value it was edited to.
+#[test]
+fn an_unrelated_edit_keeps_every_value_of_a_single_value_field() {
+    use lofty::tag::ItemKey;
+    for (path, fixture) in [
+        (temp_flac_path("several-values"), MINIMAL_FLAC.as_slice()),
+        (temp_m4a_path("several-values"), MINIMAL_M4A),
+    ] {
+        std::fs::write(&path, fixture).expect("write fixture");
+        seed_several_values(&path);
+
+        let read = retitle(&path, "Retitled");
+        let artists = generic_values(&path, ItemKey::TrackArtists);
+        let labels = generic_values(&path, ItemKey::Label);
+
+        let mut edited = read.clone();
+        edited.tags.insert(TagField::Publisher, "Z".to_string());
+        TagEngine::write(&edited).expect("write the edit");
+        let edited_labels = generic_values(&path, ItemKey::Label);
+        std::fs::remove_file(&path).ok();
+
+        let at = path.display();
+        assert_eq!(artists, ["A", "B"], "{at}: ARTISTS lost values");
+        assert_eq!(labels, ["X", "Y"], "{at}: the label lost values");
+        assert_eq!(edited_labels, ["Z"], "{at}: the edited label");
+    }
+}
+
+/// #649 for ID3v2, where several values share one text frame, null-separated.
+#[test]
+fn an_unrelated_edit_keeps_every_value_of_an_id3v2_text_frame() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{ExtendedTextFrame, Frame, FrameId, Id3v2Tag, TextInformationFrame};
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::TagExt;
+    use lofty::TextEncoding;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-several-values-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).unwrap();
+    let mut seeded = Id3v2Tag::new();
+    seeded.insert(Frame::Text(TextInformationFrame::new(
+        FrameId::new("TPUB").unwrap(),
+        TextEncoding::UTF8,
+        "X\0Y".to_string(),
+    )));
+    seeded.insert(Frame::UserText(ExtendedTextFrame::new(
+        TextEncoding::UTF8,
+        "ARTISTS".to_string(),
+        "A\0B".to_string(),
+    )));
+    seeded.insert(Frame::UserText(ExtendedTextFrame::new(
+        TextEncoding::UTF8,
+        "MYMULTI".to_string(),
+        "one\0two".to_string(),
+    )));
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let frames = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mpeg = MpegFile::read_from(&mut file, ParseOptions::new()).unwrap();
+        let mut out: Vec<(String, String)> = mpeg
+            .id3v2()
+            .unwrap()
+            .into_iter()
+            .filter_map(|frame| match frame {
+                Frame::Text(text) if frame.id().as_str() == "TPUB" => {
+                    Some(("TPUB".to_string(), text.value.to_string()))
+                }
+                Frame::UserText(text) => Some((
+                    format!("TXXX:{}", text.description),
+                    text.content.to_string(),
+                )),
+                _ => None,
+            })
+            .collect();
+        out.sort();
+        out
+    };
+
+    let read = retitle(&path, "Retitled");
+    let untouched = frames(&path);
+    let mut edited = read.clone();
+    edited.tags.insert(TagField::Publisher, "Z".to_string());
+    TagEngine::write(&edited).expect("write the edit");
+    let after_edit = frames(&path);
+    std::fs::remove_file(&path).ok();
+
+    let pair = |id: &str, value: &str| (id.to_string(), value.to_string());
+    assert_eq!(
+        untouched,
+        [
+            pair("TPUB", "X\0Y"),
+            pair("TXXX:ARTISTS", "A\0B"),
+            pair("TXXX:MYMULTI", "one\0two"),
+        ]
+    );
+    assert!(after_edit.contains(&pair("TPUB", "Z")), "{after_edit:?}");
+    assert!(
+        after_edit.contains(&pair("TXXX:ARTISTS", "A\0B")),
+        "{after_edit:?}"
+    );
+}

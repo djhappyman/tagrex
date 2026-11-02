@@ -211,6 +211,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   The extended header, which only holds a checksum, tag restrictions or a
   padding size, is dropped on save
   ([#648](https://github.com/tagrex/tagrex/issues/648)).
+- Editing one field no longer cuts another field the file holds several values
+  of, such as two `ARTISTS` or two label entries, down to its last value. A
+  field nobody edited keeps every value it had, in every format
+  ([#649](https://github.com/tagrex/tagrex/issues/649)).
 
 ## [1.1.1] - 2026-11-02
 

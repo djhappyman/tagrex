@@ -2857,6 +2857,59 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
             }
             true
         });
+        // A text frame holding several values (#649): the read gives the field
+        // the last of them, or all of them joined for a `TXXX` the backend has
+        // no key for (#609), and the model's one value was written over all of
+        // them. Where the model still holds what the read gave, nobody edited
+        // the field, so the file's values go back.
+        let several: Vec<(String, String, String)> = (&original)
+            .into_iter()
+            .filter_map(|frame| match frame {
+                Frame::Text(text) if text.value.contains('\0') => Some((
+                    frame.id().as_str().to_string(),
+                    String::new(),
+                    text.value.to_string(),
+                )),
+                Frame::UserText(text) if text.content.contains('\0') => Some((
+                    frame.id().as_str().to_string(),
+                    text.description.to_string(),
+                    text.content.to_string(),
+                )),
+                _ => None,
+            })
+            .collect();
+        let as_read = |own: &str, value: &str| {
+            own.rsplit('\0').next() == Some(value)
+                || own
+                    .split('\0')
+                    .collect::<Vec<_>>()
+                    .join(&multi_value_separator())
+                    == value
+        };
+        updated.retain_mut(|frame| {
+            let id = frame.id().as_str().to_string();
+            match frame {
+                Frame::Text(text) => {
+                    if let Some((_, _, own)) = several
+                        .iter()
+                        .find(|(own_id, _, own)| *own_id == id && as_read(own, &text.value))
+                    {
+                        text.value = own.clone().into();
+                    }
+                }
+                Frame::UserText(text) => {
+                    if let Some((_, _, own)) = several.iter().find(|(own_id, description, own)| {
+                        *own_id == id
+                            && *description == text.description
+                            && as_read(own, &text.content)
+                    }) {
+                        text.content = own.clone().into();
+                    }
+                }
+                _ => {}
+            }
+            true
+        });
         // Dates (#504). The model holds every timestamp frame and has just
         // written each one from what it read — for a timestamp lofty cannot
         // parse whole, the trimmed date. Where the model still holds that date,
@@ -3668,6 +3721,26 @@ fn write_generic(file: &TrackFile) -> Result<(), TagIoError> {
         .cloned()
         .unwrap_or_else(|| Tag::new(file.format.primary_tag_type()));
     let tag_type = tag.tag_type();
+    // A single-value field the file holds several values of reads as the last
+    // of them, and writing that one back cut the rest (#649). Where the model
+    // still holds what the read gave, nobody edited the field, so the file's
+    // values, under whichever of the field's keys they are, stay as they are.
+    let as_read = tag_to_map(&tag);
+    let untouched: std::collections::BTreeSet<TagField> = file
+        .tags
+        .iter()
+        .filter(|(field, value)| {
+            !field.is_multi_value()
+                && as_read.get(*field) == Some(*value)
+                && tag
+                    .items()
+                    .filter(|item| item_key_to_tag_field(item.key(), tag_type) == **field)
+                    .nth(1)
+                    .is_some()
+        })
+        .map(|(field, _)| field.clone())
+        .collect();
+
     let desired: HashSet<ItemKey> = file
         .tags
         .keys()
@@ -3679,6 +3752,7 @@ fn write_generic(file: &TrackFile) -> Result<(), TagIoError> {
             // Provenance the model deliberately doesn't carry (#197) — without
             // this the retain reads "not in the model" as "delete".
             || is_provenance_key(item.key())
+            || untouched.contains(&item_key_to_tag_field(item.key(), tag_type))
     });
 
     for (field, value) in &file.tags {
@@ -3686,6 +3760,9 @@ fn write_generic(file: &TrackFile) -> Result<(), TagIoError> {
         // duplicate entries for the same field — then push what the model says,
         // which for a multi-value field is more than one item (#46).
         if let Some(key) = item_key_for(field, tag_type) {
+            if untouched.contains(field) {
+                continue;
+            }
             tag.remove_key(key);
             push_field_items(&mut tag, field, value);
         }
