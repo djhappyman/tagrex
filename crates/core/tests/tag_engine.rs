@@ -3343,3 +3343,61 @@ fn a_track_number_keeps_its_leading_zero() {
         );
     }
 }
+
+/// #639: writing a block of its own, as a conversion or a revision change
+/// does, built ID3v2's `TRCK` and APE's `Track` from the numbers as integers,
+/// the way an ordinary save did before #638.
+#[test]
+fn a_block_write_keeps_the_leading_zero() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-block-zero-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Title, "Title".to_string());
+    tags.insert(TagField::TrackNumber, "01".to_string());
+    tags.insert(TagField::TrackTotal, "03".to_string());
+    tags.insert(TagField::DiscNumber, "1".to_string());
+    tags.insert(TagField::DiscTotal, "02".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Mp3,
+        tags: tags.clone(),
+    })
+    .expect("write tags");
+    let content = TagEngine::read_block(&path, TagBlockKind::Id3v2)
+        .unwrap()
+        .expect("an ID3v2 block");
+
+    // The same block at another revision, then the same content as APE.
+    TagEngine::write_block(
+        &path,
+        TagBlockKind::Id3v2,
+        Some(Id3v2Revision::V3),
+        &content,
+    )
+    .unwrap();
+    let id3 = TagEngine::read_block(&path, TagBlockKind::Id3v2)
+        .unwrap()
+        .expect("an ID3v2 block");
+    TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+    let ape = TagEngine::read_block(&path, TagBlockKind::Ape)
+        .unwrap()
+        .expect("an APE block");
+    std::fs::remove_file(&path).ok();
+    for (kind, block) in [("ID3v2.3", &id3), ("APE", &ape)] {
+        for field in [
+            TagField::TrackNumber,
+            TagField::TrackTotal,
+            TagField::DiscNumber,
+            TagField::DiscTotal,
+        ] {
+            assert_eq!(
+                block.tags.get(&field),
+                tags.get(&field),
+                "{field:?} in {kind}"
+            );
+        }
+    }
+}

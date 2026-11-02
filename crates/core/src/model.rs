@@ -1884,6 +1884,7 @@ impl TagEngine {
         match kind {
             TagBlockKind::Id3v2 => {
                 let mut id3 = Id3v2Tag::from(tag);
+                spell_id3v2_number_pairs(&mut id3, &content.tags);
                 for (name, value) in named {
                     id3.insert(Frame::UserText(ExtendedTextFrame::new(
                         TextEncoding::UTF8,
@@ -1917,6 +1918,7 @@ impl TagEngine {
             }
             TagBlockKind::Ape => {
                 let mut ape = ApeTag::from(tag);
+                spell_ape_number_pairs(&mut ape, &content.tags);
                 for (name, value) in named {
                     if let Ok(item) = ApeItem::new(name, ItemValue::Text(value)) {
                         ape.insert(item);
@@ -2328,6 +2330,37 @@ fn number_pair_as_spelled(
     }
 }
 
+/// The conversion to ID3v2 builds `TRCK` and `TPOS` from the numbers as
+/// integers, so a model's `01` went out as `1` (#638); this spells them the
+/// model's way again.
+fn spell_id3v2_number_pairs(tag: &mut Id3v2Tag, tags: &TagMap) {
+    tag.retain_mut(|frame| {
+        if let Frame::Text(text) = frame {
+            if let Some((number, total)) = number_pair_fields(text.id().as_str()) {
+                text.value = number_pair_as_spelled(&text.value, &number, &total, tags).into();
+            }
+        }
+        true
+    });
+}
+
+/// APE's `Track` and `Disc`, built from the numbers as integers the way ID3v2's
+/// `TRCK` is, spelled the model's way again (#638).
+fn spell_ape_number_pairs(tag: &mut ApeTag, tags: &TagMap) {
+    for name in ["Track", "Disc"] {
+        let spelled = tag.get(name).and_then(|item| {
+            let (number, total) = number_pair_fields(name)?;
+            let text = item.value().text()?;
+            Some(number_pair_as_spelled(text, &number, &total, tags))
+        });
+        if let Some(Ok(item)) =
+            spelled.map(|text| ApeItem::new(name.to_string(), ItemValue::Text(text)))
+        {
+            tag.insert(item);
+        }
+    }
+}
+
 /// Put a number pair's own digits back on the fields a read parsed it into
 /// (#638): where the field holds the same number, it takes the file's spelling.
 fn keep_spelled_number_pair(tags: &mut TagMap, number: &TagField, total: &TagField, text: &str) {
@@ -2397,16 +2430,7 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
     // pushed above become one well-formed TPE1/TCON rather than duplicate
     // frames (#46).
     let mut updated = Id3v2Tag::from(generic);
-    // The conversion builds `TRCK` and `TPOS` from the numbers as integers, so
-    // a model's `01` went out as `1` (#638).
-    updated.retain_mut(|frame| {
-        if let Frame::Text(text) = frame {
-            if let Some((number, total)) = number_pair_fields(text.id().as_str()) {
-                text.value = number_pair_as_spelled(&text.value, &number, &total, tags).into();
-            }
-        }
-        true
-    });
+    spell_id3v2_number_pairs(&mut updated, tags);
 
     // The custom fields ID3v2 has no frame of its own for go on as `TXXX` frames
     // named the way the file spells them; the ones it does have a frame for went
@@ -3346,20 +3370,7 @@ fn save_with_custom_items(
                 .unwrap_or_default()
                 .split_tag();
             let mut merged = remainder.merge_tag(tag);
-            // `Track` and `Disc` are built from the numbers as integers, as
-            // ID3v2's `TRCK` is (#638).
-            for name in ["Track", "Disc"] {
-                let spelled = merged.get(name).and_then(|item| {
-                    let (number, total) = number_pair_fields(name)?;
-                    let text = item.value().text()?;
-                    Some(number_pair_as_spelled(text, &number, &total, tags))
-                });
-                if let Some(Ok(item)) =
-                    spelled.map(|text| ApeItem::new(name.to_string(), ItemValue::Text(text)))
-                {
-                    merged.insert(item);
-                }
-            }
+            spell_ape_number_pairs(&mut merged, tags);
             let stale: Vec<String> = (&merged)
                 .into_iter()
                 .filter(|item| {

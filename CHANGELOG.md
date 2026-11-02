@@ -162,6 +162,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   into `1/3` in ID3v2 and APE tags, and a FLAC or Ogg file stating `01`
   showed `1`. MP4 stores the numbers as integers, so it has no zero to keep
   ([#638](https://github.com/tagrex/tagrex/issues/638)).
+- Converting a tag block or changing its ID3v2 revision keeps the leading
+  zero of track and disc numbers too
+  ([#639](https://github.com/tagrex/tagrex/issues/639)).
 
 ## [1.1.1] - 2026-11-02
 
