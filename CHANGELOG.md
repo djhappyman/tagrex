@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Cover art in APE tags: WavPack, Monkey's Audio and Musepack files now show
+  their embedded covers, and covers can be added, replaced and removed on them
+  like on any other file
+  ([#608](https://github.com/tagrex/tagrex/issues/608)).
+
 ### Fixed
 
 - A rename no longer overwrites a file when two targets differ only in letter

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
 use lofty::aac::AacFile;
-use lofty::ape::{ApeFile, ApeItem, ApeTag};
+use lofty::ape::{ApeFile, ApeItem, ApeTag, APE_PICTURE_TYPES};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::error::{FileEncodingError, FileParseError, TagEncodingError};
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
@@ -1012,8 +1012,58 @@ fn read_ape(
         Some(FileType::Ape) => ApeFile::read_from(&mut file, options)?.ape().cloned(),
         Some(FileType::Mpc) => MpcFile::read_from(&mut file, options)?.ape().cloned(),
         Some(FileType::WavPack) => WavPackFile::read_from(&mut file, options)?.ape().cloned(),
+        // An MP3 can carry an APE block beside its ID3v2 one (#608).
+        Some(FileType::Mpeg) => MpegFile::read_from(&mut file, options)?.ape().cloned(),
         _ => None,
     })
+}
+
+/// The pictures of the file's APE tag (#608). APE keeps each one as a binary
+/// item named after its picture type (`Cover Art (Front)`, …), and the backend
+/// never turns those items into pictures, so they are read off the concrete
+/// tag. An item whose bytes are not an image format the backend knows is
+/// skipped.
+fn read_ape_pictures(path: &Path, container: FileType) -> Result<Vec<Picture>, TagIoError> {
+    let Some(tag) = read_ape(path, container, tag_only_options())? else {
+        return Ok(Vec::new());
+    };
+    Ok(APE_PICTURE_TYPES
+        .iter()
+        .filter_map(|key| match tag.get(key)?.value() {
+            ItemValue::Binary(bytes) => Picture::from_ape_bytes(key, bytes).ok(),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Replace the pictures of the file's APE tag with `covers` (#608), leaving
+/// every other item as it is. APE has one item per picture type, so of two
+/// images of the same type only the last is kept.
+fn write_ape_pictures(
+    path: &Path,
+    container: FileType,
+    covers: &[CoverArt],
+) -> Result<(), TagIoError> {
+    let existing = read_ape(path, container, tag_only_options())?;
+    // No block and nothing to put in one: writing would create an empty block.
+    if existing.is_none() && covers.is_empty() {
+        return Ok(());
+    }
+    let mut tag = existing.unwrap_or_default();
+    for key in APE_PICTURE_TYPES {
+        tag.remove(key);
+    }
+    for cover in covers {
+        let picture = picture_from_cover(cover);
+        let Some(key) = picture.pic_type().as_ape_key().map(str::to_string) else {
+            continue;
+        };
+        if let Ok(item) = ApeItem::new(key, ItemValue::Binary(picture.as_ape_bytes())) {
+            tag.insert(item);
+        }
+    }
+    tag.save_to_path(path, write_options())?;
+    Ok(())
 }
 
 /// One format-specific item: its name as the file spells it (a `TXXX`
@@ -1198,10 +1248,14 @@ impl TagEngine {
         // fall back to lofty's primary/first tag. Resolve to a `TagType` while
         // the lock is held, then re-fetch the borrow so no guard outlives it.
         let present: Vec<TagType> = tagged_file.tags().iter().map(|t| t.tag_type()).collect();
+        // An APE tag's pictures never reach the generic tag, so a file with one
+        // is asked again, concretely (#608). Only those files pay for it.
         let has_cover = tagged_file
             .tags()
             .iter()
-            .any(|tag| !tag.pictures().is_empty());
+            .any(|tag| !tag.pictures().is_empty())
+            || (present.contains(&TagType::Ape)
+                && read_ape_pictures(path, container).is_ok_and(|pictures| !pictures.is_empty()));
         let priority_type = READ_PRIORITY
             .read()
             .ok()
@@ -1469,9 +1523,18 @@ impl TagEngine {
         let Some(tag) = tagged.tag(tag_type) else {
             return Ok(None);
         };
+        // An APE tag's pictures never reach the generic tag (#608).
+        let covers = if tag_type == TagType::Ape {
+            read_ape_pictures(path, tagged.file_type())?
+                .iter()
+                .map(cover_from_picture)
+                .collect()
+        } else {
+            tag.pictures().iter().map(cover_from_picture).collect()
+        };
         Ok(Some(TagBlockContent {
             tags: tag_to_map(tag),
-            covers: tag.pictures().iter().map(cover_from_picture).collect(),
+            covers,
         }))
     }
 
@@ -1546,18 +1609,29 @@ impl TagEngine {
             }
         }
         tag.save_to_path(path, options)?;
+        // The generic save above writes an APE tag without its pictures (#608).
+        if kind == TagBlockKind::Ape {
+            if let Some(container) = container_of(path)? {
+                write_ape_pictures(path, container, &content.covers)?;
+            }
+        }
         Ok(())
     }
 
     /// Every image the file carries (#56), in the order the tag holds them.
     pub fn read_covers(path: &Path) -> Result<Vec<CoverArt>, TagIoError> {
         let tagged = probe_file(path)?;
-        let covers = tagged
-            .primary_tag()
-            .or_else(|| tagged.first_tag())
-            .map(|tag| tag.pictures().iter().map(cover_from_picture).collect())
-            .unwrap_or_default();
-        Ok(covers)
+        let Some(tag) = tagged.primary_tag().or_else(|| tagged.first_tag()) else {
+            return Ok(Vec::new());
+        };
+        // An APE tag's pictures never reach the generic tag (#608).
+        if tag.tag_type() == TagType::Ape {
+            return Ok(read_ape_pictures(path, tagged.file_type())?
+                .iter()
+                .map(cover_from_picture)
+                .collect());
+        }
+        Ok(tag.pictures().iter().map(cover_from_picture).collect())
     }
 
     /// The file's front cover (or the first embedded image if there's no
@@ -1603,6 +1677,13 @@ impl TagEngine {
             return Ok(());
         }
         let mut tag = load_or_new_tag(path)?;
+        // An APE tag's pictures are items of the concrete tag, which is edited
+        // in place: nothing else in it is touched (#608).
+        if tag.tag_type() == TagType::Ape {
+            if let Some(container) = container_of(path)? {
+                return write_ape_pictures(path, container, covers);
+            }
+        }
         while !tag.pictures().is_empty() {
             tag.remove_picture(0);
         }

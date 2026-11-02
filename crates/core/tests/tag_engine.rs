@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tagrex_core::model::{
-    AudioFormat, CoverArt, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine, TagField,
-    TrackFile,
+    AudioFormat, CoverArt, CoverKind, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine,
+    TagField, TrackFile,
 };
 
 /// `fLaC` + a non-last STREAMINFO block (34 bytes, all zeroed out except a
@@ -508,6 +508,114 @@ fn a_cover_write_keeps_the_custom_fields() {
     assert_eq!(read.tags.get(&custom).map(String::as_str), Some("Kept"));
     assert!(TagEngine::read_covers(&path).unwrap().is_empty());
 
+    std::fs::remove_file(&path).ok();
+}
+
+/// A tenth of a second of silence as WavPack (#608): the smallest file whose
+/// tags live in an APE block.
+const MINIMAL_WAVPACK: [u8; 54] = [
+    0x77, 0x76, 0x70, 0x6b, 0x2e, 0x00, 0x00, 0x00, 0x10, 0x04, 0x00, 0x00, 0x20, 0x03, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x20, 0x03, 0x00, 0x00, 0x04, 0x18, 0x80, 0x00, 0x7f, 0xe5, 0xe8, 0xf3,
+    0x02, 0x00, 0x03, 0x00, 0x04, 0x00, 0x05, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x8a, 0x02,
+    0x00, 0x00, 0xff, 0x03, 0x09, 0x00,
+];
+
+/// An APE tag keeps its pictures as binary items the backend never hands over
+/// as pictures (#608): they are read, written, replaced and removed here, and
+/// the rest of the tag is left alone.
+#[test]
+fn ape_pictures_are_read_written_and_removed() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-ape-cover-{}.wv",
+        std::process::id()
+    ));
+    std::fs::write(&path, MINIMAL_WAVPACK).expect("write fixture");
+    let custom = TagField::Custom("TAGREX_CUSTOM_TEST".to_string());
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Title, "Title".to_string());
+    tags.insert(custom.clone(), "Kept".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::WavPack,
+        tags,
+    })
+    .unwrap();
+    // The backend names the format from the bytes, so they have to be an image.
+    let png = |tail: u8| vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, tail];
+    let front = CoverArt {
+        mime: "image/png".to_string(),
+        data: png(1),
+        ..CoverArt::default()
+    };
+    let back = CoverArt {
+        mime: "image/png".to_string(),
+        data: png(2),
+        kind: CoverKind::Back,
+        description: "Back".to_string(),
+    };
+
+    TagEngine::write_covers(&path, &[front.clone(), back.clone()]).unwrap();
+    assert_eq!(
+        TagEngine::read_covers(&path).unwrap(),
+        vec![front.clone(), back]
+    );
+    let read = TagEngine::read_with_props(&path).unwrap();
+    assert!(read.has_cover);
+    assert_eq!(
+        read.file.tags.get(&custom).map(String::as_str),
+        Some("Kept")
+    );
+    assert_eq!(
+        TagEngine::read_block(&path, TagBlockKind::Ape)
+            .unwrap()
+            .unwrap()
+            .covers
+            .len(),
+        2
+    );
+
+    TagEngine::write_covers(&path, std::slice::from_ref(&front)).unwrap();
+    assert_eq!(TagEngine::read_covers(&path).unwrap(), vec![front]);
+
+    TagEngine::write_covers(&path, &[]).unwrap();
+    let read = TagEngine::read_with_props(&path).unwrap();
+    assert!(!read.has_cover);
+    assert!(TagEngine::read_covers(&path).unwrap().is_empty());
+    assert_eq!(
+        read.file.tags.get(&TagField::Title).map(String::as_str),
+        Some("Title")
+    );
+    assert_eq!(
+        read.file.tags.get(&custom).map(String::as_str),
+        Some("Kept")
+    );
+
+    std::fs::remove_file(&path).ok();
+}
+
+/// An MP3's APE block keeps its pictures through a block write and read, the
+/// path a block conversion and its undo take (#608).
+#[test]
+fn an_mp3_ape_block_keeps_its_pictures() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-mp3-ape-cover-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut content = TagBlockContent::default();
+    content.tags.insert(TagField::Artist, "Someone".to_string());
+    content.covers.push(CoverArt {
+        mime: "image/png".to_string(),
+        data: vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 7],
+        ..CoverArt::default()
+    });
+
+    TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+
+    assert_eq!(
+        TagEngine::read_block(&path, TagBlockKind::Ape).unwrap(),
+        Some(content)
+    );
     std::fs::remove_file(&path).ok();
 }
 
