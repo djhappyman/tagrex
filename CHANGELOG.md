@@ -234,6 +234,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   deletes the file's rating: the save is refused with a message showing the
   expected `email|stars|plays` form, and the file is left as it was
   ([#654](https://github.com/tagrex/tagrex/issues/654)).
+- An MP3's APE tag now follows a save: an edited field is updated in it, a
+  cleared one is taken out, and clearing every field removes the block, so
+  a file whose only tag was APE no longer reads back unchanged after a clear
+  or keeps stating the old values after an edit
+  ([#655](https://github.com/tagrex/tagrex/issues/655)).
 
 ## [1.1.1] - 2026-11-02
 

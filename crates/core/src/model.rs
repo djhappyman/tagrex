@@ -2493,6 +2493,112 @@ fn sync_id3v1(
     Ok(())
 }
 
+/// Whether an MP3 carries an APE block (#655). Only an MP3 is asked: it is the
+/// one container written as ID3v2 that can also hold APE.
+fn has_ape(path: &Path, container: FileType) -> Result<bool, TagIoError> {
+    Ok(container == FileType::Mpeg && read_ape(path, container, tag_only_options())?.is_some())
+}
+
+/// The model field an APE item states, as a read of the block names it.
+fn ape_item_field(key: &str) -> TagField {
+    match ItemKey::from_key(TagType::Ape, key) {
+        Some(item_key) => item_key_to_tag_field(item_key, TagType::Ape),
+        None => field_for_name_on_tag(key, TagType::Ape)
+            .unwrap_or_else(|| TagField::Custom(key.to_string())),
+    }
+}
+
+/// Keep an MP3's APE block in step with the ID3v2 tag just written (#655), the
+/// way [`sync_id3v1`] keeps an ID3v1 tag.
+///
+/// A file whose only tag was an APE block was read from it and then written as
+/// ID3v2 alone: a clear left the block, so the file read back as if nothing had
+/// been cleared, and an edit left it stating the old values beside the new tag.
+///
+/// So an item of a field the write changed takes the model's value, and one of
+/// a field it cleared is taken out. A field the write did not touch keeps what
+/// the block says, which on a file with an ID3v2 tag too is a field the model
+/// never read. Nothing is added, since a field the block never stated is not
+/// stale; pictures and the other binary items stay; a block left with nothing
+/// is removed; and a save that changed nothing does not write the block.
+fn sync_ape(
+    path: &Path,
+    container: FileType,
+    tags: &TagMap,
+    before: &TagMap,
+) -> Result<(), TagIoError> {
+    if container != FileType::Mpeg {
+        return Ok(());
+    }
+    let Some(old) = read_ape(path, container, tag_only_options())? else {
+        return Ok(());
+    };
+    let stated = |map: &TagMap, field: &TagField| map.get(field).filter(|v| !v.is_empty()).cloned();
+    let edited = |field: &TagField| stated(tags, field) != stated(before, field);
+    // A number pair is one APE item holding two fields.
+    let item_edited = |field: &TagField| match field {
+        TagField::TrackNumber => edited(field) || edited(&TagField::TrackTotal),
+        TagField::DiscNumber => edited(field) || edited(&TagField::DiscTotal),
+        other => edited(other),
+    };
+
+    // What the model's values are as APE items, spelled as a write of an APE
+    // file spells them.
+    let mut generic = Tag::new(TagType::Ape);
+    for (field, value) in tags {
+        if !value.is_empty() {
+            push_field_items(&mut generic, field, value);
+        }
+    }
+    let mut fresh = ApeTag::from(generic);
+    spell_ape_number_pairs(&mut fresh, tags);
+    for (name, value) in raw_custom_fields(tags, TagType::Ape) {
+        if value.is_empty() {
+            continue;
+        }
+        if let Ok(item) = ApeItem::new(name.to_string(), ItemValue::Text(value.to_string())) {
+            fresh.insert(item);
+        }
+    }
+
+    let mut synced = old.clone();
+    let mut changed = false;
+    for item in &old {
+        if item.value().text().is_none() {
+            continue;
+        }
+        if ItemKey::from_key(TagType::Ape, item.key()).is_some_and(is_provenance_key) {
+            continue;
+        }
+        let field = ape_item_field(item.key());
+        if !item_edited(&field) {
+            continue;
+        }
+        synced.remove(item.key());
+        changed = true;
+        if let Some(value) = (&fresh)
+            .into_iter()
+            .find(|candidate| ape_item_field(candidate.key()) == field)
+        {
+            synced.insert(value.clone());
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+    if synced.is_empty() {
+        // Not `remove_from_path`, for the reason [`sync_id3v1`] gives.
+        let mut handle = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)?;
+        TagType::Ape.remove_from(&mut handle, write_options())?;
+    } else {
+        synced.save_to_path(path, write_options())?;
+    }
+    Ok(())
+}
+
 /// Keep the RIFF INFO list of a WAV, or the text chunks of an AIFF, in step
 /// with the ID3v2 tag just written (#621), the way [`sync_id3v1`] keeps an
 /// ID3v1 tag.
@@ -2826,9 +2932,12 @@ fn keep_spelled_number_pair(tags: &mut TagMap, number: &TagField, total: &TagFie
 /// only then gives up with an honest error rather than a false success.
 fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
     // What the file read as before this write, so the legacy text blocks of a
-    // WAV or an AIFF, and an ID3v1 tag, lose only what the model cleared
-    // (#652, #653).
-    let before = if matches!(container, FileType::Wav | FileType::Aiff) || has_id3v1(path)? {
+    // WAV or an AIFF, an ID3v1 tag and an MP3's APE block lose only what the
+    // model cleared (#652, #653, #655).
+    let before = if matches!(container, FileType::Wav | FileType::Aiff)
+        || has_id3v1(path)?
+        || has_ape(path, container)?
+    {
         TagEngine::read(path)?.tags
     } else {
         TagMap::new()
@@ -3133,6 +3242,8 @@ fn save_id3v2(
     // Whatever the file also carries in an ID3v1 block has to say the same
     // thing (#194).
     sync_id3v1(path, container, tags, before)?;
+    // And so does an APE block beside it (#655).
+    sync_ape(path, container, tags, before)?;
     Ok(())
 }
 

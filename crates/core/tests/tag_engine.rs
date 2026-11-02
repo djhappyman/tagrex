@@ -4507,3 +4507,119 @@ fn a_rating_the_backend_cannot_parse_is_refused_not_deleted() {
     std::fs::remove_file(&path).ok();
     assert!(cleared.is_empty(), "{cleared:?}");
 }
+
+/// #655: an MP3 whose only tag is an APE block was read from that block, but
+/// written as ID3v2 alone. A clear left the APE block, so the file read back
+/// unchanged; an edit put a new ID3v2 tag beside an APE block still stating the
+/// old values.
+#[test]
+fn an_mp3_ape_block_follows_an_edit_and_a_clear() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-mp3-ape-sync-{}.mp3",
+        std::process::id()
+    ));
+    let seeded = || {
+        std::fs::write(&path, minimal_mp3()).unwrap();
+        let mut content = TagBlockContent::default();
+        content
+            .tags
+            .insert(TagField::Title, "Old Title".to_string());
+        content.tags.insert(TagField::Artist, "Someone".to_string());
+        content.tags.insert(TagField::Album, "Record".to_string());
+        TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+        TagEngine::read(&path).expect("read")
+    };
+    let ape = |path: &std::path::Path| {
+        TagEngine::read_block(path, TagBlockKind::Ape)
+            .unwrap()
+            .map(|content| content.tags)
+    };
+
+    let file = seeded();
+    assert_eq!(
+        file.tags.get(&TagField::Title).map(String::as_str),
+        Some("Old Title")
+    );
+    let edited = retitle(&path, "New Title");
+    let block = ape(&path).expect("the APE block stays");
+    assert_eq!(
+        block.get(&TagField::Title).map(String::as_str),
+        Some("New Title")
+    );
+    assert_eq!(
+        block.get(&TagField::Artist).map(String::as_str),
+        Some("Someone")
+    );
+    assert_eq!(
+        edited.tags.get(&TagField::Title).map(String::as_str),
+        Some("New Title")
+    );
+
+    let mut file = seeded();
+    file.tags.clear();
+    TagEngine::write(&file).expect("a clear");
+    let block = ape(&path);
+    let read_back = TagEngine::read(&path).expect("read back");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(block, None);
+    assert!(read_back.tags.is_empty(), "{:?}", read_back.tags);
+}
+
+/// #655, beside an ID3v2 tag: the model is read from ID3v2, so a field only the
+/// APE block states and the block's picture survive an edit, and a save that
+/// changed nothing leaves the block as it was.
+#[test]
+fn an_mp3_ape_block_beside_id3v2_loses_only_what_was_edited() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-mp3-ape-id3v2-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).unwrap();
+    let mut content = TagBlockContent::default();
+    content
+        .tags
+        .insert(TagField::Title, "Old Title".to_string());
+    content
+        .tags
+        .insert(TagField::Album, "Only In APE".to_string());
+    content.covers.push(CoverArt {
+        mime: "image/png".to_string(),
+        data: vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 7],
+        ..CoverArt::default()
+    });
+    TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+    let mut id3 = TagBlockContent::default();
+    id3.tags.insert(TagField::Title, "Old Title".to_string());
+    id3.tags.insert(TagField::Artist, "Someone".to_string());
+    TagEngine::write_block(&path, TagBlockKind::Id3v2, None, &id3).unwrap();
+
+    let file = TagEngine::read(&path).expect("read");
+    assert_eq!(file.tags.get(&TagField::Album), None);
+    let ape_bytes = |path: &std::path::Path| {
+        let bytes = std::fs::read(path).unwrap();
+        let at = bytes
+            .windows(8)
+            .position(|window| window == b"APETAGEX")
+            .expect("an APE block");
+        bytes[at..].to_vec()
+    };
+    let untouched = ape_bytes(&path);
+    TagEngine::write(&file).expect("a save that changes nothing");
+    assert_eq!(ape_bytes(&path), untouched);
+
+    retitle(&path, "New Title");
+    let block = TagEngine::read_block(&path, TagBlockKind::Ape)
+        .unwrap()
+        .expect("the APE block stays");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        block.tags.get(&TagField::Title).map(String::as_str),
+        Some("New Title")
+    );
+    assert_eq!(
+        block.tags.get(&TagField::Album).map(String::as_str),
+        Some("Only In APE")
+    );
+    assert_eq!(block.tags.get(&TagField::Artist), None);
+    assert_eq!(block.covers, content.covers);
+}
