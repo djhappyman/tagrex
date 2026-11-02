@@ -113,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Italian: four labels (the editor's Core group, a column's Pattern, the Mood
   field and the player's Stop) were still English
   ([#629](https://github.com/tagrex/tagrex/issues/629)).
+- Six interface strings that nothing displays any more were still carried in
+  all seven translations; they are removed
+  ([#630](https://github.com/tagrex/tagrex/issues/630)).
 
 ## [1.1.1] - 2026-11-02
 
