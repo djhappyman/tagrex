@@ -69,6 +69,9 @@ let id3Choice = "v24"; // "v23" | "v24", mirrored by the segmented control
 // Whether an import brings the release's cover (#207): "never" | "if-missing"
 // | "always", mirrored by its segmented control.
 let importCoverChoice = "if-missing";
+// How an import writes a vinyl position as the track number (#642): "number"
+// (the default, the numeric track number the standards define) | "position".
+let importTrackChoice = "number";
 
 function updateSettingsDot() {
   el("settings-open").classList.toggle("has-token", !!el("discogs-token").value.trim());
@@ -94,6 +97,13 @@ function setImportCoverChoice(choice) {
   el("set-import-cover")
     .querySelectorAll(".seg-btn")
     .forEach((b) => b.classList.toggle("active", b.dataset.importCover === choice));
+}
+
+function setImportTrackChoice(choice) {
+  importTrackChoice = choice;
+  el("set-import-track")
+    .querySelectorAll(".seg-btn")
+    .forEach((b) => b.classList.toggle("active", b.dataset.importTrack === choice));
 }
 
 // Reflect + apply a language choice (#50). Live, like the theme: the static
@@ -378,6 +388,7 @@ async function openSettings() {
     el("set-check-updates").checked = s.check_updates !== false;
     setId3Choice(s.id3_v23 ? "v23" : "v24");
     setImportCoverChoice(s.import_cover || "if-missing");
+    setImportTrackChoice(s.import_vinyl_position ? "position" : "number");
     el("set-cover-max").value = s.cover_max_px || 0;
     el("set-cover-quality").value = s.cover_quality || 85;
     el("set-bpm-range").value = String(s.bpm_floor || 0);
@@ -556,6 +567,7 @@ async function saveSettings() {
       sidecar_extensions: parseSidecarExts(el("set-sidecar-exts").value),
       import_skip_fields: importSkipFromForm(),
       import_cover: importCoverChoice,
+      import_vinyl_position: importTrackChoice === "position",
       bpm_floor: parseInt(el("set-bpm-range").value, 10) || 0,
       bpm_detection: el("set-bpm-detection").checked,
       bpm_max_minutes: bpmMaxFromForm(),
@@ -606,6 +618,10 @@ el("set-id3").addEventListener("click", (e) => {
 el("set-import-cover").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-import-cover]");
   if (btn) setImportCoverChoice(btn.dataset.importCover);
+});
+el("set-import-track").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-import-track]");
+  if (btn) setImportTrackChoice(btn.dataset.importTrack);
 });
 el("set-lang").addEventListener("change", (e) => setLanguageChoice(e.target.value));
 // Theme is a live control — switch immediately on click.
@@ -701,10 +717,14 @@ initGroupResets([
   },
   {
     id: "import",
-    isDefault: () => importSkipFromForm().length === 0 && importCoverChoice === "if-missing",
+    isDefault: () =>
+      importSkipFromForm().length === 0 &&
+      importCoverChoice === "if-missing" &&
+      importTrackChoice === "number",
     reset: () => {
       setAllImportFields(true);
       setImportCoverChoice("if-missing");
+      setImportTrackChoice("number");
     },
   },
   {

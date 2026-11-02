@@ -226,9 +226,11 @@ headphone controls drive it too; on Linux the media keys, the desktop's media
 widget and `playerctl` do, over MPRIS; on Windows the media keys and the media
 flyout do.
 
-**Vinyl-aware** — side letters map to disc numbers (`A1` → disc 1, track 1)
-rather than being stored verbatim, with a `MediaType` tag, a render-only
-`%side%` mask placeholder and a derived Position column.
+**Vinyl-aware** — side letters can map to disc numbers (`A1` → disc 1, track 1),
+with a `MediaType` tag, a render-only `%side%` mask placeholder and a derived
+Position column. An import writes the numeric track number the tag standards
+define by default, or the position itself (`A1`) if you prefer it that way, and
+a position can be typed into the track number by hand.
 
 **Formats** — MP3, FLAC, Ogg Vorbis, Opus, Speex, M4A/MP4, AAC, AIFF, WAV,
 Musepack, Monkey's Audio, WavPack. ID3v2 writes go through the concrete tag type

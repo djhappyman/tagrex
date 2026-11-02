@@ -796,6 +796,9 @@ export const es = {
   "settings.cover.ifMissing": "Si falta",
   "settings.cover.always": "Siempre",
   "settings.importCoverHint": "Si una importación incrusta también la portada del lanzamiento. <strong>Si falta</strong> solo completa los archivos que no tienen ninguna imagen, así que nunca se sobrescribe nada que hayas elegido tú — se decide por archivo, de modo que una selección mixta la recibe justo donde hace falta. <strong>Siempre</strong> reemplaza la portada que ya tenga un archivo. En ambos casos las etiquetas y la imagen son un solo cambio, así que un único deshacer revierte las dos cosas.",
+  "settings.importTrack.number": "Número",
+  "settings.importTrack.position": "Posición de vinilo",
+  "settings.importTrackHint": "Cómo escribe una importación una posición de vinilo como A1 en el número de pista. <strong>Número</strong> escribe 1, el número de pista numérico que definen los estándares de etiquetas y que lee cualquier reproductor o programa de DJ; la posición en sí va al campo POSITION. <strong>Posición de vinilo</strong> escribe A1 tal cual. Un archivo MP4 recibe siempre el número, y con Cara de vinilo → disco activado las pistas se numeran por cara en cualquier caso.",
   "settings.files": "Archivos",
   "settings.sidecarsHint": "Cuando renombrar o mover reubica una pista, los archivos del mismo nombre (letras, hojas cue, portadas por pista…) se van con ella y deshacer los restaura juntos. Nunca se sobrescribe un archivo que ya esté en el destino.",
   "settings.extrasHint": "Cuando una reorganización saca todas las pistas de una carpeta, lo que queda en ella — un registro de ripeo, imágenes sueltas, una subcarpeta Scans — viaja al mismo destino, para que nada se quede atrás y la carpeta se pueda eliminar. Una carpeta que aún contiene otra música, o pistas que se reparten entre varios destinos, se dejan como están.",
@@ -845,6 +848,7 @@ export const es = {
   "settings.resetTitle": "Restablecer a ID3v2 · Vorbis · APE",
   "settings.priorityAria": "Prioridad de lectura de bloques de etiquetas",
   "settings.importCover": "Importar portada",
+  "settings.importTrack": "Importar número de pista",
   "settings.extensionsPlaceholder": "lrc cue txt jpg jpeg png",
   // ---- tag fields and derived columns ----
   "editor.group.core": "Básicos",

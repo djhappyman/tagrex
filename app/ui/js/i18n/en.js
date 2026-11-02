@@ -800,6 +800,9 @@ export const en = {
   "settings.cover.ifMissing": "If missing",
   "settings.cover.always": "Always",
   "settings.importCoverHint": "Whether an import also embeds the release's cover. <strong>If missing</strong> only fills in files that carry no artwork at all, so nothing you chose yourself is ever overwritten — decided per file, so a mixed selection gets it exactly where it's needed. <strong>Always</strong> replaces the cover a file already has. Either way the tags and the artwork are one change, so a single undo takes back both.",
+  "settings.importTrack.number": "Number",
+  "settings.importTrack.position": "Vinyl position",
+  "settings.importTrackHint": "How an import writes a vinyl position such as A1 as the track number. <strong>Number</strong> writes 1, the numeric track number the tag standards define and every player and DJ program reads; the position itself goes to the POSITION field. <strong>Vinyl position</strong> writes A1 as it is. An MP4 file always gets the number, and with Vinyl side → disc on the tracks are numbered per side either way.",
   "settings.files": "Files",
   "settings.sidecarsHint": "When a rename or move relocates a track, same-named files (lyrics, cue sheets, per-track covers…) move with it and undo restores them together. A file already at the destination is never overwritten.",
   "settings.extrasHint": "When a reorganize takes every track out of a folder, whatever is left in it — a rip log, loose artwork, a Scans subfolder — travels to the same destination, so nothing is stranded and the folder can be tidied away. A folder that still holds other music, or tracks that scatter to several destinations, are left alone.",
@@ -849,6 +852,7 @@ export const en = {
   "settings.resetTitle": "Reset to ID3v2 · Vorbis · APE",
   "settings.priorityAria": "Tag-block read priority",
   "settings.importCover": "Import cover art",
+  "settings.importTrack": "Import track number",
   "settings.extensionsPlaceholder": "lrc cue txt jpg jpeg png",
   // ---- tag fields and derived columns ----
   "editor.group.core": "Core",

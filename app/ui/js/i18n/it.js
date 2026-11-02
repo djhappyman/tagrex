@@ -798,6 +798,9 @@ export const it = {
   "settings.cover.ifMissing": "Se mancante",
   "settings.cover.always": "Sempre",
   "settings.importCoverHint": "Se un'importazione incorpora anche la copertina della release. <strong>Se mancante</strong> riempie solo i file che non hanno alcuna grafica, così nulla di ciò che hai scelto tu viene mai sovrascritto — deciso per file, quindi una selezione mista ottiene esattamente dove serve. <strong>Sempre</strong> sostituisce la copertina che un file ha già. In ogni caso tag e grafica sono un'unica modifica, quindi un singolo annulla ripristina entrambi.",
+  "settings.importTrack.number": "Numero",
+  "settings.importTrack.position": "Posizione vinile",
+  "settings.importTrackHint": "Come un'importazione scrive una posizione vinile come A1 nel numero traccia. <strong>Numero</strong> scrive 1, il numero traccia numerico definito dagli standard dei tag e letto da qualsiasi lettore o programma per DJ; la posizione stessa va nel campo POSITION. <strong>Posizione vinile</strong> scrive A1 così com'è. Un file MP4 riceve sempre il numero, e con Lato vinile → disco attivo le tracce vengono comunque numerate per lato.",
   "settings.files": "File",
   "settings.sidecarsHint": "Quando una rinomina o spostamento sposta una traccia, i file con stesso nome (testi, cue sheet, copertine per traccia…) si spostano con essa e l'annullamento li ripristina insieme. Un file già a destinazione non viene mai sovrascritto.",
   "settings.extrasHint": "Quando una riorganizzazione porta via ogni traccia da una cartella, tutto ciò che rimane in essa — un log di rippaggio, grafica sparsa, una sottocartella Scans — viaggia verso la stessa destinazione, così nulla resta isolato e la cartella può essere pulita. Una cartella che contiene ancora altra musica, o tracce che si disperdono su più destinazioni, viene lasciata stare.",
@@ -847,6 +850,7 @@ export const it = {
   "settings.resetTitle": "Ripristina a ID3v2 · Vorbis · APE",
   "settings.priorityAria": "Priorità lettura blocco tag",
   "settings.importCover": "Importa copertina",
+  "settings.importTrack": "Importa numero traccia",
   "settings.extensionsPlaceholder": "lrc cue txt jpg jpeg png",
   // ---- tag fields and derived columns ----
   "editor.group.core": "Essenziali",

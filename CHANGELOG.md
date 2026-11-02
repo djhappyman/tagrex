@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   files store these numbers as integers, so there a position is still marked
   as a value the field cannot hold
   ([#641](https://github.com/tagrex/tagrex/issues/641)).
+- **Settings › Online import › Track number** chooses how an import writes a
+  vinyl position: **Number** (the default) writes `A1` as track 1, the
+  numeric track number the tag standards define, and **Vinyl position**
+  writes `A1` as it is. An MP4 file always gets the number
+  ([#642](https://github.com/tagrex/tagrex/issues/642)).
 
 ### Fixed
 

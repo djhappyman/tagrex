@@ -28,8 +28,8 @@ use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
 use tagrex_core::mask::{FileContext, Mask, MaskError};
 use tagrex_core::matching::{self, MatchOptions, TrackRef};
 use tagrex_core::model::{
-    is_writable_value, is_writable_value_at, CoverArt, CoverKind, Id3v2Revision, TagBlock,
-    TagBlockContent, TagBlockKind, TagEngine, TagField, TagMap,
+    is_vinyl_position, is_writable_value, is_writable_value_at, CoverArt, CoverKind, Id3v2Revision,
+    TagBlock, TagBlockContent, TagBlockKind, TagEngine, TagField, TagMap,
 };
 use tagrex_core::plan::{
     ApplyProgress, BlockChange, ChangePlan, CoverChange, Executor, FieldChange, FileChange,
@@ -1047,6 +1047,11 @@ pub struct SettingsDto {
     /// `never`, `if-missing` (the default) or `always`. See [`ImportCover`].
     #[serde(default = "default_import_cover")]
     pub import_cover: String,
+    /// Whether an online import writes a vinyl position (`A1`) as the track
+    /// number rather than its number (`1`), which is the default the standard
+    /// asks for (#642). An MP4 always gets the number.
+    #[serde(default)]
+    pub import_vinyl_position: bool,
     /// Saved transform-chain action groups (#57): each a named, ordered set of
     /// steps + scope. Stored data only — `apply_settings` ignores it; the UI
     /// reads it from `load_settings` and rewrites it via `save_settings`.
@@ -1155,6 +1160,7 @@ impl Default for SettingsDto {
             cover_max_px: 0,
             cover_quality: 0,
             import_cover: default_import_cover(),
+            import_vinyl_position: false,
             action_groups: Vec::new(),
             mask_presets: Vec::new(),
             carry_sidecars: default_carry_sidecars(),
@@ -1899,6 +1905,9 @@ pub struct App {
     /// Whether an import brings the release's cover with it (#207), from
     /// settings.
     import_cover: Cell<ImportCover>,
+    /// Whether an import writes a vinyl position as the track number (#642),
+    /// from settings.
+    import_vinyl_position: Cell<bool>,
     /// The lower end of the range a detected tempo is folded into (#536), from
     /// settings; 0 = no folding.
     bpm_floor: Cell<u32>,
@@ -1952,6 +1961,7 @@ impl App {
             sidecar_extensions: RefCell::new(default_sidecar_extensions()),
             import_skip_fields: RefCell::new(HashSet::new()),
             import_cover: Cell::new(ImportCover::default()),
+            import_vinyl_position: Cell::new(false),
             bpm_floor: Cell::new(0),
             bpm_max_length: Cell::new(bpm_max_length(default_bpm_max_minutes())),
             locked_fields: RefCell::new(HashSet::new()),
@@ -2040,6 +2050,8 @@ impl App {
             settings.import_skip_fields.iter().cloned().collect();
         self.import_cover
             .set(ImportCover::from_storage_key(&settings.import_cover));
+        self.import_vinyl_position
+            .set(settings.import_vinyl_position);
         self.bpm_floor.set(settings.bpm_floor);
         self.bpm_max_length
             .set(bpm_max_length(settings.bpm_max_minutes));
@@ -4845,6 +4857,16 @@ impl App {
                 } else {
                     None
                 };
+                // The position itself as the track number (#642), when the setting
+                // asks for it and the file can hold one; the number the standard
+                // asks for is the default. Sides to discs, an instruction for
+                // this import, wins and numbers the tracks per side.
+                let verbatim_position = (self.import_vinyl_position.get() && side_disc.is_none())
+                    .then_some(track.position.trim())
+                    .filter(|position| {
+                        is_vinyl_position(position)
+                            && is_writable_value_at(path, &TagField::TrackNumber, position)
+                    });
                 let position_number = match side_disc {
                     // Digits in the position are already per-side ("A1" -> 1);
                     // a bare side ("B") has none, so take the next per-side number.
@@ -4867,8 +4889,19 @@ impl App {
                     .tags
                     .get(&TagField::TrackNumber)
                     .and_then(|value| track_number_from_position(value));
-                if current_number.as_deref() != Some(position_number.as_str()) {
-                    desired.push((TagField::TrackNumber, Some(position_number)));
+                let unchanged = match verbatim_position {
+                    Some(position) => {
+                        current
+                            .tags
+                            .get(&TagField::TrackNumber)
+                            .map(|value| value.trim())
+                            == Some(position)
+                    }
+                    None => current_number.as_deref() == Some(position_number.as_str()),
+                };
+                if !unchanged {
+                    let number = verbatim_position.map_or(position_number, str::to_string);
+                    desired.push((TagField::TrackNumber, Some(number)));
                 }
                 // Disc number, in precedence order (#146):
                 //
@@ -7245,6 +7278,7 @@ mod tests {
             cover_max_px: 500,
             cover_quality: 90,
             import_cover: "never".into(),
+            import_vinyl_position: true,
             action_groups: Vec::new(),
             mask_presets: Vec::new(),
             carry_sidecars: true,
@@ -7261,6 +7295,7 @@ mod tests {
         assert_eq!(app.cover_quality.get(), 90);
         assert_eq!(app.bpm_floor.get(), 70);
         assert_eq!(app.bpm_max_length(), Some(Duration::from_secs(15 * 60)));
+        assert!(app.import_vinyl_position.get());
     }
 
     #[test]
@@ -9399,6 +9434,76 @@ mod tests {
         let off = app.preview_import(&[a1, a2, b], &selection, false).unwrap();
         assert_eq!(td(&off.changes[2]).1, Some("<none>".into())); // no disc change
         assert_eq!(td(&off.changes[2]).0, Some("3".into())); // index-based fallback
+    }
+
+    // #642: the vinyl position as the track number is an opt-in. The default
+    // is the number the standard asks for; an MP4, which stores an integer,
+    // always gets the number; sides to discs, asked for on the import, wins.
+    #[test]
+    fn the_vinyl_position_setting_writes_the_position_as_the_track_number() {
+        let dir = TempDir::new("import-vinyl-position");
+        let a1 = dir.tagged_flac("f1.flac", "Old", "Old");
+        let numbered = dir.tagged_flac("f2.flac", "Old", "Old");
+        let m4a = dir.0.join("f3.m4a");
+        std::fs::write(
+            &m4a,
+            include_bytes!("../../core/tests/fixtures/minimal.m4a"),
+        )
+        .unwrap();
+        let mut app = open_app(&dir);
+        let track = |position: &str| ImportTrackDto {
+            disc: None,
+            position: position.into(),
+            artist: "X".into(),
+            title: "T".into(),
+            duration_secs: None,
+            isrc: None,
+            bpm: None,
+            key: None,
+        };
+        let selection = ImportSelectionDto {
+            album: Some("Album".into()),
+            tracks: vec![track("A1"), track("1-05"), track("B2")],
+            ..ImportSelectionDto::default()
+        };
+        let paths = [a1.clone(), numbered.clone(), m4a.clone()];
+        let numbers = |plan: &PlanDto| -> Vec<Option<String>> {
+            plan.changes
+                .iter()
+                .map(|change| {
+                    change
+                        .tag_changes
+                        .iter()
+                        .find(|fc| fc.field == "track")
+                        .and_then(|fc| fc.new.clone())
+                })
+                .collect()
+        };
+        let setting = |on: bool| SettingsDto {
+            import_vinyl_position: on,
+            ..SettingsDto::default()
+        };
+
+        let default = app.preview_import(&paths, &selection, false).unwrap();
+        assert_eq!(
+            numbers(&default),
+            vec![Some("1".into()), Some("5".into()), Some("2".into())]
+        );
+
+        app.apply_settings(&setting(true));
+        let opted_in = app.preview_import(&paths, &selection, false).unwrap();
+        assert_eq!(
+            numbers(&opted_in),
+            vec![Some("A1".into()), Some("5".into()), Some("2".into())]
+        );
+        // Sides to discs numbers per side, whatever the setting.
+        let sides = app.preview_import(&paths, &selection, true).unwrap();
+        assert_eq!(numbers(&sides)[0], Some("1".into()));
+
+        // A file already stating the position is left alone.
+        app.apply(&opted_in).unwrap();
+        let again = app.preview_import(&paths, &selection, false).unwrap();
+        assert!(numbers(&again).iter().all(Option::is_none));
     }
 
     #[test]

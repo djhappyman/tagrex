@@ -794,6 +794,9 @@ export const de = {
   "settings.cover.ifMissing": "Wenn fehlend",
   "settings.cover.always": "Immer",
   "settings.importCoverHint": "Ob ein Import auch das Cover des Releases einbettet. <strong>Wenn fehlend</strong> ergänzt nur Dateien ganz ohne Artwork, sodass nichts überschrieben wird, was du selbst gewählt hast — pro Datei entschieden, eine gemischte Auswahl bekommt es also genau dort, wo es fehlt. <strong>Immer</strong> ersetzt das vorhandene Cover einer Datei. In beiden Fällen sind Tags und Artwork eine Änderung, ein einziges Rückgängig nimmt also beides zurück.",
+  "settings.importTrack.number": "Nummer",
+  "settings.importTrack.position": "Vinyl-Position",
+  "settings.importTrackHint": "Wie ein Import eine Vinyl-Position wie A1 als Tracknummer schreibt. <strong>Nummer</strong> schreibt 1, die numerische Tracknummer, die die Tag-Standards festlegen und die jeder Player und jedes DJ-Programm liest; die Position selbst kommt ins Feld POSITION. <strong>Vinyl-Position</strong> schreibt A1 unverändert. Eine MP4-Datei bekommt immer die Nummer, und mit Vinyl-Seite → Disc werden die Tracks in jedem Fall pro Seite nummeriert.",
   "settings.files": "Dateien",
   "settings.sidecarsHint": "Wenn ein Umbenennen oder Verschieben einen Track verlagert, wandern gleichnamige Dateien (Lyrics, Cue-Sheets, Cover pro Track…) mit, und Rückgängig stellt sie gemeinsam wieder her. Eine bereits am Ziel liegende Datei wird nie überschrieben.",
   "settings.extrasHint": "Wenn ein Umorganisieren alle Tracks aus einem Ordner holt, wandert, was darin übrig ist — ein Rip-Log, lose Bilder, ein Scans-Unterordner — zum selben Ziel, sodass nichts zurückbleibt und der Ordner aufgeräumt werden kann. Ein Ordner, der noch andere Musik enthält, oder Tracks, die sich auf mehrere Ziele verteilen, bleiben unberührt.",
@@ -843,6 +846,7 @@ export const de = {
   "settings.resetTitle": "Zurücksetzen auf ID3v2 · Vorbis · APE",
   "settings.priorityAria": "Lesepriorität der Tag-Blöcke",
   "settings.importCover": "Cover importieren",
+  "settings.importTrack": "Tracknummer importieren",
   "settings.extensionsPlaceholder": "lrc cue txt jpg jpeg png",
   // ---- tag fields and derived columns ----
   "editor.group.core": "Grundlegend",

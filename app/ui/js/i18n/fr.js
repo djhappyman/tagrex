@@ -798,6 +798,9 @@ export const fr = {
   "settings.cover.ifMissing": "Si absente",
   "settings.cover.always": "Toujours",
   "settings.importCoverHint": "Si un import intègre aussi la pochette de la parution. <strong>Si absente</strong> ne complète que les fichiers sans aucune image, rien de ce que vous avez choisi n'est donc jamais écrasé — décidé fichier par fichier, une sélection mixte la reçoit donc exactement là où il faut. <strong>Toujours</strong> remplace la pochette qu'un fichier a déjà. Dans les deux cas, les tags et l'image forment un seul changement, une seule annulation reprend donc les deux.",
+  "settings.importTrack.number": "Numéro",
+  "settings.importTrack.position": "Position vinyle",
+  "settings.importTrackHint": "Comment un import écrit une position vinyle comme A1 dans le numéro de piste. <strong>Numéro</strong> écrit 1, le numéro de piste numérique que définissent les normes de tags et que lit tout lecteur ou logiciel de DJ ; la position elle-même va dans le champ POSITION. <strong>Position vinyle</strong> écrit A1 tel quel. Un fichier MP4 reçoit toujours le numéro, et avec Face vinyle → disque activé, les pistes sont de toute façon numérotées par face.",
   "settings.files": "Fichiers",
   "settings.sidecarsHint": "Quand un renommage ou un déplacement change une piste de place, les fichiers du même nom (paroles, fichiers cue, pochettes par piste…) la suivent et l'annulation les remet ensemble. Un fichier déjà présent à la destination n'est jamais écrasé.",
   "settings.extrasHint": "Quand une réorganisation sort toutes les pistes d'un dossier, ce qui y reste — un journal d'extraction, des images isolées, un sous-dossier Scans — part vers la même destination, pour que rien ne soit abandonné et que le dossier puisse être supprimé. Un dossier qui contient encore d'autre musique, ou des pistes qui partent vers plusieurs destinations, sont laissés tels quels.",
@@ -847,6 +850,7 @@ export const fr = {
   "settings.resetTitle": "Rétablir ID3v2 · Vorbis · APE",
   "settings.priorityAria": "Priorité de lecture des blocs de tags",
   "settings.importCover": "Importer la pochette",
+  "settings.importTrack": "Importer le numéro de piste",
   "settings.extensionsPlaceholder": "lrc cue txt jpg jpeg png",
   // ---- tag fields and derived columns ----
   "editor.group.core": "Essentiels",

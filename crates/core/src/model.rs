@@ -3851,7 +3851,7 @@ pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool 
 /// A vinyl (or cassette) position as a track or disc number (#641): one or two
 /// letters with up to three digits after them (`A`, `B2`, `Aa1`), or digits
 /// with one letter after them (`12a`). Plain digits are a number, not this.
-fn is_vinyl_position(value: &str) -> bool {
+pub fn is_vinyl_position(value: &str) -> bool {
     let letters = value.bytes().take_while(u8::is_ascii_alphabetic).count();
     let digits = value[letters..]
         .bytes()

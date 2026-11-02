@@ -96,6 +96,25 @@ halving or doubling it. **As measured** (the default) writes the tempo as the
 beats fall. Choose **70-140** if your library writes a 174 BPM track as 87;
 **90-180** keeps drum & bass at full tempo and doubles a slow one.
 
+## Online import
+
+**Fields**: which tags an import from Discogs or MusicBrainz may write, one
+checkbox each, all on by default. A field switched off is left exactly as the
+file has it; see [Import, then fix](tagger.md#import-then-fix).
+
+**Cover art**: whether an import also embeds the release's cover: **Never**,
+**If missing** (the default, only files with no artwork at all) or **Always**.
+
+**Track number**: how an import writes a vinyl position such as `A1`.
+**Number** (the default) writes `1`: the tag standards define the track number
+as a number, and every player and DJ program reads it that way. The position
+itself is kept in the `POSITION` field, which the `%position%` and `%side%`
+placeholders read. **Vinyl position** writes `A1` as it is, for a library that
+keeps its vinyl that way. A position that is not a vinyl side, such as `1-05`,
+still gives a number, an MP4 file always gets the number because it stores the
+track number as an integer, and with **Vinyl side → disc** on the tracks are
+numbered per side whichever you choose.
+
 ## Files
 
 **Same-named file extensions** — which same-named files travel with a renamed
