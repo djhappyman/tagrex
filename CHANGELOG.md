@@ -128,6 +128,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   called both *sortie* and *parution*, and 35 strings let a colon,
   question mark or closing quote wrap onto a line of its own
   ([#633](https://github.com/tagrex/tagrex/issues/633)).
+- Russian: wording fixes from a translation review, among them the case
+  styles named as nouns, a vinyl position count in the wrong case, slang
+  in the generator's labels, a reference to a button by a name it does not
+  have, and locks and undo batches each called two different things
+  ([#634](https://github.com/tagrex/tagrex/issues/634)).
 
 ## [1.1.1] - 2026-11-02
 
