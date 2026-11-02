@@ -239,6 +239,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   a file whose only tag was APE no longer reads back unchanged after a clear
   or keeps stating the old values after an edit
   ([#655](https://github.com/tagrex/tagrex/issues/655)).
+- Clearing every field no longer leaves behind a field only an ID3v1 tag, an
+  APE tag, a WAV's INFO list or an AIFF's text chunks stated, which the file
+  then read back as if it had not been cleared
+  ([#656](https://github.com/tagrex/tagrex/issues/656)).
 
 ## [1.1.1] - 2026-11-02
 

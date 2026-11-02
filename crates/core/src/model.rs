@@ -2934,7 +2934,7 @@ fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Ta
     // What the file read as before this write, so the legacy text blocks of a
     // WAV or an AIFF, an ID3v1 tag and an MP3's APE block lose only what the
     // model cleared (#652, #653, #655).
-    let before = if matches!(container, FileType::Wav | FileType::Aiff)
+    let mut before = if matches!(container, FileType::Wav | FileType::Aiff)
         || has_id3v1(path)?
         || has_ape(path, container)?
     {
@@ -2942,6 +2942,25 @@ fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Ta
     } else {
         TagMap::new()
     };
+    // A write that takes away the title, the artist and the album leaves an
+    // ID3v2 tag the next read passes over for a legacy block that still names
+    // the track (#615), so a field only that block stated would come back
+    // (#656). Then every field a legacy block states counts as read, and so as
+    // cleared where the model has none.
+    if names_the_track(&before) && !names_the_track(tags) {
+        for kind in [
+            TagBlockKind::Id3v1,
+            TagBlockKind::Ape,
+            TagBlockKind::RiffInfo,
+            TagBlockKind::AiffText,
+        ] {
+            if let Some(content) = TagEngine::read_block(path, kind)? {
+                for (field, value) in content.tags {
+                    before.entry(field).or_insert(value);
+                }
+            }
+        }
+    }
     save_id3v2(path, container, tags, &before)?;
     if id3v2_write_landed(path, container, tags)? {
         return sync_iff_text(path, container, tags, &before);

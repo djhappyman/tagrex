@@ -4623,3 +4623,64 @@ fn an_mp3_ape_block_beside_id3v2_loses_only_what_was_edited() {
     assert_eq!(block.tags.get(&TagField::Artist), None);
     assert_eq!(block.covers, content.covers);
 }
+
+/// #656: clearing every field took out of a legacy block only what the model
+/// had read, so a field only the legacy block stated outlived the clear, and
+/// with the ID3v2 tag now empty the next read came from the legacy block and
+/// showed it again.
+#[test]
+fn clearing_every_field_leaves_no_legacy_field_behind() {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v1::Id3v1Tag;
+    use lofty::prelude::TagExt;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-clear-legacy-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).unwrap();
+    Id3v1Tag {
+        title: Some("Title".to_string()),
+        album: Some("Only In ID3v1".to_string()),
+        ..Default::default()
+    }
+    .save_to_path(&path, WriteOptions::default())
+    .unwrap();
+    let mut content = TagBlockContent::default();
+    content.tags.insert(TagField::Title, "Title".to_string());
+    content
+        .tags
+        .insert(TagField::Genre, "Only In APE".to_string());
+    TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+    let mut id3 = TagBlockContent::default();
+    id3.tags.insert(TagField::Title, "Title".to_string());
+    TagEngine::write_block(&path, TagBlockKind::Id3v2, None, &id3).unwrap();
+
+    let mut file = TagEngine::read(&path).expect("read");
+    assert_eq!(file.tags.len(), 1, "{:?}", file.tags);
+    file.tags.clear();
+    TagEngine::write(&file).expect("a clear");
+    let read_back = TagEngine::read(&path).expect("read back");
+    std::fs::remove_file(&path).ok();
+    assert!(read_back.tags.is_empty(), "{:?}", read_back.tags);
+
+    // A WAV's INFO list beside its ID3v2 chunk.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-clear-legacy-{}.wav",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_wav()).unwrap();
+    let mut info = lofty::iff::wav::RiffInfoList::new();
+    info.insert("INAM".to_string(), "Title".to_string());
+    info.insert("IGNR".to_string(), "Only In INFO".to_string());
+    info.save_to_path(&path, WriteOptions::default()).unwrap();
+    TagEngine::write_block(&path, TagBlockKind::Id3v2, None, &id3).unwrap();
+
+    let mut file = TagEngine::read(&path).expect("read");
+    assert_eq!(file.tags.len(), 1, "{:?}", file.tags);
+    file.tags.clear();
+    TagEngine::write(&file).expect("a clear");
+    let read_back = TagEngine::read(&path).expect("read back");
+    std::fs::remove_file(&path).ok();
+    assert!(read_back.tags.is_empty(), "{:?}", read_back.tags);
+}
