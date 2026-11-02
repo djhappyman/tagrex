@@ -1865,6 +1865,7 @@ impl TagEngine {
                         value,
                     )));
                 }
+                order_frames(&mut id3, None);
                 match container_of(path)? {
                     Some(container) => save_id3v2_tag_with(path, container, &id3, options)?,
                     None => id3.save_to_path(path, options)?,
@@ -2463,12 +2464,60 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
         for frame in edited_rating {
             updated.insert(frame);
         }
+        order_frames(&mut updated, Some(&original));
+    } else {
+        order_frames(&mut updated, None);
     }
     save_id3v2_tag(path, container, &updated)?;
     // Whatever the file also carries in an ID3v1 block has to say the same
     // thing (#194).
     sync_id3v1(path, tags)?;
     Ok(())
+}
+
+/// Put a tag's frames in a stable order before it is written (#623).
+///
+/// The backend's conversion from a generic tag collects the frames in a hash
+/// set with a random seed, so the same tags came out in a different order on
+/// every save: the file's frames moved around on each edit and a save that
+/// changed nothing still rewrote the tag. A frame the file already has (the
+/// same frame by the backend's own reckoning, which is what replaces it on
+/// insert) keeps its place in `original`; a new one goes after those, by its id
+/// and then its description.
+fn order_frames(tag: &mut Id3v2Tag, original: Option<&Id3v2Tag>) {
+    let place = |frame: &Frame<'static>| {
+        let known = original.and_then(|original| original.into_iter().position(|old| old == frame));
+        (
+            known.unwrap_or(usize::MAX),
+            frame.id_str().to_string(),
+            frame_description(frame),
+        )
+    };
+    let mut frames: Vec<Frame<'static>> = (&*tag).into_iter().cloned().collect();
+    frames.sort_by_cached_key(place);
+    tag.retain(|_| false);
+    for frame in frames {
+        tag.insert(frame);
+    }
+}
+
+/// What tells two frames with one id apart, for [`order_frames`].
+fn frame_description(frame: &Frame<'_>) -> String {
+    match frame {
+        Frame::UserText(text) => text.description.to_string(),
+        Frame::UserUrl(url) => url.description.to_string(),
+        Frame::Comment(comment) => format!("{:?}{}", comment.language, comment.description),
+        Frame::UnsynchronizedText(lyrics) => {
+            format!("{:?}{}", lyrics.language, lyrics.description)
+        }
+        Frame::Popularimeter(rating) => rating.email.to_string(),
+        Frame::Picture(picture) => format!(
+            "{:?}{}",
+            picture.picture.pic_type(),
+            picture.picture.description().unwrap_or_default()
+        ),
+        _ => String::new(),
+    }
 }
 
 /// Persist an [`Id3v2Tag`] to a file, choosing the writer by container.

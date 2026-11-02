@@ -90,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   over 600 MB of memory to resize and now takes about a fifth of that. A PNG
   too large to decode at all was embedded at full size, and is resized now
   ([#622](https://github.com/tagrex/tagrex/issues/622)).
+- Saving the same tags again writes the same bytes: the ID3v2 frames used to
+  come out in a different order on every save. Frames a file already has keep
+  their place, and new ones follow in a fixed order
+  ([#623](https://github.com/tagrex/tagrex/issues/623)).
 
 ## [1.1.1] - 2026-11-02
 

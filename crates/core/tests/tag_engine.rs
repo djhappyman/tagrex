@@ -3018,3 +3018,87 @@ fn a_wav_or_aiff_keeps_its_legacy_text_block_in_step() {
     assert_eq!(after.copyright.as_deref(), Some("(c) Label"));
     std::fs::remove_file(&path).ok();
 }
+
+/// #623: the backend builds an ID3v2 tag's frames from a hash set, so the same
+/// tags came out in a different order on every save. Saves of the same tags
+/// are byte for byte the same now, and the frames a file already has keep the
+/// file's own order.
+#[test]
+fn saving_the_same_tags_twice_writes_the_same_bytes() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{Frame, FrameId, Id3v2Tag, TextInformationFrame};
+    use lofty::iff::wav::WavFile;
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::TagExt;
+    use lofty::TextEncoding;
+    use std::borrow::Cow;
+
+    // The order a file might arrive in, nothing like the backend's own.
+    let seeded_ids = [
+        "TCON", "TPE1", "TRCK", "TALB", "TIT2", "TPE2", "TCOM", "TPUB", "TBPM", "TKEY",
+    ];
+    for (format, bytes, extension) in [
+        (AudioFormat::Mp3, minimal_mp3(), "mp3"),
+        (AudioFormat::Wav, minimal_wav(), "wav"),
+    ] {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-frame-order-{}.{extension}",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write fixture");
+        let mut seeded = Id3v2Tag::new();
+        for id in seeded_ids {
+            let value = if id == "TRCK" { "3" } else { id };
+            seeded.insert(Frame::Text(TextInformationFrame::new(
+                FrameId::Valid(Cow::Borrowed(id)),
+                TextEncoding::UTF8,
+                value.to_string(),
+            )));
+        }
+        seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        let mut tags = TagEngine::read(&path).expect("read tags").tags;
+        tags.insert(TagField::Title, "Edited".to_string());
+        tags.insert(TagField::Year, "2001".to_string());
+        tags.insert(TagField::Comment, "New".to_string());
+        let write = || {
+            TagEngine::write(&TrackFile {
+                path: path.clone(),
+                format,
+                tags: tags.clone(),
+            })
+            .expect("write tags");
+            std::fs::read(&path).unwrap()
+        };
+        let first = write();
+        for _ in 0..4 {
+            assert!(
+                write() == first,
+                "{extension}: a second save changed the bytes"
+            );
+        }
+
+        let mut file = std::fs::File::open(&path).unwrap();
+        let tag = if format == AudioFormat::Mp3 {
+            MpegFile::read_from(&mut file, ParseOptions::new())
+                .unwrap()
+                .id3v2()
+                .cloned()
+        } else {
+            WavFile::read_from(&mut file, ParseOptions::new())
+                .unwrap()
+                .id3v2()
+                .cloned()
+        };
+        let ids: Vec<String> = tag
+            .unwrap()
+            .into_iter()
+            .map(|frame| frame.id_str().to_string())
+            .collect();
+        std::fs::remove_file(&path).ok();
+        // The file's frames first, in the file's order, then the new ones.
+        assert_eq!(ids[..seeded_ids.len()], seeded_ids, "{extension}");
+        assert_eq!(ids[seeded_ids.len()..], ["COMM", "TDRC"], "{extension}");
+    }
+}
