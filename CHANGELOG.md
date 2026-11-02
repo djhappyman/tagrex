@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-02
+
+TagRex now updates itself. When a newer release is out, the note in the top bar
+offers to install it: the app downloads the signed bundle for its platform,
+checks the signature and restarts into the new version. This is the first
+release that can do so, so it has to be installed by hand once; every release
+after it arrives through the app. Also new: the Delete key moves the selected
+files to the Trash, and a saved mask can be updated in place.
+
 ### Added
 
 - **Delete moves the selected files to the Trash.** The same confirmation as
