@@ -2752,3 +2752,96 @@ fn the_id3v1_preview_names_what_the_bytes_cannot_hold() {
     assert!(lost.contains(&TagField::Album), "got {lost:?}");
     assert!(!lost.contains(&TagField::Artist), "got {lost:?}");
 }
+
+/// #619: the carry loop put the file's `POPM` frame back over the one written
+/// from the model, so editing or clearing the rating never reached the file.
+#[test]
+fn an_edited_or_cleared_rating_reaches_the_file() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{Frame, Id3v2Tag, PopularimeterFrame};
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::TagExt;
+
+    let ratings = |path: &PathBuf| -> Vec<(String, u8, u64)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mut found: Vec<(String, u8, u64)> = MpegFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .id3v2()
+            .map(|tag| {
+                tag.into_iter()
+                    .filter_map(|frame| match frame {
+                        Frame::Popularimeter(p) => Some((p.email.to_string(), p.rating, p.counter)),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        found.sort();
+        found
+    };
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-rating-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut seeded = Id3v2Tag::new();
+    seeded.insert(Frame::Popularimeter(PopularimeterFrame::new(
+        "other@y", 64, 1,
+    )));
+    // 150 is no star value: it reads as 4 stars, which write as 196.
+    seeded.insert(Frame::Popularimeter(PopularimeterFrame::new(
+        "rater@x", 150, 3,
+    )));
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    let field = TagField::Custom("POPM".to_string());
+    let write = |tags: BTreeMap<TagField, String>| {
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format: AudioFormat::Mp3,
+            tags,
+        })
+        .expect("write tags")
+    };
+
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(
+        read.tags.get(&field).map(String::as_str),
+        Some("rater@x|4|3")
+    );
+
+    // An unrelated edit keeps both frames exactly.
+    let mut tags = read.tags.clone();
+    tags.insert(TagField::Title, "Edited".to_string());
+    write(tags.clone());
+    assert_eq!(
+        ratings(&path),
+        vec![
+            ("other@y".to_string(), 64, 1),
+            ("rater@x".to_string(), 150, 3)
+        ]
+    );
+
+    // An edit lands; the other rater's frame stays.
+    tags.insert(field.clone(), "rater@x|5|3".to_string());
+    write(tags.clone());
+    assert_eq!(
+        ratings(&path),
+        vec![
+            ("other@y".to_string(), 64, 1),
+            ("rater@x".to_string(), 255, 3)
+        ]
+    );
+    let reread = TagEngine::read(&path).expect("read tags");
+    assert_eq!(
+        reread.tags.get(&field).map(String::as_str),
+        Some("rater@x|5|3")
+    );
+
+    // So does a clear.
+    tags.remove(&field);
+    write(tags);
+    let left = ratings(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(left, vec![("other@y".to_string(), 64, 1)]);
+}

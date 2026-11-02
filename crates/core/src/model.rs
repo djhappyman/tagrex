@@ -2237,9 +2237,52 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
                 }
             }
         }
+        // The rating (#619). The read keeps the file's last `POPM` frame, as the
+        // custom field `POPM`, so that frame is the model's: the carry loop below
+        // put it back over the one just written from the model, and an edit or a
+        // clear never reached the file. A rating nobody edited goes back as the
+        // file's own frame instead, since its 0-255 value does not survive the
+        // round trip through stars; frames for other emails are not the model's
+        // and carry over as they are.
+        let owned_rating = (&original).into_iter().rev().find_map(|frame| match frame {
+            Frame::Popularimeter(rating) => Some(rating.clone()),
+            _ => None,
+        });
+        let owned_email = owned_rating.and_then(|rating| {
+            let mut alone = Id3v2Tag::new();
+            alone.insert(Frame::Popularimeter(rating.clone()));
+            let as_read = Tag::from(alone)
+                .get_string(ItemKey::Popularimeter)
+                .map(str::to_string);
+            let field = item_key_to_tag_field(ItemKey::Popularimeter, TagType::Id3v2);
+            if tags.get(&field) == as_read.as_ref() {
+                updated.retain(|frame| !matches!(frame, Frame::Popularimeter(_)));
+                None
+            } else {
+                Some(rating.email.to_string())
+            }
+        });
+        // The edited frame has to stay the file's last one, or the next read
+        // keeps another email's frame carried in after it.
+        let edited_rating: Vec<Frame<'static>> = if owned_email.is_some() {
+            let taken = (&updated)
+                .into_iter()
+                .filter(|frame| matches!(frame, Frame::Popularimeter(_)))
+                .cloned()
+                .collect();
+            updated.retain(|frame| !matches!(frame, Frame::Popularimeter(_)));
+            taken
+        } else {
+            Vec::new()
+        };
         for frame in &original {
             if is_model_text_frame(frame) {
                 continue;
+            }
+            if let (Frame::Popularimeter(rating), Some(email)) = (frame, &owned_email) {
+                if rating.email == email.as_str() {
+                    continue;
+                }
             }
             // Lyrics in any other language are lyrics the model never saw —
             // `unsync_text().last()` is the one the read kept, since a second
@@ -2271,6 +2314,9 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
             flags.data_length_indicator = None;
             carried.set_flags(flags);
             updated.insert(carried);
+        }
+        for frame in edited_rating {
+            updated.insert(frame);
         }
     }
     save_id3v2_tag(path, container, &updated)?;

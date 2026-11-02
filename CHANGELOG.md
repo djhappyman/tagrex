@@ -69,6 +69,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   as written: text past 30 characters, or letters outside Latin-1, such as
   Cyrillic
   ([#617](https://github.com/tagrex/tagrex/issues/617)).
+- Editing or clearing the rating of an MP3 or another ID3v2 file now reaches
+  the file. Before, the save put the file's old rating frame back over the edit.
+  A rating nobody touched is kept exactly as the file stored it, and other
+  raters' frames are kept too
+  ([#619](https://github.com/tagrex/tagrex/issues/619)).
 
 ## [1.1.1] - 2026-11-02
 
