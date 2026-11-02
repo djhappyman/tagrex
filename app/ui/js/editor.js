@@ -413,9 +413,19 @@ const EDITOR_NUMERIC_KEYS = new Set(["track", "tracktotal", "disc", "bpm", "year
 let editorStandardCollapsed = false;
 let editorAdvancedCollapsed = true;
 
+// A vinyl position as a track or disc number (#641), the backend's
+// is_vinyl_position: one or two letters with up to three digits ("A", "B2",
+// "Aa1"), or up to three digits with one letter ("12a").
+const VINYL_POSITION = /^(?:[A-Za-z]{1,2}\d{0,3}|\d{1,3}[A-Za-z])$/;
+// The files that store track and disc numbers as integers, so a vinyl
+// position has nowhere to go there: MP4, by the backend's extensions for it.
+const INTEGER_NUMBER_FILE = /\.(?:mp4|m4[abprv]|3gp)$/i;
+
 // Validate a hand-typed value the same way the backend does (empty always OK —
 // it clears the field). Returns { ok, hint } — hint is the rule shown on focus.
-function validateFieldValue(key, value) {
+// `paths` are the files the value goes to, for the one rule that depends on
+// the format.
+function validateFieldValue(key, value, paths = []) {
   if (!EDITOR_NUMERIC_KEYS.has(key)) return { ok: true, hint: "" };
   const v = value.trim();
   if (key === "year") {
@@ -425,7 +435,16 @@ function validateFieldValue(key, value) {
   if (key === "bpm") {
     return { ok: v === "" || /^\d+(\.\d+)?$/.test(v), hint: tr("editor.hintNumbers") };
   }
-  // track / tracktotal / disc — a plain integer.
+  // track / disc — a plain integer, or a vinyl position where the file keeps
+  // the number as text.
+  if (
+    (key === "track" || key === "disc") &&
+    VINYL_POSITION.test(v) &&
+    !paths.some((path) => INTEGER_NUMBER_FILE.test(path))
+  ) {
+    return { ok: true, hint: tr("editor.hintNumbers") };
+  }
+  // tracktotal, and the rest — a plain integer.
   return { ok: v === "" || /^\d+$/.test(v), hint: tr("editor.hintNumbers") };
 }
 
@@ -570,7 +589,7 @@ function fieldRow(key, label, paths) {
 
   // Reflect the field's state (dirty / error) on the row and input.
   const reflect = () => {
-    const { ok } = validateFieldValue(key, input.value);
+    const { ok } = validateFieldValue(key, input.value, paths);
     row.classList.toggle("error", !ok);
     input.classList.toggle("error", !ok);
     if (!ok) input.setAttribute("aria-invalid", "true");
@@ -619,7 +638,7 @@ function fieldDuoRow(pairs, paths) {
   const reflectRow = () => {
     let anyError = false;
     for (const inp of inputs) {
-      const { ok } = validateFieldValue(inp.dataset.key, inp.value);
+      const { ok } = validateFieldValue(inp.dataset.key, inp.value, paths);
       inp.classList.toggle("error", !ok);
       if (!ok) inp.setAttribute("aria-invalid", "true");
       else inp.removeAttribute("aria-invalid");

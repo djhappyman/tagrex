@@ -3816,8 +3816,10 @@ fn is_decimal(value: &str) -> bool {
 /// - **year** must be a valid 4-digit timestamp — an invalid one is written as
 ///   a raw text frame the reader then rejects, corrupting the file (see the
 ///   hard guard in [`TagEngine::write`]).
-/// - **track / track-total / disc** are parsed as integers; a non-numeric value
-///   is silently dropped, so require a plain non-negative integer.
+/// - **track / disc** are a plain non-negative integer or a vinyl position
+///   such as `A1` (#641), which every format but MP4 keeps as text; see
+///   [`is_writable_value_at`] for the file-aware rule.
+/// - **track-total / disc-total** are a plain non-negative integer.
 /// - **bpm** must be numeric (integer or decimal).
 ///
 /// Every free-text field (artist, title, album, genre, comment, ISRC, key,
@@ -3828,13 +3830,41 @@ pub fn is_writable_value(field: &TagField, value: &str) -> bool {
     }
     match field {
         TagField::Year => is_writable_year(value),
-        TagField::TrackNumber
-        | TagField::TrackTotal
-        | TagField::DiscNumber
-        | TagField::DiscTotal => is_ascii_digits(value),
+        TagField::TrackNumber | TagField::DiscNumber => {
+            is_ascii_digits(value) || is_vinyl_position(value)
+        }
+        TagField::TrackTotal | TagField::DiscTotal => is_ascii_digits(value),
         TagField::Bpm => is_decimal(value),
         _ => true,
     }
+}
+
+/// [`is_writable_value`] for the file at `path`. An MP4 stores the track and
+/// disc numbers as integers, so a vinyl position, which the other formats keep
+/// as text, has nowhere to go there and would be dropped (#641).
+pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool {
+    let integers_only = matches!(field, TagField::TrackNumber | TagField::DiscNumber)
+        && FileType::from_path(path) == Some(FileType::Mp4);
+    is_writable_value(field, value) && !(integers_only && is_vinyl_position(value))
+}
+
+/// A vinyl (or cassette) position as a track or disc number (#641): one or two
+/// letters with up to three digits after them (`A`, `B2`, `Aa1`), or digits
+/// with one letter after them (`12a`). Plain digits are a number, not this.
+fn is_vinyl_position(value: &str) -> bool {
+    let letters = value.bytes().take_while(u8::is_ascii_alphabetic).count();
+    let digits = value[letters..]
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .count();
+    let rest = &value[letters + digits..];
+    if letters > 0 {
+        return letters <= 2 && digits <= 3 && rest.is_empty();
+    }
+    let digits = value.bytes().take_while(u8::is_ascii_digit).count();
+    (1..=3).contains(&digits)
+        && value.len() == digits + 1
+        && value.as_bytes()[digits].is_ascii_alphabetic()
 }
 
 #[derive(Debug, Error)]
@@ -4087,6 +4117,44 @@ mod tests {
     }
 
     #[test]
+    fn a_track_or_disc_number_can_be_a_vinyl_position() {
+        for position in ["A", "B2", "Aa1", "AA", "C123", "12a", "1B"] {
+            assert!(
+                is_writable_value(&TagField::TrackNumber, position),
+                "{position}"
+            );
+            assert!(
+                is_writable_value(&TagField::DiscNumber, position),
+                "{position}"
+            );
+            // A total is a count.
+            assert!(
+                !is_writable_value(&TagField::TrackTotal, position),
+                "{position}"
+            );
+            assert!(
+                !is_writable_value(&TagField::DiscTotal, position),
+                "{position}"
+            );
+        }
+        for not_one in [
+            "one", "Bonus", "A1/04", "A 1", "A1b", "A1234", "1234a", "12ab", "-1",
+        ] {
+            assert!(
+                !is_writable_value(&TagField::TrackNumber, not_one),
+                "{not_one}"
+            );
+        }
+        // MP4 keeps the numbers as integers, so only there it is refused.
+        let field = TagField::TrackNumber;
+        assert!(is_writable_value_at(Path::new("a.mp3"), &field, "A1"));
+        assert!(is_writable_value_at(Path::new("a.flac"), &field, "A1"));
+        assert!(!is_writable_value_at(Path::new("a.m4a"), &field, "A1"));
+        assert!(is_writable_value_at(Path::new("a.m4a"), &field, "7"));
+        assert!(!is_writable_value_at(Path::new("a.mp3"), &field, "one"));
+    }
+
+    #[test]
     fn is_writable_value_constrains_typed_fields_only() {
         // Empty clears any field.
         assert!(is_writable_value(&TagField::Year, ""));
@@ -4096,7 +4164,6 @@ mod tests {
         assert!(is_writable_value(&TagField::TrackNumber, "7"));
         assert!(is_writable_value(&TagField::TrackTotal, "12"));
         assert!(is_writable_value(&TagField::DiscNumber, "1"));
-        assert!(!is_writable_value(&TagField::TrackNumber, "A1"));
         assert!(!is_writable_value(&TagField::DiscNumber, "one"));
         assert!(is_writable_value(&TagField::Bpm, "128"));
         assert!(is_writable_value(&TagField::Bpm, "128.5"));

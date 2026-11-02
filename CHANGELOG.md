@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   their embedded covers, and covers can be added, replaced and removed on them
   like on any other file
   ([#608](https://github.com/tagrex/tagrex/issues/608)).
+- A vinyl position such as `A1`, `B` or `12a` can be entered as the track or
+  disc number, in the editor and through a FROM NAME or FROM TEXT mask. MP4
+  files store these numbers as integers, so there a position is still marked
+  as a value the field cannot hold
+  ([#641](https://github.com/tagrex/tagrex/issues/641)).
 
 ### Fixed
 

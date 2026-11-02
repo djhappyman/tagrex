@@ -28,8 +28,8 @@ use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
 use tagrex_core::mask::{FileContext, Mask, MaskError};
 use tagrex_core::matching::{self, MatchOptions, TrackRef};
 use tagrex_core::model::{
-    is_writable_value, CoverArt, CoverKind, Id3v2Revision, TagBlock, TagBlockContent, TagBlockKind,
-    TagEngine, TagField, TagMap,
+    is_writable_value, is_writable_value_at, CoverArt, CoverKind, Id3v2Revision, TagBlock,
+    TagBlockContent, TagBlockKind, TagEngine, TagField, TagMap,
 };
 use tagrex_core::plan::{
     ApplyProgress, BlockChange, ChangePlan, CoverChange, Executor, FieldChange, FileChange,
@@ -158,14 +158,20 @@ impl FieldChangeDto {
 /// Whether a proposed `new` value for `field` (a storage key) must be rejected
 /// rather than written. Delegates to the tag engine's per-field rule
 /// ([`is_writable_value`]) so the preview flags exactly what the writer would
-/// mishandle: an invalid year (corrupts the file), a non-numeric track/disc/
-/// total or BPM (silently dropped). Free-text fields accept anything; an
-/// empty/absent value is always valid (it clears the field).
-/// The keys of the readings a field cannot hold (#548).
-fn invalid_readings(fields: &[(String, String)]) -> Vec<String> {
+/// mishandle: an invalid year (corrupts the file), a non-numeric total or BPM,
+/// or a track/disc number that is neither a number nor a vinyl position
+/// (silently dropped). Free-text fields accept anything; an empty/absent value
+/// is always valid (it clears the field).
+/// The keys of the readings a field cannot hold (#548), in the file at `path`
+/// when there is one: a vinyl position is a track number everywhere but in an
+/// MP4 (#641).
+fn invalid_readings(fields: &[(String, String)], path: Option<&Path>) -> Vec<String> {
     fields
         .iter()
-        .filter(|(field, value)| field_value_invalid(field, Some(value)))
+        .filter(|(field, value)| match path {
+            Some(path) => !is_writable_value_at(path, &TagField::from_storage_key(field), value),
+            None => field_value_invalid(field, Some(value)),
+        })
         .map(|(field, _)| field.clone())
         .collect()
 }
@@ -2128,6 +2134,16 @@ impl App {
         let mut skipped: Vec<LockedSkipDto> = Vec::new();
         let mut kept = Vec::with_capacity(changes.len());
         for mut change in changes {
+            // A vinyl position is a track number everywhere but in an MP4
+            // (#641), which only the file's path can tell.
+            for field_change in &mut change.tag_changes {
+                if let Some(new) = &field_change.new {
+                    let field = TagField::from_storage_key(&field_change.field);
+                    if !is_writable_value_at(Path::new(&change.path), &field, new) {
+                        field_change.invalid = true;
+                    }
+                }
+            }
             if !locked.is_empty() {
                 change.tag_changes.retain(|field_change| {
                     if !locked.contains(&field_change.field) {
@@ -2694,7 +2710,7 @@ impl App {
         };
         Ok(NameProbeDto {
             subject,
-            invalid: invalid_readings(&fields),
+            invalid: invalid_readings(&fields, Some(path)),
             fields,
             matched: true,
         })
@@ -2813,12 +2829,13 @@ impl App {
                         })
                         .filter(|(_, value)| !value.is_empty())
                         .collect();
+                    let path = files.next();
                     TextLineDto {
                         line: line.to_string(),
                         matched: true,
-                        invalid: invalid_readings(&fields),
+                        invalid: invalid_readings(&fields, path.map(PathBuf::as_path)),
                         fields,
-                        path: files.next().map(|path| path.to_string_lossy().into_owned()),
+                        path: path.map(|path| path.to_string_lossy().into_owned()),
                     }
                 }
                 Err(MaskError::NoMatch) => TextLineDto {
@@ -6578,6 +6595,46 @@ mod tests {
         );
     }
 
+    // #641: a vinyl position is a track number the writer keeps as text,
+    // except in an MP4, which stores the number as an integer: there the plan
+    // flags it and apply leaves the file's number alone.
+    #[test]
+    fn a_vinyl_position_is_written_except_into_an_mp4() {
+        let dir = TempDir::new("vinyl-position-edit");
+        let flac = dir.tagged_flac("x.flac", "Artist", "Title");
+        let m4a = dir.0.join("y.m4a");
+        std::fs::write(
+            &m4a,
+            include_bytes!("../../core/tests/fixtures/minimal.m4a"),
+        )
+        .unwrap();
+        let mut app = open_app(&dir);
+        let edit = |path: &PathBuf| TagEditDto {
+            path: path.to_string_lossy().into_owned(),
+            field: "track".into(),
+            value: Some("A1".into()),
+        };
+        let plan = app.preview_tag_edits(&[edit(&flac), edit(&m4a)]).unwrap();
+        let invalid = |path: &PathBuf| {
+            plan.changes
+                .iter()
+                .find(|change| change.path == path.to_string_lossy())
+                .map(|change| change.tag_changes[0].invalid)
+        };
+        assert_eq!(invalid(&flac), Some(false));
+        assert_eq!(invalid(&m4a), Some(true));
+        app.apply(&plan).unwrap();
+        let track = |path: &PathBuf| {
+            TagEngine::read(path)
+                .unwrap()
+                .tags
+                .get(&TagField::TrackNumber)
+                .cloned()
+        };
+        assert_eq!(track(&flac).as_deref(), Some("A1"));
+        assert_eq!(track(&m4a), None);
+    }
+
     // #353: the manual vinyl split stages the raw side position into a
     // `custom:POSITION` edit (so %position% works for hand-split files, like it
     // does after an import, #352). That relies on a custom-field edit flowing
@@ -8091,22 +8148,25 @@ mod tests {
         let dir = TempDir::new("fromname-probes");
         let fits = dir.tagged_flac("01 - Autechre - Gantz Graf.flac", "Autechre", "Gantz Graf");
         let vinyl = dir.tagged_flac("A1 - Autechre - Cichli.flac", "Autechre", "Cichli");
+        let bonus = dir.tagged_flac("Bonus - Autechre - Fold4.flac", "Autechre", "Fold4");
         let junk = dir.tagged_flac("track05.flac", "Autechre", "Pen Expers");
         let app = open_app(&dir);
 
         let probes = app
             .probe_tags_from_names(
                 "%track% - %artist% - %title%[ (%comment%)]",
-                &[fits, vinyl, junk],
+                &[fits, vinyl, bonus, junk],
             )
             .unwrap();
         assert_eq!(probes.fields, vec!["track", "artist", "title", "comment"]);
-        assert_eq!(probes.files.len(), 3);
+        assert_eq!(probes.files.len(), 4);
         assert!(probes.files[0].matched);
         assert!(probes.files[0].invalid.is_empty());
-        assert_eq!(probes.files[1].invalid, vec!["track".to_string()]);
-        assert!(!probes.files[2].matched);
-        assert_eq!(probes.files[2].subject, "track05");
+        // A vinyl position is a track number (#641); a word is not.
+        assert!(probes.files[1].invalid.is_empty());
+        assert_eq!(probes.files[2].invalid, vec!["track".to_string()]);
+        assert!(!probes.files[3].matched);
+        assert_eq!(probes.files[3].subject, "track05");
 
         assert!(app
             .probe_tags_from_names("%artist% - [%title%", &[])
@@ -8122,7 +8182,7 @@ mod tests {
         let two = dir.tagged_flac("b.flac", "Old", "Old");
         let app = open_app(&dir);
         let text =
-            "Side A\n1. Autechre - Cichli\n\nA2. Autechre - Pen Expers\n3. Autechre - Fold4\n";
+            "Side A\n1. Autechre - Cichli\n\nBonus. Autechre - Pen Expers\n3. Autechre - Fold4\n";
 
         let probe = app
             .probe_text_lines(
@@ -8144,7 +8204,7 @@ mod tests {
             vec![
                 ("Side A", false, None),
                 ("1. Autechre - Cichli", true, Some(one.as_str())),
-                ("A2. Autechre - Pen Expers", true, Some(two.as_str())),
+                ("Bonus. Autechre - Pen Expers", true, Some(two.as_str())),
                 ("3. Autechre - Fold4", true, None),
             ]
         );
@@ -8979,7 +9039,8 @@ mod tests {
         assert!(!field_value_invalid("track", Some("7")));
         assert!(!field_value_invalid("disc", Some("2")));
         assert!(!field_value_invalid("tracktotal", Some("12")));
-        assert!(field_value_invalid("track", Some("A1"))); // vinyl-style — dropped
+        assert!(!field_value_invalid("track", Some("A1"))); // a vinyl position (#641)
+        assert!(field_value_invalid("tracktotal", Some("A1"))); // a total is a count
         assert!(field_value_invalid("track", Some("7/12"))); // pair belongs in two fields
         assert!(field_value_invalid("disc", Some("one")));
 

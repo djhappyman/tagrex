@@ -161,6 +161,8 @@ function mockNameSubject(path, mask) {
 // The real bidirectional grammar is mask.rs, and this is not a second
 // implementation of it — anything subtle must be checked in the native app.
 const MOCK_INTEGER_FIELDS = ["track", "tracktotal", "disc", "disctotal"];
+// A track number the backend accepts: digits, or a vinyl position (#641).
+const mockTrackNumberOk = (value) => /^(?:\d+|[A-Za-z]{1,2}\d{0,3}|\d{1,3}[A-Za-z])$/.test(value);
 // The first of the lines with the commonest tab count — the backend's
 // `typical_text_list_line` (#521).
 function mockTypicalLine(lines) {
@@ -513,7 +515,7 @@ function mockInvoke(cmd, args) {
         .map((line) => {
           const fields = mockExtractFromName(mask, line);
           if (!fields) return { line, matched: false, fields: [], invalid: [], path: null };
-          const invalid = fields.filter(([f, v]) => f === "track" && !/^\d+$/.test(v)).map(([f]) => f);
+          const invalid = fields.filter(([f, v]) => f === "track" && !mockTrackNumberOk(v)).map(([f]) => f);
           return { line, matched: true, fields, invalid, path: args.paths[next++] ?? null };
         });
       return Promise.resolve({ fields: columns, lines, spare_files: Math.max(0, args.paths.length - next) });
@@ -527,7 +529,7 @@ function mockInvoke(cmd, args) {
       const files = args.paths.map((path) => {
         const subject = mockNameSubject(path, args.mask);
         const fields = mockExtractFromName(args.mask, subject);
-        const invalid = (fields || []).filter(([f, v]) => f === "track" && !/^\d+$/.test(v)).map(([f]) => f);
+        const invalid = (fields || []).filter(([f, v]) => f === "track" && !mockTrackNumberOk(v)).map(([f]) => f);
         return { subject, fields: fields || [], matched: !!fields, invalid };
       });
       return Promise.resolve({ fields: columns, files });
