@@ -133,6 +133,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   in the generator's labels, a reference to a button by a name it does not
   have, and locks and undo batches each called two different things
   ([#634](https://github.com/tagrex/tagrex/issues/634)).
+- Ukrainian: wording fixes from a translation review, among them
+  Russianisms, words used in a meaning they do not have (a keyboard layout
+  for reorganising, "throw" for drop), slang, and a folder and a file name
+  each called two different things. Russian and Ukrainian also counted
+  merged field changes in the wrong case
+  ([#635](https://github.com/tagrex/tagrex/issues/635)).
 
 ## [1.1.1] - 2026-11-02
 

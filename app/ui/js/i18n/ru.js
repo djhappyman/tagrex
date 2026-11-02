@@ -412,7 +412,7 @@ export const ru = {
   "unit.entry": { one: "{n} запись", few: "{n} записи", many: "{n} записей" },
   "unit.releaseTrack": { one: "{n} трек релиза", few: "{n} трека релиза", many: "{n} треков релиза" },
   "unit.lengthDisagrees": { one: "{n} длительность расходится", few: "{n} длительности расходятся", many: "{n} длительностей расходятся" },
-  "unit.fieldChange": { one: "{n} правку полей", few: "{n} правки полей", many: "{n} правок полей" },
+  "unit.fieldChange": { one: "{n} правка полей", few: "{n} правки полей", many: "{n} правок полей" },
   "online.found": "Найдено: {entries}",
   "match.sameLength": "{tracks} одинаковой длительности, не тронуты",
   "match.leftOut": "не вошло: {tracks}",
@@ -432,7 +432,7 @@ export const ru = {
   "toast.online.selectImport": "Сначала выберите треки, в которые импортировать",
   "toast.online.previewCover": "{files}: показана обложка — нажмите «Применить»",
   "toast.online.savedImages": "Рядом с треками сохранено: {images}",
-  "toast.import.merged": "Из Discogs в несохранённые правки внесено {changes}{cover}",
+  "toast.import.merged": "Несохранённые правки дополнены из Discogs: {changes}{cover}",
   "toast.import.nothingNew": "Из этого релиза импортировать нечего",
   // ---- columns, the rule chain, the player, settings actions ----
   "toast.columns.needPattern": "Колонке нужен шаблон",
