@@ -165,6 +165,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Converting a tag block or changing its ID3v2 revision keeps the leading
   zero of track and disc numbers too
   ([#639](https://github.com/tagrex/tagrex/issues/639)).
+- A vinyl track position such as `B1/04` in an MP3 is no longer deleted by a
+  save. It showed as the track total and any save, even of an unrelated
+  field, dropped the frame; it now reads as track `B1` of `04` and goes back
+  as the file had it. An APE tag kept the position on read but wrote `0/04`
+  and lost a disc side such as `A`; it keeps both now
+  ([#640](https://github.com/tagrex/tagrex/issues/640)).
 
 ## [1.1.1] - 2026-11-02
 

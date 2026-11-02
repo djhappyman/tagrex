@@ -3401,3 +3401,114 @@ fn a_block_write_keeps_the_leading_zero() {
         }
     }
 }
+
+/// #640: a vinyl position in `TRCK`, as `B1/04`, is not a pair of numbers, so
+/// the backend handed the whole text over as the track total and dropped it on
+/// the way out: an MP3 showed a total of `B1/04` and lost the frame to any save.
+/// APE read it right and wrote `0/04`, losing a disc side `A` with it.
+#[test]
+fn a_vinyl_track_position_survives_a_save() {
+    use lofty::ape::{ApeItem, ApeTag};
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{Frame, FrameId, Id3v2Tag, TextInformationFrame};
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::TagExt;
+    use lofty::tag::ItemValue;
+    use lofty::TextEncoding;
+
+    let pairs = |tags: &BTreeMap<TagField, String>| {
+        [
+            TagField::TrackNumber,
+            TagField::TrackTotal,
+            TagField::DiscNumber,
+            TagField::DiscTotal,
+        ]
+        .map(|field| tags.get(&field).cloned())
+    };
+    let some = |value: &str| Some(value.to_string());
+    let frame_text = |path: &PathBuf, id: &str| -> Option<String> {
+        let mut file = std::fs::File::open(path).unwrap();
+        MpegFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .id3v2()?
+            .get_text(&FrameId::Valid(id.into()))
+            .map(str::to_string)
+    };
+
+    for (trck, tpos, expected) in [
+        ("B1/04", "A", [some("B1"), some("04"), some("A"), None]),
+        ("A/04", "1/2", [some("A"), some("04"), some("1"), some("2")]),
+        ("12a", "B/2", [some("12a"), None, some("B"), some("2")]),
+    ] {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-test-vinyl-{}.mp3",
+            std::process::id()
+        ));
+        std::fs::write(&path, minimal_mp3()).expect("write fixture");
+        let mut seeded = Id3v2Tag::new();
+        for (id, value) in [("TIT2", "Title"), ("TRCK", trck), ("TPOS", tpos)] {
+            seeded.insert(Frame::Text(TextInformationFrame::new(
+                FrameId::Valid(id.into()),
+                TextEncoding::UTF8,
+                value.to_string(),
+            )));
+        }
+        seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+        let read = TagEngine::read(&path).expect("read tags");
+        assert_eq!(pairs(&read.tags), expected, "read of {trck} {tpos}");
+
+        // An unrelated edit puts both frames back as they were.
+        let mut tags = read.tags.clone();
+        tags.insert(TagField::Title, "Edited".to_string());
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format: read.format,
+            tags,
+        })
+        .expect("write tags");
+        assert_eq!(frame_text(&path, "TRCK").as_deref(), Some(trck));
+        assert_eq!(frame_text(&path, "TPOS").as_deref(), Some(tpos));
+
+        // And so does a block write, as an ID3v2.3 or as APE.
+        let content = TagEngine::read_block(&path, TagBlockKind::Id3v2)
+            .unwrap()
+            .expect("an ID3v2 block");
+        assert_eq!(pairs(&content.tags), expected, "block of {trck} {tpos}");
+        TagEngine::write_block(
+            &path,
+            TagBlockKind::Id3v2,
+            Some(Id3v2Revision::V3),
+            &content,
+        )
+        .unwrap();
+        assert_eq!(frame_text(&path, "TRCK").as_deref(), Some(trck));
+        TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+        let ape = TagEngine::read_block(&path, TagBlockKind::Ape)
+            .unwrap()
+            .expect("an APE block");
+        std::fs::remove_file(&path).ok();
+        assert_eq!(pairs(&ape.tags), expected, "APE block of {trck} {tpos}");
+    }
+
+    // An APE tag of its own.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-vinyl-{}.wv",
+        std::process::id()
+    ));
+    std::fs::write(&path, MINIMAL_WAVPACK).expect("write fixture");
+    let mut ape = ApeTag::new();
+    for (key, value) in [("Title", "Title"), ("Track", "B1/04"), ("Disc", "A")] {
+        ape.insert(ApeItem::new(key.to_string(), ItemValue::Text(value.to_string())).unwrap());
+    }
+    ape.save_to_path(&path, WriteOptions::default()).unwrap();
+    let read = TagEngine::read(&path).expect("read tags");
+    TagEngine::write(&read).expect("write tags");
+    let back = TagEngine::read(&path).expect("read tags");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        pairs(&back.tags),
+        [some("B1"), some("04"), some("A"), None],
+        "APE"
+    );
+}

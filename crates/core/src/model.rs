@@ -13,7 +13,9 @@ use lofty::error::{FileEncodingError, FileParseError, TagEncodingError};
 use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use lofty::flac::FlacFile;
 use lofty::id3::v1::Id3v1Tag;
-use lofty::id3::v2::{BinaryFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version};
+use lofty::id3::v2::{
+    BinaryFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version, TextInformationFrame,
+};
 use lofty::iff::aiff::{AiffFile, AiffTextChunks};
 use lofty::iff::wav::{RiffInfoList, WavFile};
 use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst};
@@ -1386,6 +1388,10 @@ fn insert_concrete_items(
     // several values — is the file stating several values, and they
     // are joined the way a multi-value field is (#609). Keeping only
     // the last showed one of them and let any edit drop the rest.
+    if tag_type == TagType::Id3v2 {
+        split_unparsed_number_pair(tags, &TagField::TrackNumber, &TagField::TrackTotal);
+        split_unparsed_number_pair(tags, &TagField::DiscNumber, &TagField::DiscTotal);
+    }
     let mut repeated = std::collections::BTreeSet::new();
     for (name, value) in custom {
         // A Vorbis track or disc number as the file spells it (#638): it only
@@ -2332,7 +2338,8 @@ fn number_pair_as_spelled(
 
 /// The conversion to ID3v2 builds `TRCK` and `TPOS` from the numbers as
 /// integers, so a model's `01` went out as `1` (#638); this spells them the
-/// model's way again.
+/// model's way again. A pair that is not numbers at all, as a vinyl position
+/// `B1/04`, the conversion drops, so it goes on as the model states it (#640).
 fn spell_id3v2_number_pairs(tag: &mut Id3v2Tag, tags: &TagMap) {
     tag.retain_mut(|frame| {
         if let Frame::Text(text) = frame {
@@ -2342,15 +2349,30 @@ fn spell_id3v2_number_pairs(tag: &mut Id3v2Tag, tags: &TagMap) {
         }
         true
     });
+    for id in ["TRCK", "TPOS"] {
+        let Some((number, total)) = number_pair_fields(id) else {
+            continue;
+        };
+        if let Some(text) = verbatim_number_pair(&number, &total, tags) {
+            tag.insert(Frame::Text(TextInformationFrame::new(
+                FrameId::Valid(id.into()),
+                TextEncoding::UTF8,
+                text,
+            )));
+        }
+    }
 }
 
 /// APE's `Track` and `Disc`, built from the numbers as integers the way ID3v2's
-/// `TRCK` is, spelled the model's way again (#638).
+/// `TRCK` is, spelled the model's way again (#638), and a pair that is not
+/// numbers put back as the model states it (#640).
 fn spell_ape_number_pairs(tag: &mut ApeTag, tags: &TagMap) {
     for name in ["Track", "Disc"] {
-        let spelled = tag.get(name).and_then(|item| {
-            let (number, total) = number_pair_fields(name)?;
-            let text = item.value().text()?;
+        let Some((number, total)) = number_pair_fields(name) else {
+            continue;
+        };
+        let spelled = verbatim_number_pair(&number, &total, tags).or_else(|| {
+            let text = tag.get(name)?.value().text()?;
             Some(number_pair_as_spelled(text, &number, &total, tags))
         });
         if let Some(Ok(item)) =
@@ -2359,6 +2381,54 @@ fn spell_ape_number_pairs(tag: &mut ApeTag, tags: &TagMap) {
             tag.insert(item);
         }
     }
+}
+
+/// The text of a number pair the model states with something other than
+/// digits, as a vinyl position `B1` of `04` (#640), or `None` when both parts
+/// are numbers and the backend's own conversion writes the pair.
+fn verbatim_number_pair(number: &TagField, total: &TagField, tags: &TagMap) -> Option<String> {
+    let part = |field: &TagField| {
+        tags.get(field)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+    };
+    let (number, total) = (part(number), part(total));
+    let numeric = |value: Option<&str>| value.is_none_or(|value| value.parse::<u32>().is_ok());
+    if numeric(number) && numeric(total) {
+        return None;
+    }
+    Some(match (number, total) {
+        (Some(number), Some(total)) => format!("{number}/{total}"),
+        (Some(number), None) => number.to_string(),
+        // How the backend states a total without a number.
+        (None, Some(total)) => format!("0/{total}"),
+        (None, None) => return None,
+    })
+}
+
+/// A number pair the backend could not split into integers, which an ID3v2
+/// read hands over whole as the total (#640): a vinyl position `B1/04` showed
+/// as a track total of `B1/04` and no track number. It is split here the way a
+/// pair of numbers is.
+fn split_unparsed_number_pair(tags: &mut TagMap, number: &TagField, total: &TagField) {
+    if tags.contains_key(number) {
+        return;
+    }
+    let Some(text) = tags
+        .get(total)
+        .filter(|text| text.trim().parse::<u32>().is_err())
+    else {
+        return;
+    };
+    let (first, second) = match text.split_once('/') {
+        Some((first, second)) => (first.trim().to_string(), Some(second.trim().to_string())),
+        None => (text.trim().to_string(), None),
+    };
+    tags.insert(number.clone(), first);
+    match second.filter(|second| !second.is_empty()) {
+        Some(second) => tags.insert(total.clone(), second),
+        None => tags.remove(total),
+    };
 }
 
 /// Put a number pair's own digits back on the fields a read parsed it into
