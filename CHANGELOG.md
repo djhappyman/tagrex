@@ -144,6 +144,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and a release *Release* or *Veröffentlichung*. It now says *du*, *Track*,
   *Preset* and *Release* throughout, and a vinyl disc is no longer a CD
   ([#636](https://github.com/tagrex/tagrex/issues/636)).
+- Italian: English jargon (staging, batch, rate limit, lookup, default and
+  more) is replaced with ordinary Italian, a release is always *release*
+  rather than sometimes *uscita*, two messages and a list heading agree
+  with their subject, and field names use Italian capitalisation
+  ([#637](https://github.com/tagrex/tagrex/issues/637)).
 
 ## [1.1.1] - 2026-11-02
 
