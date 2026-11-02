@@ -679,6 +679,7 @@ export const de = {
   "error.mask.unbalancedSection": "Unausgeglichene Abschnittsklammern",
   "error.mask.unterminatedQuote": "Nicht geschlossenes Anführungszeichen: Ein ' muss durch ein weiteres ' geschlossen werden",
   "error.plan.stale": "Die Datei hat sich auf der Festplatte geändert, seit der Plan erstellt wurde: {path}",
+  "error.plan.changedSinceApplied": "Nicht rückgängig gemacht: Die Datei wurde seit dem Anwenden dieser Änderung bearbeitet, und das Rückgängigmachen würde diese Bearbeitung überschreiben. Machen Sie zuerst die spätere Änderung rückgängig: {path}",
   "error.plan.renameCollision": "Dort liegt bereits eine Datei: {path}",
   "error.plan.outsideRoot": "Dieser Pfad liegt außerhalb des erlaubten Stammordners: {path}",
   "error.plan.cancelled": "Anwenden abgebrochen",

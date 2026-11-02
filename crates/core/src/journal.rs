@@ -56,6 +56,22 @@ pub struct AppliedBatch {
     /// matches. Empty for a batch recorded before this existed; its copies are
     /// removed without the check, as they always were.
     pub copy_stamps: Vec<CopyStamp>,
+    /// What each changed field read as once the batch was written (#658). Undo
+    /// refuses a file whose fields have changed since, rather than writing the
+    /// old values over somebody's later edit. Empty for a batch recorded before
+    /// this existed; it is undone without the check, as it always was.
+    pub applied_values: Vec<AppliedValue>,
+}
+
+/// One field of one file as a batch left it (#658).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppliedValue {
+    /// Where the file was once the batch was written: its rename target if the
+    /// batch moved it.
+    pub path: PathBuf,
+    pub field: TagField,
+    /// `None` when the field read as absent.
+    pub value: Option<String>,
 }
 
 /// A file's size and modification time (#604): enough to tell the copy a batch
@@ -302,6 +318,13 @@ impl SqliteJournal {
                  path        TEXT NOT NULL,
                  len         INTEGER NOT NULL,
                  modified_ns INTEGER NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS applied_values (
+                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                 batch_id INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+                 path     TEXT NOT NULL,
+                 field    TEXT NOT NULL,
+                 value    TEXT
              );",
         )?;
         // `copied` (#153) arrived after the table did, and a journal from an
@@ -341,7 +364,8 @@ impl SqliteJournal {
              CREATE INDEX IF NOT EXISTS idx_created_dirs_batch ON created_dirs(batch_id);
              CREATE INDEX IF NOT EXISTS idx_removed_dirs_batch ON removed_dirs(batch_id);
              CREATE INDEX IF NOT EXISTS idx_allowed_roots_batch ON allowed_roots(batch_id);
-             CREATE INDEX IF NOT EXISTS idx_copy_stamps_batch ON copy_stamps(batch_id);",
+             CREATE INDEX IF NOT EXISTS idx_copy_stamps_batch ON copy_stamps(batch_id);
+             CREATE INDEX IF NOT EXISTS idx_applied_values_batch ON applied_values(batch_id);",
         )?;
         Ok(Self { conn })
     }
@@ -501,6 +525,19 @@ impl UndoJournal for SqliteJournal {
             )?;
         }
 
+        for applied in &batch.applied_values {
+            tx.execute(
+                "INSERT INTO applied_values (batch_id, path, field, value) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    batch_id,
+                    applied.path.to_string_lossy(),
+                    applied.field.to_storage_key(),
+                    applied.value,
+                ],
+            )?;
+        }
+
         tx.commit()?;
         Ok(BatchId(batch_id))
     }
@@ -601,6 +638,7 @@ impl SqliteJournal {
             removed_dirs: self.load_paths("removed_dirs", id)?,
             allowed_roots: self.load_paths("allowed_roots", id)?,
             copy_stamps: self.load_copy_stamps(id)?,
+            applied_values: self.load_applied_values(id)?,
         })
     }
 
@@ -613,6 +651,20 @@ impl SqliteJournal {
                 path: PathBuf::from(row.get::<_, String>(0)?),
                 len: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
                 modified_ns: row.get::<_, i64>(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    fn load_applied_values(&self, batch_id: i64) -> Result<Vec<AppliedValue>, JournalError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, field, value FROM applied_values WHERE batch_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![batch_id], |row| {
+            Ok(AppliedValue {
+                path: PathBuf::from(row.get::<_, String>(0)?),
+                field: TagField::from_storage_key(&row.get::<_, String>(1)?),
+                value: row.get::<_, Option<String>>(2)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)

@@ -247,6 +247,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   it under a description of its own (such as `ID3v1 Comment`); the machine
   comment frames that hold gapless and loudness data stay
   ([#657](https://github.com/tagrex/tagrex/issues/657)).
+- Undoing an older change no longer silently overwrites edits made to the
+  same fields since, by a later change or by another program: the undo is
+  refused, naming the file, and nothing is written. Undo the later change
+  first. Changes recorded by an earlier version are undone as before
+  ([#658](https://github.com/tagrex/tagrex/issues/658)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -681,6 +681,7 @@ export const es = {
   "error.mask.unbalancedSection": "Corchetes de sección desequilibrados",
   "error.mask.unterminatedQuote": "Comilla sin cerrar: una ' debe cerrarse con otra '",
   "error.plan.stale": "El archivo cambió en el disco después de crear el plan: {path}",
+  "error.plan.changedSinceApplied": "No se deshizo: el archivo se editó después de aplicar este cambio, y deshacerlo sobrescribiría esa edición. Deshaga primero el cambio posterior: {path}",
   "error.plan.renameCollision": "Ya hay un archivo ahí: {path}",
   "error.plan.outsideRoot": "Esa ruta queda fuera de la raíz permitida: {path}",
   "error.plan.cancelled": "Aplicación cancelada",

@@ -8,14 +8,14 @@
 //! of plans. **No module writes tags or renames files directly; all writes go
 //! through [`Executor`].** This is an invariant, not a preference.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
-use crate::journal::{AppliedBatch, BatchId, CopyStamp, JournalError, UndoJournal};
+use crate::journal::{AppliedBatch, AppliedValue, BatchId, CopyStamp, JournalError, UndoJournal};
 use crate::model::{
     CoverArt, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine, TagField, TrackFile,
 };
@@ -302,6 +302,7 @@ impl Executor {
             removed_dirs,
             allowed_roots: roots,
             copy_stamps: copy_stamps(plan),
+            applied_values: applied_values(plan),
         };
         match journal.record(&batch) {
             Ok(id) => batch.id = id,
@@ -480,6 +481,8 @@ impl Executor {
                 ensure_untransfer_safe(to, from, change.copy, &batch.copy_stamps)?;
             }
         }
+
+        ensure_unchanged_since_applied(&batch)?;
 
         // Reverse the transfers first, so tag restoration finds each file back
         // at its original path. Undoing a copy means removing the copy — the
@@ -808,6 +811,67 @@ fn ensure_untransfer_safe(
     } else {
         ensure_target_free(target, original, false)
     }
+}
+
+/// What each changed field of every file `plan` wrote in place reads as, once
+/// the batch is written (#658). A file that cannot be read gets nothing, and is
+/// undone unchecked. A copy is not here: undo removes it, under its stamp.
+fn applied_values(plan: &ChangePlan) -> Vec<AppliedValue> {
+    let mut values = Vec::new();
+    for change in &plan.changes {
+        if change.copy || change.tag_changes.is_empty() {
+            continue;
+        }
+        let path = effective_rename(change).unwrap_or(&change.path);
+        let Ok(current) = TagEngine::read(path) else {
+            continue;
+        };
+        values.extend(change.tag_changes.iter().map(|field_change| AppliedValue {
+            path: path.to_path_buf(),
+            field: field_change.field.clone(),
+            value: current.tags.get(&field_change.field).cloned(),
+        }));
+    }
+    values
+}
+
+/// Refuse to undo `batch` over a later edit (#658): every field it changed must
+/// still read as the batch left it, or as its `old` value already, where an
+/// earlier undo stopped part-way (#604). Checked for every file before any is
+/// touched, so a refusal writes nothing.
+fn ensure_unchanged_since_applied(batch: &AppliedBatch) -> Result<(), PlanError> {
+    let mut recorded: HashMap<&Path, Vec<&AppliedValue>> = HashMap::new();
+    for applied in &batch.applied_values {
+        recorded.entry(&applied.path).or_default().push(applied);
+    }
+    for change in &batch.plan.changes {
+        if change.copy {
+            continue;
+        }
+        let path = effective_rename(change).unwrap_or(&change.path);
+        let Some(values) = recorded.get(path) else {
+            continue;
+        };
+        // Where the file is now: back at its own path when an earlier undo
+        // already moved it there.
+        let now_at = match effective_rename(change) {
+            Some(target) if is_untransferred(target, &change.path, false) => &change.path,
+            _ => path,
+        };
+        let current = TagEngine::read(now_at)?;
+        for applied in values {
+            let now = current.tags.get(&applied.field);
+            let old = change
+                .tag_changes
+                .iter()
+                .find(|field_change| field_change.field == applied.field)
+                .and_then(|field_change| field_change.old.as_ref());
+            if now != applied.value.as_ref() && now != old {
+                return Err(PlanError::ChangedSinceApplied(now_at.to_path_buf()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The stamp of every copy `plan` made, read once the batch is written (#604).
@@ -1187,6 +1251,10 @@ pub enum PlanError {
     Stale(PathBuf),
     #[error("rename target already exists: {0}")]
     RenameCollision(PathBuf),
+    /// Undo found a field that has changed since the batch was applied (#658),
+    /// and would have written the old value over that later edit.
+    #[error("file changed since the batch was applied: {0}")]
+    ChangedSinceApplied(PathBuf),
     #[error("path resolves outside the allowed root: {0}")]
     OutsideRoot(PathBuf),
     #[error("journal error: {0}")]

@@ -683,6 +683,7 @@ export const it = {
   "error.mask.unbalancedSection": "Parentesi quadre sbilanciate",
   "error.mask.unterminatedQuote": "Apice non terminato: un ' deve essere chiuso da un altro '",
   "error.plan.stale": "Il file è cambiato su disco da quando il piano è stato creato: {path}",
+  "error.plan.changedSinceApplied": "Non annullato: il file è stato modificato dopo l'applicazione di questa modifica, e annullarla sovrascriverebbe quella modifica. Annulla prima la modifica successiva: {path}",
   "error.plan.renameCollision": "Un file è già lì: {path}",
   "error.plan.outsideRoot": "Quel percorso finisce fuori dalla cartella consentita: {path}",
   "error.plan.cancelled": "Applicazione annullata",

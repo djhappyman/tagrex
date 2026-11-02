@@ -684,6 +684,7 @@ export const uk = {
   "error.mask.unbalancedSection": "Непарні дужки секції",
   "error.mask.unterminatedQuote": "Незакрита лапка: ' має бути закрита іншою '",
   "error.plan.stale": "Файл змінився на диску відтоді, як було побудовано план: {path}",
+  "error.plan.changedSinceApplied": "Не скасовано: файл редагували після того, як цю зміну було застосовано, і скасування затерло б ту правку. Спершу скасуйте пізнішу зміну: {path}",
   "error.plan.renameCollision": "Там уже є файл: {path}",
   "error.plan.outsideRoot": "Цей шлях веде за межі дозволеного кореня: {path}",
   "error.plan.cancelled": "Застосування скасовано",

@@ -819,6 +819,10 @@ fn error_message(error: &AppError) -> MessageDto {
         },
         AppError::Plan(inner) => match inner {
             PlanError::Stale(path) => coded("error.plan.stale", arg("path", path.display())),
+            PlanError::ChangedSinceApplied(path) => coded(
+                "error.plan.changedSinceApplied",
+                arg("path", path.display()),
+            ),
             PlanError::RenameCollision(path) => {
                 coded("error.plan.renameCollision", arg("path", path.display()))
             }

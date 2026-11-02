@@ -683,6 +683,7 @@ export const ru = {
   "error.mask.unbalancedSection": "Непарные скобки секции",
   "error.mask.unterminatedQuote": "Незакрытая кавычка: ' должна быть закрыта другой '",
   "error.plan.stale": "Файл изменился на диске с тех пор, как был построен план: {path}",
+  "error.plan.changedSinceApplied": "Не отменено: файл правили после того, как это изменение было применено, и отмена затёрла бы ту правку. Сначала отмените более позднее изменение: {path}",
   "error.plan.renameCollision": "Там уже есть файл: {path}",
   "error.plan.outsideRoot": "Этот путь ведёт за пределы разрешённого корня: {path}",
   "error.plan.cancelled": "Применение отменено",

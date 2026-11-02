@@ -685,6 +685,7 @@ export const en = {
   "error.mask.unbalancedSection": "Unbalanced section brackets",
   "error.mask.unterminatedQuote": "Unterminated quote: a ' must be closed by another '",
   "error.plan.stale": "The file changed on disk since the plan was built: {path}",
+  "error.plan.changedSinceApplied": "Not undone: the file has been edited since this change was applied, and undoing it would overwrite that edit. Undo the later change first: {path}",
   "error.plan.renameCollision": "A file is already there: {path}",
   "error.plan.outsideRoot": "That path resolves outside the allowed root: {path}",
   "error.plan.cancelled": "Apply cancelled",

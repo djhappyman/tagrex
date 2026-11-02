@@ -683,6 +683,7 @@ export const fr = {
   "error.mask.unbalancedSection": "Crochets de section déséquilibrés",
   "error.mask.unterminatedQuote": "Apostrophe non fermée : une ' doit être fermée par une autre '",
   "error.plan.stale": "Le fichier a changé sur le disque depuis la création du plan : {path}",
+  "error.plan.changedSinceApplied": "Non annulé : le fichier a été modifié depuis l'application de ce changement, et l'annuler écraserait cette modification. Annulez d'abord le changement plus récent : {path}",
   "error.plan.renameCollision": "Un fichier s'y trouve déjà : {path}",
   "error.plan.outsideRoot": "Ce chemin sort de la racine autorisée : {path}",
   "error.plan.cancelled": "Application annulée",

@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tagrex_core::journal::{BatchId, CopyStamp, SqliteJournal, UndoJournal};
+use tagrex_core::journal::{AppliedValue, BatchId, CopyStamp, SqliteJournal, UndoJournal};
 use tagrex_core::model::{TagEngine, TagField};
 use tagrex_core::plan::{ChangePlan, Executor, FieldChange, FileChange};
 
@@ -368,6 +368,7 @@ fn the_journal_tables_are_indexed_by_their_parent() {
         "SELECT * FROM block_change_fields WHERE block_change_id = 1",
         "SELECT * FROM allowed_roots WHERE batch_id = 1",
         "SELECT * FROM copy_stamps WHERE batch_id = 1",
+        "SELECT * FROM applied_values WHERE batch_id = 1",
     ] {
         let plan: String = conn
             .query_row(&format!("EXPLAIN QUERY PLAN {query}"), [], |row| row.get(3))
@@ -401,4 +402,56 @@ fn the_stamp_of_a_copy_survives_a_restart() {
     let journal = SqliteJournal::open(&dir.db()).unwrap();
     let batch = journal.batch(id).unwrap().unwrap();
     assert_eq!(batch.copy_stamps, vec![CopyStamp::of(&target).unwrap()]);
+}
+
+/// What a batch left each field as (#658) is what undo checks the file
+/// against, so it has to be there after a restart.
+#[test]
+fn what_a_batch_left_survives_a_restart() {
+    let dir = TempDir::new("applied-values");
+    let track = dir.flac("track.flac");
+    let plan = ChangePlan {
+        description: "set".to_string(),
+        changes: vec![FileChange {
+            path: track.clone(),
+            tag_changes: vec![
+                FieldChange {
+                    field: TagField::Artist,
+                    old: None,
+                    new: Some("Y".to_string()),
+                },
+                FieldChange {
+                    field: TagField::Album,
+                    old: None,
+                    new: None,
+                },
+            ],
+            ..FileChange::default()
+        }],
+        ..ChangePlan::default()
+    };
+    let id = {
+        let mut journal = SqliteJournal::open(&dir.db()).unwrap();
+        Executor::apply(&plan, &mut journal, &roots(dir.path()))
+            .unwrap()
+            .id
+    };
+
+    let journal = SqliteJournal::open(&dir.db()).unwrap();
+    let batch = journal.batch(id).unwrap().unwrap();
+    assert_eq!(
+        batch.applied_values,
+        vec![
+            AppliedValue {
+                path: track.clone(),
+                field: TagField::Artist,
+                value: Some("Y".to_string()),
+            },
+            AppliedValue {
+                path: track,
+                field: TagField::Album,
+                value: None,
+            },
+        ]
+    );
 }

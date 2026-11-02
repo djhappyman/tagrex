@@ -1313,3 +1313,81 @@ fn an_undo_that_stopped_half_way_can_be_finished() {
     }
     assert!(journal.batches().unwrap().is_empty());
 }
+
+/// #658: undoing an older batch wrote its `old` values over every later edit of
+/// the same fields without a word.
+#[test]
+fn undo_refuses_to_overwrite_a_later_edit() {
+    let dir = TempDir::new("undo-later-edit");
+    let track = dir.flac("track.flac");
+    let mut journal = VecJournal::new();
+    let artist = |path: &Path| {
+        TagEngine::read(path)
+            .unwrap()
+            .tags
+            .get(&TagField::Artist)
+            .cloned()
+    };
+
+    let first = Executor::apply(
+        &set_artist(&track, None, Some("Y")),
+        &mut journal,
+        &roots(dir.path()),
+    )
+    .unwrap();
+    let later = Executor::apply(
+        &set_artist(&track, Some("Y"), Some("Z")),
+        &mut journal,
+        &roots(dir.path()),
+    )
+    .unwrap();
+
+    let refused = Executor::undo(&mut journal, first.id, &roots(dir.path()));
+    assert!(
+        matches!(&refused, Err(PlanError::ChangedSinceApplied(path)) if path == &track),
+        "{refused:?}"
+    );
+    assert_eq!(artist(&track).as_deref(), Some("Z"), "nothing was written");
+    assert_eq!(journal.batches().unwrap().len(), 2, "both batches stay");
+
+    // Undone newest first, both go through.
+    Executor::undo(&mut journal, later.id, &roots(dir.path())).unwrap();
+    Executor::undo(&mut journal, first.id, &roots(dir.path())).unwrap();
+    assert_eq!(artist(&track), None);
+    assert!(journal.batches().unwrap().is_empty());
+}
+
+/// #658, the other half: an edit outside the app is a later edit too, and a
+/// batch recorded before the check existed is undone as it always was.
+#[test]
+fn undo_checks_only_what_the_batch_recorded() {
+    let dir = TempDir::new("undo-unrecorded");
+    let track = dir.flac("track.flac");
+    let mut journal = VecJournal::new();
+    let batch = Executor::apply(
+        &set_artist(&track, None, Some("Y")),
+        &mut journal,
+        &roots(dir.path()),
+    )
+    .unwrap();
+    assert_eq!(batch.applied_values.len(), 1);
+
+    let mut file = TagEngine::read(&track).unwrap();
+    file.tags.insert(TagField::Artist, "Elsewhere".to_string());
+    TagEngine::write(&file).unwrap();
+    assert!(matches!(
+        Executor::undo(&mut journal, batch.id, &roots(dir.path())),
+        Err(PlanError::ChangedSinceApplied(_))
+    ));
+
+    // The same batch as an older build recorded it: no values, no check.
+    let mut old_journal = VecJournal::new();
+    let mut unrecorded = batch.clone();
+    unrecorded.applied_values.clear();
+    let id = old_journal.record(&unrecorded).unwrap();
+    Executor::undo(&mut old_journal, id, &roots(dir.path())).unwrap();
+    assert!(!TagEngine::read(&track)
+        .unwrap()
+        .tags
+        .contains_key(&TagField::Artist));
+}
