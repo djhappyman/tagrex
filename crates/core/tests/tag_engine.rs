@@ -2488,3 +2488,120 @@ fn an_ape_tag_misread_as_id3v1_is_never_written_over() {
     assert!(covers.is_err(), "the cover write went ahead");
     assert_eq!(before, after, "the file was touched");
 }
+
+/// #615: an ID3v2 tag holding only a picture hid the ID3v1 tag beside it — the
+/// file read as having no fields — and the next edit, keeping ID3v1 in step,
+/// rewrote it with the nothing it had read.
+#[test]
+fn values_in_id3v1_survive_an_id3v2_tag_that_holds_only_a_picture() {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v1::Id3v1Tag;
+    use lofty::prelude::TagExt;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-v1-behind-picture-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut v1 = Id3v1Tag::new();
+    v1.title = Some("V1 Title".to_string());
+    v1.artist = Some("V1 Artist".to_string());
+    v1.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let cover = CoverArt {
+        mime: "image/png".to_string(),
+        data: vec![0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5],
+        ..CoverArt::default()
+    };
+    TagEngine::write_covers(&path, std::slice::from_ref(&cover)).unwrap();
+
+    let read = TagEngine::read_with_props(&path).expect("read tags");
+    assert_eq!(
+        read.file.tags.get(&TagField::Title).map(String::as_str),
+        Some("V1 Title"),
+        "the ID3v1 values are hidden"
+    );
+    assert!(
+        read.blocks
+            .iter()
+            .any(|block| block.kind == TagBlockKind::Id3v1 && block.read_from),
+        "the report must say the values come from ID3v1, got {:?}",
+        read.blocks
+    );
+
+    let mut tags = read.file.tags.clone();
+    tags.insert(TagField::Genre, "House".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Mp3,
+        tags,
+    })
+    .expect("write tags");
+    let after = TagEngine::read(&path).expect("read tags").tags;
+    let v1_after = {
+        use lofty::config::ParseOptions;
+        use lofty::file::AudioFile;
+        use lofty::mpeg::MpegFile;
+        let mut file = std::fs::File::open(&path).unwrap();
+        MpegFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .id3v1()
+            .cloned()
+    };
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        after.get(&TagField::Title).map(String::as_str),
+        Some("V1 Title")
+    );
+    assert_eq!(
+        after.get(&TagField::Artist).map(String::as_str),
+        Some("V1 Artist")
+    );
+    let v1_after = v1_after.expect("ID3v1 tag kept");
+    assert_eq!(v1_after.title.as_deref(), Some("V1 Title"), "ID3v1 erased");
+    assert_eq!(
+        v1_after.artist.as_deref(),
+        Some("V1 Artist"),
+        "ID3v1 erased"
+    );
+}
+
+/// #615, the other half: most ID3v1 tags behind an empty ID3v2 tag are
+/// zero-filled, and their zero genre byte decodes to "Blues". Such a tag names
+/// no track, so it is not read in the empty block's place.
+#[test]
+fn a_zero_filled_id3v1_tag_is_not_read_in_place_of_an_empty_id3v2_tag() {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v1::Id3v1Tag;
+    use lofty::prelude::TagExt;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-zero-v1-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut v1 = Id3v1Tag::new();
+    v1.genre = Some(0);
+    v1.comment = Some(" ".repeat(28));
+    v1.save_to_path(&path, WriteOptions::default()).unwrap();
+    TagEngine::write_covers(
+        &path,
+        &[CoverArt {
+            mime: "image/png".to_string(),
+            data: vec![0x89, 0x50, 0x4e, 0x47, 1, 2, 3, 4, 5],
+            ..CoverArt::default()
+        }],
+    )
+    .unwrap();
+
+    let read = TagEngine::read_with_props(&path).expect("read tags");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(read.file.tags, BTreeMap::new());
+    assert!(
+        read.blocks
+            .iter()
+            .any(|block| block.kind == TagBlockKind::Id3v2 && block.read_from),
+        "got {:?}",
+        read.blocks
+    );
+}

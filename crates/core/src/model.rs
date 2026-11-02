@@ -1280,6 +1280,22 @@ fn raw_custom_fields(tags: &TagMap, tag_type: TagType) -> impl Iterator<Item = (
     })
 }
 
+/// Whether a block's values say what the track is: a title, an artist or an
+/// album that is not blank. What decides whether a block the read would not
+/// have chosen is read instead of an empty one (#615). Any field at all is not
+/// enough: in a real library nearly every ID3v1 tag behind an empty ID3v2 one
+/// was zero-filled, holding only the genre its zero byte decodes to ("Blues"),
+/// a comment of spaces, or a lone year — and reading that would show it and let
+/// the next write copy it into ID3v2.
+fn names_the_track(tags: &TagMap) -> bool {
+    [TagField::Title, TagField::Artist, TagField::Album]
+        .iter()
+        .any(|field| {
+            tags.get(field)
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+}
+
 /// The name the URL is stored under where the format has no frame for it.
 const URL_ITEM_NAME: &str = "WWW";
 
@@ -1368,12 +1384,26 @@ impl TagEngine {
         // consumes the tag to do it (#201). The choice itself is unchanged: the
         // prioritized block, else the primary one, else the first present.
         let primary = tagged_file.primary_tag_type();
-        let chosen = priority_type
+        let first_choice = priority_type
             .or_else(|| present.contains(&primary).then_some(primary))
             .or_else(|| present.first().copied());
+        // A block that holds no field at all is not where the values are while
+        // another block holds some (#615): an ID3v2 tag made only to carry a
+        // picture hid the ID3v1 tag beside it, and the next write, keeping the
+        // two in step, rewrote ID3v1 with the nothing it had read. So the others
+        // are tried in turn, and the first one that names the track is read
+        // instead — see [`names_the_track`] for why a field alone is not enough.
+        let candidates: Vec<TagType> = first_choice
+            .into_iter()
+            .chain(present.iter().copied().filter(|t| Some(*t) != first_choice))
+            .collect();
+        let mut chosen = first_choice;
 
         let mut tags = TagMap::new();
-        if let Some(tag) = chosen.and_then(|tag_type| tagged_file.remove(tag_type)) {
+        for candidate in candidates {
+            let Some(tag) = tagged_file.remove(candidate) else {
+                continue;
+            };
             let tag_type = tag.tag_type();
             for item in tag.items() {
                 // What made the file is not what the file is about (#197).
@@ -1428,6 +1458,16 @@ impl TagEngine {
                     }
                 }
                 insert_read_value(&mut tags, field, from_alias, value);
+            }
+            if Some(candidate) == first_choice {
+                if !tags.is_empty() {
+                    break;
+                }
+            } else if names_the_track(&tags) {
+                chosen = Some(candidate);
+                break;
+            } else {
+                tags.clear();
             }
         }
 

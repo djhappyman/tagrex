@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   written to: the write used to replace the APE tag and lose everything in it,
   and is now refused with an error instead
   ([#614](https://github.com/tagrex/tagrex/issues/614)).
+- The title, artist and album of an ID3v1 tag no longer disappear when the file
+  also has an ID3v2 tag with no fields in it, such as one added just to hold a
+  cover. They used to read as empty, and the next edit erased them from the
+  ID3v1 tag too
+  ([#615](https://github.com/tagrex/tagrex/issues/615)).
 
 ## [1.1.1] - 2026-11-02
 
