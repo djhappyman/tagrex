@@ -1154,6 +1154,14 @@ const FREEFORM_MEAN: &str = "com.apple.iTunes";
 /// named after the `name` half alone — because that is what a person sees, and
 /// what every other format would have called it.
 fn item_key_for_custom_name(tag_type: TagType, name: &str) -> Option<ItemKey> {
+    // The release country is one field under every format's own name for it
+    // (#612): `RELEASECOUNTRY` is that name only on Vorbis and APE, and written
+    // by name it went into ID3v2 and MP4 as an item nothing reads as the country.
+    if name.eq_ignore_ascii_case(RELEASE_COUNTRY)
+        && ItemKey::ReleaseCountry.map_key(tag_type).is_some()
+    {
+        return Some(ItemKey::ReleaseCountry);
+    }
     if tag_type == TagType::Mp4Ilst {
         if let Some(key) = ItemKey::from_key(tag_type, &format!("----:{FREEFORM_MEAN}:{name}")) {
             return Some(key);
@@ -2131,10 +2139,13 @@ fn sync_id3v1(path: &Path, tags: &TagMap) -> Result<(), TagIoError> {
 /// copyright, an INFO id it does not know) stays as the file has it, and a
 /// block nothing changed in is not written at all.
 fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
+    // The release country is a custom field with a standard item on each format
+    // (#612), so a RIFF INFO `ICNT` is the model's like the title is.
     let owned = |key: Option<ItemKey>, tag_type: TagType| {
         key.is_some_and(|key| {
             !is_provenance_key(key)
-                && !matches!(item_key_to_tag_field(key, tag_type), TagField::Custom(_))
+                && (key == ItemKey::ReleaseCountry
+                    || !matches!(item_key_to_tag_field(key, tag_type), TagField::Custom(_)))
         })
     };
     match container {
@@ -3426,6 +3437,10 @@ fn insert_read_value(tags: &mut TagMap, field: TagField, from_alias: bool, value
     }
 }
 
+/// The release country's field name: the portable spelling, which is what the
+/// import, the mask and the import settings know it by (#612).
+const RELEASE_COUNTRY: &str = "RELEASECOUNTRY";
+
 /// User-text (`TXXX`) names other taggers use for fields that have a standard
 /// frame of their own (#171). Folding them in means a file stops stating two
 /// labels or two media types, and — because a `TXXX` that is not in the model is
@@ -3436,10 +3451,15 @@ fn insert_read_value(tags: &mut TagMap, field: TagField, from_alias: bool, value
 /// differ from the standard frames (Camelot against musical, decimal against
 /// integer), so folding them would silently pick one and drop the other.
 /// Anything not listed keeps round-tripping as a `Custom` field.
+///
+/// `RELEASECOUNTRY` is here too (#612). Where it is the format's own name the
+/// generic tag carries it and it never reaches this table; where it arrives by
+/// name it is what an older version wrote into ID3v2 or MP4, and the standard
+/// item beside it is the current value.
 fn legacy_alias_field(name: &str) -> Option<TagField> {
     match name.trim().to_ascii_uppercase().as_str() {
         "LABEL" | "ORGANIZATION" => Some(TagField::Publisher),
-        "COUNTRY" => Some(TagField::Custom("RELEASECOUNTRY".to_string())),
+        "COUNTRY" | RELEASE_COUNTRY => Some(TagField::Custom(RELEASE_COUNTRY.to_string())),
         "ORIGINALMEDIATYPE" | "MEDIA" | "MEDIATYPE" => Some(TagField::MediaType),
         _ => None,
     }
@@ -3569,6 +3589,9 @@ fn item_key_to_tag_field(key: ItemKey, tag_type: TagType) -> TagField {
         ItemKey::CatalogNumber => TagField::CatalogNumber,
         ItemKey::AudioFileUrl => TagField::Url,
         ItemKey::OriginalMediaType => TagField::MediaType,
+        // Under its portable name whatever the format calls it (#612), or an
+        // ID3v2 file showed it as a field named after its `TXXX` description.
+        ItemKey::ReleaseCountry => TagField::Custom(RELEASE_COUNTRY.to_string()),
         other => TagField::Custom(
             custom_name_for_item_key(other, tag_type)
                 .map(str::to_string)
@@ -3774,10 +3797,11 @@ mod tests {
             alias("COUNTRY"),
             (TagField::Custom("RELEASECOUNTRY".to_string()), true)
         );
-        // The field we already write keeps its own name, and is not an alias.
+        // Arriving by name, the field's own spelling is what an older version
+        // wrote where the format has a standard item for it (#612).
         assert_eq!(
             alias("RELEASECOUNTRY"),
-            (TagField::Custom("RELEASECOUNTRY".to_string()), false)
+            (TagField::Custom("RELEASECOUNTRY".to_string()), true)
         );
         // Anything else is still an ordinary custom field.
         assert_eq!(
@@ -3794,6 +3818,40 @@ mod tests {
         assert_eq!(
             item_key_to_tag_field(ItemKey::Publisher, TagType::Id3v2),
             TagField::Publisher
+        );
+    }
+
+    /// #612: the release country goes through the backend's own key on every
+    /// format that has one, so each spells it its standard way, and reads back
+    /// under the one field name whatever the file called it.
+    #[test]
+    fn the_release_country_is_one_field_under_each_formats_name() {
+        let field = TagField::Custom("RELEASECOUNTRY".to_string());
+        for (tag_type, standard) in [
+            (TagType::Id3v2, "MusicBrainz Album Release Country"),
+            (
+                TagType::Mp4Ilst,
+                "----:com.apple.iTunes:MusicBrainz Album Release Country",
+            ),
+            (TagType::VorbisComments, "RELEASECOUNTRY"),
+            (TagType::Ape, "RELEASECOUNTRY"),
+            (TagType::RiffInfo, "ICNT"),
+        ] {
+            let key = item_key_for(&field, tag_type);
+            assert_eq!(key, Some(ItemKey::ReleaseCountry), "{tag_type:?}");
+            assert_eq!(ItemKey::ReleaseCountry.map_key(tag_type), Some(standard));
+            assert_eq!(
+                item_key_to_tag_field(ItemKey::ReleaseCountry, tag_type),
+                field
+            );
+        }
+        // Any spelling of the name is the same field.
+        assert_eq!(
+            item_key_for(
+                &TagField::Custom("ReleaseCountry".to_string()),
+                TagType::Id3v2
+            ),
+            Some(ItemKey::ReleaseCountry)
         );
     }
 

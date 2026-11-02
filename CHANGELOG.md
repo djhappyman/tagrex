@@ -149,6 +149,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rather than sometimes *uscita*, two messages and a list heading agree
   with their subject, and field names use Italian capitalisation
   ([#637](https://github.com/tagrex/tagrex/issues/637)).
+- The release country is one field under each format's standard name for
+  it: `TXXX:MusicBrainz Album Release Country` on ID3v2, the matching
+  freeform atom on MP4, `RELEASECOUNTRY` on Vorbis and APE and `ICNT` in a
+  RIFF INFO block. An ID3v2 file used to show the standard frame as a field
+  of its own, and an import or mask wrote the country as a `TXXX` or MP4
+  atom named `RELEASECOUNTRY` that other software does not read. Those older
+  items, and a `COUNTRY` one, now fold into the field and are rewritten under
+  the standard name on the next save
+  ([#612](https://github.com/tagrex/tagrex/issues/612)).
 
 ## [1.1.1] - 2026-11-02
 

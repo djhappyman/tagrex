@@ -307,6 +307,145 @@ fn a_legacy_user_text_field_folds_into_the_standard_one() {
     }
 }
 
+/// #612: the release country is one field under each format's own name for it.
+/// On ID3v2 the standard frame showed as a field named after its description,
+/// and the field the import and the mask fill went out as a `TXXX:RELEASECOUNTRY`
+/// (an MP4 freeform atom) that nothing reads as the country.
+#[test]
+fn the_release_country_is_written_under_each_formats_standard_name() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{ExtendedTextFrame, Frame, Id3v2Tag};
+    use lofty::iff::wav::{RiffInfoList, WavFile};
+    use lofty::mp4::{Atom, AtomData, AtomIdent};
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::TagExt;
+    use lofty::TextEncoding;
+
+    let country = TagField::Custom("RELEASECOUNTRY".to_string());
+    let standard = "MusicBrainz Album Release Country";
+    let user_text = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mpeg = MpegFile::read_from(&mut file, ParseOptions::new()).unwrap();
+        let mut frames: Vec<(String, String)> = mpeg
+            .id3v2()
+            .map(|tag| {
+                tag.iter()
+                    .filter_map(|frame| match frame {
+                        Frame::UserText(user) => {
+                            Some((user.description.to_string(), user.content.to_string()))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        frames.sort();
+        frames
+    };
+    let txxx = |description: &str, content: &str| {
+        Frame::UserText(ExtendedTextFrame::new(
+            TextEncoding::UTF8,
+            description.to_string(),
+            content.to_string(),
+        ))
+    };
+
+    // MP3 with an older version's frame beside the standard one: the standard
+    // value is the field, and a save leaves only the standard frame.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-country-both-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut seeded = Id3v2Tag::new();
+    seeded.insert(txxx("RELEASECOUNTRY", "DE"));
+    seeded.insert(txxx(standard, "FR"));
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(read.tags.get(&country).map(String::as_str), Some("FR"));
+    assert_eq!(
+        read.tags.get(&TagField::Custom(standard.to_string())),
+        None,
+        "the standard frame shows as a field of its own"
+    );
+    TagEngine::write(&read).expect("write tags");
+    let frames = user_text(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(frames, vec![(standard.to_string(), "FR".to_string())]);
+
+    // MP3 with only the older frame: its value moves to the standard name.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-country-old-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut seeded = Id3v2Tag::new();
+    seeded.insert(txxx("RELEASECOUNTRY", "DE"));
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(read.tags.get(&country).map(String::as_str), Some("DE"));
+    TagEngine::write(&read).expect("write tags");
+    let frames = user_text(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(frames, vec![(standard.to_string(), "DE".to_string())]);
+
+    // M4A with a freeform `COUNTRY` atom: read as the country, saved under the
+    // standard atom only.
+    let path = temp_m4a_path("country");
+    std::fs::write(&path, MINIMAL_M4A).expect("write fixture");
+    let mut ilst = mp4_ilst(&path);
+    ilst.insert(Atom::new(
+        AtomIdent::Freeform {
+            mean: "com.apple.iTunes".into(),
+            name: "COUNTRY".into(),
+        },
+        AtomData::UTF8("JP".into()),
+    ));
+    ilst.save_to_path(&path, WriteOptions::default()).unwrap();
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(read.tags.get(&country).map(String::as_str), Some("JP"));
+    TagEngine::write(&read).expect("write tags");
+    let atoms = mp4_freeform(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        atoms,
+        vec![(
+            "com.apple.iTunes".to_string(),
+            standard.to_string(),
+            vec!["JP".to_string()]
+        )]
+    );
+
+    // WAV with a RIFF INFO `ICNT`: an edit of the country reaches it.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-country-{}.wav",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_wav()).expect("write fixture");
+    let mut info = RiffInfoList::new();
+    info.insert("INAM".to_string(), "Title".to_string());
+    info.insert("ICNT".to_string(), "DE".to_string());
+    info.save_to_path(&path, WriteOptions::default()).unwrap();
+    let mut read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(read.tags.get(&country).map(String::as_str), Some("DE"));
+    read.tags.insert(country.clone(), "FR".to_string());
+    TagEngine::write(&read).expect("write tags");
+    let icnt = {
+        let mut file = std::fs::File::open(&path).unwrap();
+        WavFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .riff_info()
+            .and_then(|list| {
+                list.into_iter()
+                    .find(|(id, _)| id.as_str() == "ICNT")
+                    .map(|(_, value)| value.trim_end_matches('\0').to_string())
+            })
+    };
+    std::fs::remove_file(&path).ok();
+    assert_eq!(icnt.as_deref(), Some("FR"));
+}
+
 /// #172: the file listing needs the playing time next to the tags, and parsing
 /// every file twice to get it would double the cost of opening a library. One
 /// probe answers both, and `read` is that call minus the properties — so the two
@@ -1406,10 +1545,14 @@ fn a_custom_field_is_a_user_text_frame_named_after_the_field() {
 
     let mut written = user_text(&path);
     written.sort();
+    // The release country has a standard TXXX name of its own on ID3v2 (#612).
     assert_eq!(
         written,
         vec![
-            ("RELEASECOUNTRY".to_string(), "DE".to_string()),
+            (
+                "MusicBrainz Album Release Country".to_string(),
+                "DE".to_string()
+            ),
             ("TAGREX_CUSTOM_TEST".to_string(), "Energetic".to_string()),
         ],
         "the custom fields did not land in TXXX frames of their own names"
