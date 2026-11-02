@@ -3745,6 +3745,93 @@ fn a_wav_or_aiff_keeps_its_legacy_text_block_in_step() {
     std::fs::remove_file(&path).ok();
 }
 
+/// #652: a file that also has an ID3v2 chunk is read from that chunk alone, so
+/// a field only its INFO list or AIFF text chunks state never reaches the model,
+/// and the sync of #621 took that for a clear and deleted it on any save.
+#[test]
+fn a_legacy_text_item_the_id3v2_chunk_lacks_survives_a_save() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::Id3v2Tag;
+    use lofty::iff::aiff::{AiffFile, AiffTextChunks};
+    use lofty::iff::wav::{RiffInfoList, WavFile};
+    use lofty::prelude::{Accessor, TagExt};
+
+    let title_only = || {
+        let mut id3 = Id3v2Tag::new();
+        id3.set_title("Only title".to_string());
+        id3
+    };
+
+    // WAV.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-info-beside-id3-{}.wav",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_wav()).expect("write fixture");
+    let mut info = RiffInfoList::new();
+    for (id, value) in [("INAM", "Old title"), ("IART", "Artist"), ("IGNR", "House")] {
+        info.insert(id.to_string(), value.to_string());
+    }
+    info.save_to_path(&path, WriteOptions::default()).unwrap();
+    title_only()
+        .save_to_path(&path, WriteOptions::default())
+        .unwrap();
+    let mut file = TagEngine::read(&path).expect("read");
+    assert_eq!(
+        file.tags.get(&TagField::Genre),
+        None,
+        "read from ID3v2 alone"
+    );
+    file.tags.insert(TagField::Title, "New title".to_string());
+    TagEngine::write(&file).expect("write");
+    let mut handle = std::fs::File::open(&path).unwrap();
+    let mut items: Vec<(String, String)> = WavFile::read_from(&mut handle, ParseOptions::new())
+        .unwrap()
+        .riff_info()
+        .expect("INFO kept")
+        .into_iter()
+        .map(|(id, value)| (id.clone(), value.trim_end_matches('\0').to_string()))
+        .collect();
+    items.sort();
+    std::fs::remove_file(&path).ok();
+    let expected = [("IART", "Artist"), ("IGNR", "House"), ("INAM", "New title")];
+    assert_eq!(
+        items,
+        expected.map(|(id, value)| (id.to_string(), value.to_string()))
+    );
+
+    // AIFF.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-text-beside-id3-{}.aiff",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_aiff()).expect("write fixture");
+    let text = AiffTextChunks {
+        name: Some("Old title".to_string()),
+        author: Some("Artist".to_string()),
+        copyright: None,
+        annotations: Some(vec!["A note".to_string()]),
+        comments: None,
+    };
+    text.save_to_path(&path, WriteOptions::default()).unwrap();
+    title_only()
+        .save_to_path(&path, WriteOptions::default())
+        .unwrap();
+    let file = TagEngine::read(&path).expect("read");
+    TagEngine::write(&file).expect("write");
+    let mut handle = std::fs::File::open(&path).unwrap();
+    let after = AiffFile::read_from(&mut handle, ParseOptions::new())
+        .unwrap()
+        .text_chunks()
+        .cloned()
+        .expect("text chunks kept");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(after.name.as_deref(), Some("Only title"));
+    assert_eq!(after.author.as_deref(), Some("Artist"));
+    assert_eq!(after.annotations, Some(vec!["A note".to_string()]));
+}
+
 /// #623: the backend builds an ID3v2 tag's frames from a hash set, so the same
 /// tags came out in a different order on every save. Saves of the same tags
 /// are byte for byte the same now, and the frames a file already has keep the

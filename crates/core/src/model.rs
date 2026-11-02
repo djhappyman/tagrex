@@ -2446,7 +2446,17 @@ fn sync_id3v1(path: &Path, tags: &TagMap) -> Result<(), TagIoError> {
 /// created. What the model has no field of its own for (the encoder, a
 /// copyright, an INFO id it does not know) stays as the file has it, and a
 /// block nothing changed in is not written at all.
-fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
+///
+/// "Cleared" means the field read with a value (`before`) and the model now
+/// has none (#652). A file that also has an ID3v2 chunk reads from that alone,
+/// so a genre or an annotation only the legacy block states never reached the
+/// model, and taking it out as cleared deleted data nobody had touched.
+fn sync_iff_text(
+    path: &Path,
+    container: FileType,
+    tags: &TagMap,
+    before: &TagMap,
+) -> Result<(), TagIoError> {
     // The release country is a custom field with a standard item on each format
     // (#612), so a RIFF INFO `ICNT` is the model's like the title is.
     let owned = |key: Option<ItemKey>, tag_type: TagType| {
@@ -2471,6 +2481,9 @@ fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), 
                     .map(|key| item_key_to_tag_field(key, TagType::RiffInfo))
             };
             let model = |field: &TagField| tags.get(field).filter(|value| !value.is_empty());
+            let cleared = |field: &TagField| {
+                model(field).is_none() && before.get(field).is_some_and(|value| !value.is_empty())
+            };
             let mut synced = RiffInfoList::new();
             let mut written: std::collections::BTreeSet<TagField> = Default::default();
             for (id, value) in &old {
@@ -2495,6 +2508,8 @@ fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), 
                     if written.insert(field.clone()) {
                         synced.insert(id.clone(), agreeing_value(&field, value, &wanted));
                     }
+                } else if !cleared(&field) {
+                    synced.insert(id.clone(), value.clone());
                 }
             }
             // In any order: the backend's writer does not keep the list's.
@@ -2526,11 +2541,18 @@ fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), 
             };
             drop(file);
             let model = |field: &TagField| tags.get(field).filter(|value| !value.is_empty());
+            let cleared = |field: &TagField| {
+                model(field).is_none() && before.get(field).is_some_and(|value| !value.is_empty())
+            };
             let mut synced = old.clone();
-            if old.name.is_some() {
+            if old.name.is_some()
+                && (model(&TagField::Title).is_some() || cleared(&TagField::Title))
+            {
                 synced.name = model(&TagField::Title).cloned();
             }
-            if old.author.is_some() {
+            if old.author.is_some()
+                && (model(&TagField::Artist).is_some() || cleared(&TagField::Artist))
+            {
                 synced.author = model(&TagField::Artist).cloned();
             }
             // Annotations and comments both read as the comment. One that
@@ -2546,6 +2568,7 @@ fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), 
                 .chain(old.comments.iter().flatten().map(|note| note.text.as_str()))
                 .collect();
             let kept = stated.is_empty()
+                || (comment.is_none() && !cleared(&TagField::Comment))
                 || comment.is_some_and(|comment| stated.contains(&comment.as_str()));
             if !kept {
                 synced.annotations = comment.map(|comment| vec![comment.clone()]);
@@ -2742,15 +2765,22 @@ fn keep_spelled_number_pair(tags: &mut TagMap, number: &TagField, total: &TagFie
 /// took; for an AIFF it first tries to repair the container and write again, and
 /// only then gives up with an honest error rather than a false success.
 fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
+    // What the file read as before this write, so the legacy text blocks of a
+    // WAV or an AIFF lose only what the model cleared (#652).
+    let before = if matches!(container, FileType::Wav | FileType::Aiff) {
+        TagEngine::read(path)?.tags
+    } else {
+        TagMap::new()
+    };
     save_id3v2(path, container, tags)?;
     if id3v2_write_landed(path, container, tags)? {
-        return sync_iff_text(path, container, tags);
+        return sync_iff_text(path, container, tags, &before);
     }
     // The write was a silent no-op. Repair a broken AIFF once and retry.
     if container == FileType::Aiff && repair_aiff_container(path)? {
         save_id3v2(path, container, tags)?;
         if id3v2_write_landed(path, container, tags)? {
-            return sync_iff_text(path, container, tags);
+            return sync_iff_text(path, container, tags, &before);
         }
     }
     Err(TagIoError::Malformed(format!(

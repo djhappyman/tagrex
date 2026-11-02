@@ -223,6 +223,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - That change no longer reorders another field's values on the same save: two
   artists stay in the order the file had them
   ([#651](https://github.com/tagrex/tagrex/issues/651)).
+- A save no longer deletes what a WAV's INFO list or an AIFF's text chunks
+  state beside an ID3v2 chunk that lacks it, such as a genre or an
+  annotation only the legacy block had. Only a field you clear is taken out
+  of it ([#652](https://github.com/tagrex/tagrex/issues/652)).
 
 ## [1.1.1] - 2026-11-02
 
