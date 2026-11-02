@@ -120,6 +120,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   participle or verb next to a count, so they read wrong for a single file
   or track ("1 pista numeradas"). They are reworded to read right at any
   count ([#631](https://github.com/tagrex/tagrex/issues/631)).
+- Spanish: four messages called presets *ajustes*, the word for Settings,
+  and five said *carátula* where the rest of the interface says *portada*
+  ([#632](https://github.com/tagrex/tagrex/issues/632)).
 
 ## [1.1.1] - 2026-11-02
 
