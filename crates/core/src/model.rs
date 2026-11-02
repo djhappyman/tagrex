@@ -1609,7 +1609,16 @@ impl TagEngine {
         for cover in covers {
             tag.push_picture(picture_from_cover(cover));
         }
-        tag.save_to_path(path, write_options())?;
+        // A plain save of the generic tag drops every custom field a Vorbis
+        // Comments or APE tag holds (#201), so those go out the way a text write
+        // does, with the file's own fields (#606).
+        match tag.tag_type() {
+            TagType::VorbisComments | TagType::Ape => {
+                let file = Self::read(path)?;
+                save_with_custom_items(path, file.format.to_lofty(), tag, &file.tags)?;
+            }
+            _ => tag.save_to_path(path, write_options())?,
+        }
         Ok(())
     }
 }

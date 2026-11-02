@@ -471,6 +471,46 @@ fn cover_embed_read_remove_and_survives_a_tag_write() {
     std::fs::remove_file(&path).ok();
 }
 
+/// A cover write leaves the custom fields alone (#606): converting Vorbis
+/// Comments to the generic tag drops every item it has no key for, and a cover
+/// write that saved that tag deleted them.
+#[test]
+fn a_cover_write_keeps_the_custom_fields() {
+    let path = temp_flac_path("cover-custom");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let custom = TagField::Custom("TAGREX_CUSTOM_TEST".to_string());
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Title, "Title".to_string());
+    tags.insert(custom.clone(), "Kept".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Flac,
+        tags,
+    })
+    .unwrap();
+    let cover = CoverArt {
+        mime: "image/png".to_string(),
+        data: vec![0x89, 0x50, 0x4e, 0x47, 1, 2, 3],
+        ..CoverArt::default()
+    };
+
+    TagEngine::write_covers(&path, std::slice::from_ref(&cover)).unwrap();
+    let read = TagEngine::read(&path).unwrap();
+    assert_eq!(read.tags.get(&custom).map(String::as_str), Some("Kept"));
+    assert_eq!(
+        read.tags.get(&TagField::Title).map(String::as_str),
+        Some("Title")
+    );
+    assert_eq!(TagEngine::read_covers(&path).unwrap(), vec![cover]);
+
+    TagEngine::write_covers(&path, &[]).unwrap();
+    let read = TagEngine::read(&path).unwrap();
+    assert_eq!(read.tags.get(&custom).map(String::as_str), Some("Kept"));
+    assert!(TagEngine::read_covers(&path).unwrap().is_empty());
+
+    std::fs::remove_file(&path).ok();
+}
+
 /// The listing's cover flag (#447) comes from the same probe as the tags, and
 /// follows the picture through an embed and a removal.
 #[test]
