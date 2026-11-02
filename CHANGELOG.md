@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   something else no longer cuts it down to one. An M4A custom field filed under
   another tagger's namespace stays there when the file is saved
   ([#609](https://github.com/tagrex/tagrex/issues/609)).
+- The BPM of an M4A file written by another tagger is now shown, setting a BPM
+  writes one integer tempo instead of adding a second, text one next to the
+  old value, and clearing the tags removes the tempo too
+  ([#610](https://github.com/tagrex/tagrex/issues/610)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -16,7 +16,7 @@ use lofty::id3::v1::Id3v1Tag;
 use lofty::id3::v2::{BinaryFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version};
 use lofty::iff::aiff::{AiffFile, AiffTextChunks};
 use lofty::iff::wav::{RiffInfoList, WavFile};
-use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst};
+use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst};
 use lofty::mpeg::MpegFile;
 use lofty::musepack::MpcFile;
 use lofty::ogg::tag::VorbisComments;
@@ -1151,6 +1151,46 @@ fn ilst_custom_items(ilst: &Ilst) -> Vec<CustomItem> {
         .collect()
 }
 
+/// The MP4 tempo atom.
+const MP4_TEMPO: AtomIdent<'static> = AtomIdent::Fourcc(*b"tmpo");
+
+/// The tempo an MP4 `tmpo` atom states as an integer, which is how the format
+/// defines it (#610). The backend only turns a *text* `tmpo` into a generic
+/// item; the integer one every other tagger writes is left on the concrete tag,
+/// so this is where it is picked up.
+fn ilst_integer_tempo(ilst: &Ilst) -> Option<String> {
+    ilst.get(&MP4_TEMPO)?.data().find_map(|data| match data {
+        AtomData::SignedInteger(n) => Some(n.to_string()),
+        AtomData::UnsignedInteger(n) => Some(n.to_string()),
+        AtomData::Unknown { data, .. } if (1..=4).contains(&data.len()) => {
+            let n = data.iter().fold(0u32, |n, byte| n << 8 | u32::from(*byte));
+            Some(n.to_string())
+        }
+        _ => None,
+    })
+}
+
+/// The `tmpo` atom a BPM string is written as: a 2-byte big-endian integer,
+/// the size the format defines and the only one some readers look at (#610).
+/// A value that is not a tempo in that range is written as text, which is
+/// what the backend did with every value before.
+fn mp4_tempo_atom(bpm: &str) -> Atom<'static> {
+    let tempo = bpm
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .map(f64::round)
+        .filter(|n| (0.0..=f64::from(i16::MAX)).contains(n));
+    let data = match tempo {
+        Some(n) => AtomData::Unknown {
+            code: DataType::BeSignedInteger,
+            data: (n as i16).to_be_bytes().to_vec(),
+        },
+        None => AtomData::UTF8(bpm.to_string()),
+    };
+    Atom::new(MP4_TEMPO, data)
+}
+
 /// The values a custom field is written back as: the file's own, when it had
 /// several and the model still says what they read as joined together (#609),
 /// or else the model's one value. An untouched field therefore goes back the
@@ -1317,7 +1357,17 @@ impl TagEngine {
             // The rest of the fields are the format-specific items the generic
             // tag has no key for, which it therefore cannot hand over at all
             // (#201) — they come off the concrete tag, under their own names.
-            let custom = custom_items(path, container, tag)?;
+            let custom = if tag_type == TagType::Mp4Ilst {
+                // One conversion serves both the custom fields and the integer
+                // tempo the generic tag left behind (#610).
+                let ilst = Ilst::from(tag);
+                if let Some(bpm) = ilst_integer_tempo(&ilst) {
+                    tags.entry(TagField::Bpm).or_insert(bpm);
+                }
+                ilst_custom_items(&ilst)
+            } else {
+                custom_items(path, container, tag)?
+            };
             // A name the block repeats — a comment stated twice, an atom with
             // several values — is the file stating several values, and they
             // are joined the way a multi-value field is (#609). Keeping only
@@ -2752,6 +2802,13 @@ fn save_with_custom_items(
                     },
                     AtomData::UTF8(value.to_string()),
                 ));
+            }
+            // The tempo is the model's to state, once and as an integer
+            // (#610). The conversion above writes it as text and leaves the
+            // file's own integer atom beside it; both go.
+            merged.remove(&MP4_TEMPO).for_each(drop);
+            if let Some(bpm) = tags.get(&TagField::Bpm) {
+                merged.insert(mp4_tempo_atom(bpm));
             }
             merged.save_to_path(path, write_options())?;
         }

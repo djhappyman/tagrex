@@ -2264,3 +2264,82 @@ fn a_repeated_custom_comment_survives_an_unrelated_edit() {
     std::fs::remove_file(&path).ok();
     assert_eq!(values, vec!["one".to_string(), "two".to_string()]);
 }
+
+/// #610: MP4 defines `tmpo` as an integer, which is what other taggers write.
+/// The read did not see that atom at all, setting a BPM left it in place next to
+/// a second, text `tmpo`, and clearing every field still left it in the file.
+#[test]
+fn an_mp4_integer_tempo_is_read_written_and_cleared() {
+    use lofty::config::WriteOptions;
+    use lofty::mp4::{Atom, AtomData, AtomIdent};
+    use lofty::prelude::TagExt;
+
+    let tempo_atoms = |path: &PathBuf| -> Vec<Vec<String>> {
+        mp4_ilst(path)
+            .into_iter()
+            .filter(|atom| atom.ident() == &AtomIdent::Fourcc(*b"tmpo"))
+            .map(|atom| atom.data().map(|data| format!("{data:?}")).collect())
+            .collect()
+    };
+
+    let path = temp_m4a_path("tempo");
+    std::fs::write(&path, MINIMAL_M4A).expect("write fixture");
+    let mut ilst = mp4_ilst(&path);
+    ilst.insert(Atom::new(
+        AtomIdent::Fourcc(*b"tmpo"),
+        AtomData::SignedInteger(128),
+    ));
+    ilst.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(
+        read.tags.get(&TagField::Bpm).map(String::as_str),
+        Some("128")
+    );
+
+    let mut tags = read.tags.clone();
+    tags.insert(TagField::Bpm, "124".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: read.format,
+        tags,
+    })
+    .expect("write tags");
+    assert_eq!(
+        tempo_atoms(&path),
+        vec![vec!["SignedInteger(124)".to_string()]],
+        "the tempo must be one integer atom"
+    );
+    // Two bytes, the size the format defines and some readers insist on: the
+    // atom is its 8-byte header, a 16-byte `data` header (size, name, type 21
+    // for a big-endian signed integer, locale) and the value.
+    let bytes = std::fs::read(&path).unwrap();
+    let at = bytes
+        .windows(4)
+        .position(|window| window == b"tmpo")
+        .unwrap();
+    assert_eq!(&bytes[at - 4..at], &[0, 0, 0, 0x1a]);
+    assert_eq!(&bytes[at + 12..at + 16], &[0, 0, 0, 0x15]);
+    assert_eq!(&bytes[at + 20..at + 22], &124i16.to_be_bytes());
+    assert_eq!(
+        TagEngine::read(&path)
+            .expect("read tags")
+            .tags
+            .get(&TagField::Bpm)
+            .map(String::as_str),
+        Some("124")
+    );
+
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: read.format,
+        tags: BTreeMap::new(),
+    })
+    .expect("write tags");
+    let left = tempo_atoms(&path);
+    std::fs::remove_file(&path).ok();
+    assert!(
+        left.is_empty(),
+        "clearing every field left the tempo, got {left:?}"
+    );
+}
