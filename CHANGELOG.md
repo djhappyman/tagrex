@@ -243,6 +243,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   APE tag, a WAV's INFO list or an AIFF's text chunks stated, which the file
   then read back as if it had not been cleared
   ([#656](https://github.com/tagrex/tagrex/issues/656)).
+- A cleared comment no longer comes back on an MP3 that kept a second copy of
+  it under a description of its own (such as `ID3v1 Comment`); the machine
+  comment frames that hold gapless and loudness data stay
+  ([#657](https://github.com/tagrex/tagrex/issues/657)).
 
 ## [1.1.1] - 2026-11-02
 

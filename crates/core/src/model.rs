@@ -3214,6 +3214,18 @@ fn save_id3v2(
             if is_model_text_frame(frame) && !foreign_comment {
                 continue;
             }
+            // With no comment in the model, a `COMM` under a description of its
+            // own is what the next read would take for the comment (#644), so
+            // carrying it brought a cleared comment back (#657). Only the
+            // machine ones stay.
+            if let Frame::Comment(comment) = frame {
+                let has_comment = tags
+                    .get(&TagField::Comment)
+                    .is_some_and(|value| !value.is_empty());
+                if !has_comment && !is_machine_comment(&comment.description) {
+                    continue;
+                }
+            }
             if let (Frame::Popularimeter(rating), Some(email)) = (frame, &owned_email) {
                 if rating.email == email.as_str() {
                     continue;

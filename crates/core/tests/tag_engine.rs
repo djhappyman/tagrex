@@ -4684,3 +4684,40 @@ fn clearing_every_field_leaves_no_legacy_field_behind() {
     std::fs::remove_file(&path).ok();
     assert!(read_back.tags.is_empty(), "{:?}", read_back.tags);
 }
+
+/// #657: with the comment cleared, a second `COMM` the file carried under a
+/// description of its own was kept, and the next read took it for the comment
+/// (#644 reads the last one that is not a machine one when no frame lacks a
+/// description), so the cleared comment came back.
+#[test]
+fn a_cleared_comment_does_not_come_back_from_a_described_frame() {
+    let path = mp3_with_comments(
+        "cleared-described",
+        &[
+            (b"XXX", "", "the comment"),
+            (b"XXX", "ID3v1 Comment", "the comment"),
+            (b"eng", "iTunSMPB", ITUNES_GAPLESS),
+        ],
+    );
+    let mut file = TagEngine::read(&path).unwrap();
+    assert_eq!(
+        file.tags.get(&TagField::Comment).map(String::as_str),
+        Some("the comment")
+    );
+    file.tags.remove(&TagField::Comment);
+    TagEngine::write(&file).unwrap();
+
+    let read_back = TagEngine::read(&path).unwrap();
+    let frames = comment_frames(&path);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(read_back.tags.get(&TagField::Comment), None);
+    assert_eq!(
+        frames,
+        vec![(
+            "eng".to_string(),
+            "iTunSMPB".to_string(),
+            ITUNES_GAPLESS.to_string()
+        )],
+        "the machine frame stays"
+    );
+}
