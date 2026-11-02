@@ -289,7 +289,9 @@ async function embedExternalCover() {
 }
 
 function coverThumbImg(cover, cls) {
-  return `<img class="cover-thumb${cls ? " " + cls : ""}" alt="${escapeHtml(t("cover.altFront"))}" src="data:${cover.mime};base64,${cover.data_base64}" />`;
+  // The MIME type comes from a file or a server, so it is escaped like any
+  // other outside text (#603).
+  return `<img class="cover-thumb${cls ? " " + cls : ""}" alt="${escapeHtml(t("cover.altFront"))}" src="${escapeHtml(`data:${cover.mime};base64,${cover.data_base64}`)}" />`;
 }
 
 function renderCoverWell(summary) {

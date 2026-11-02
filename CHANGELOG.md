@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- The MIME type of a cover image, which comes from the audio file or from the
+  image server, is now sanitized before the interface shows the cover, and the
+  main window runs under a Content-Security-Policy that only lets the app's own
+  scripts run ([#603](https://github.com/tagrex/tagrex/issues/603)).
+
 ## [1.1.0] - 2026-11-02
 
 TagRex now updates itself. When a newer release is out, the note in the top bar

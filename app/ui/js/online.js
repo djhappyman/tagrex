@@ -545,7 +545,11 @@ function cardMarkup(c) {
 // that shares it, and say whether it is round label art (#397).
 function setCoverImage(cover, src) {
   cover.querySelector("img")?.remove();
-  cover.insertAdjacentHTML("afterbegin", `<img alt="" src="${src}" />`);
+  // Built through the DOM: the data URI carries a server's MIME type (#603).
+  const img = document.createElement("img");
+  img.alt = "";
+  img.src = src;
+  cover.prepend(img);
   markRoundArt(cover, src);
 }
 

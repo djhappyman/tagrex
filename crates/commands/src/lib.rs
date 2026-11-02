@@ -1838,7 +1838,7 @@ impl ProviderHub {
             _ => self.discogs_provider(token)?.fetch_image(url)?,
         };
         Ok(CoverArtDto {
-            mime: image.mime,
+            mime: display_safe_mime(&image.mime, &image.data),
             data_base64: base64::engine::general_purpose::STANDARD.encode(&image.data),
             ..CoverArtDto::default()
         })
@@ -6124,9 +6124,36 @@ fn cover_dto_to_art(dto: &CoverArtDto) -> Option<CoverArt> {
     })
 }
 
+/// A cover's MIME type fit to cross into the frontend, which puts it in a
+/// `data:` URI (#603). It comes from a file's picture frame or a server's
+/// Content-Type, so it can hold anything: a value made only of MIME token
+/// characters is kept as it is (odd but harmless ones included), anything
+/// else is replaced by the type the image bytes start with.
+fn display_safe_mime(mime: &str, data: &[u8]) -> String {
+    let plain = mime.len() <= 127
+        && mime
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'+' | b'-'));
+    if plain {
+        return mime.to_string();
+    }
+    let sniffed = if data.starts_with(&[0x89, b'P', b'N', b'G']) {
+        "image/png"
+    } else if data.starts_with(b"GIF8") {
+        "image/gif"
+    } else if data.len() >= 12 && data.starts_with(b"RIFF") && &data[8..12] == b"WEBP" {
+        "image/webp"
+    } else if data.starts_with(b"BM") {
+        "image/bmp"
+    } else {
+        "image/jpeg"
+    };
+    sniffed.to_string()
+}
+
 fn cover_art_to_dto(art: &CoverArt) -> CoverArtDto {
     CoverArtDto {
-        mime: art.mime.clone(),
+        mime: display_safe_mime(&art.mime, &art.data),
         data_base64: base64::engine::general_purpose::STANDARD.encode(&art.data),
         kind: art.kind.to_storage_key().to_string(),
         description: art.description.clone(),
@@ -11046,6 +11073,42 @@ mod tests {
         // Garbage / non-image falls back to jpg.
         assert_eq!(extension_for_mime("application/octet-stream"), "jpg");
         assert_eq!(extension_for_mime(""), "jpg");
+    }
+
+    #[test]
+    fn display_safe_mime_keeps_tokens_and_replaces_markup() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A];
+        assert_eq!(display_safe_mime("image/png", &png), "image/png");
+        // Odd but harmless values pass through untouched.
+        assert_eq!(display_safe_mime("PNG", &png), "PNG");
+        assert_eq!(display_safe_mime("image/svg+xml", &png), "image/svg+xml");
+        assert_eq!(display_safe_mime("", &png), "");
+        // Anything that could close the attribute or add parameters is replaced
+        // by what the bytes are.
+        assert_eq!(display_safe_mime("image/png\" x=\"", &png), "image/png");
+        assert_eq!(
+            display_safe_mime("image/jpeg;charset=x", b"GIF89a"),
+            "image/gif"
+        );
+        assert_eq!(
+            display_safe_mime("image/<b>", &[0xFF, 0xD8, 0xFF]),
+            "image/jpeg"
+        );
+        assert_eq!(
+            display_safe_mime("a b", b"RIFF\0\0\0\0WEBPVP8 "),
+            "image/webp"
+        );
+    }
+
+    #[test]
+    fn cover_dto_mime_is_display_safe() {
+        let art = CoverArt {
+            mime: "image/png\" onload=\"x".to_string(),
+            data: vec![0x89, b'P', b'N', b'G', 1, 2],
+            kind: CoverKind::Front,
+            description: String::new(),
+        };
+        assert_eq!(cover_art_to_dto(&art).mime, "image/png");
     }
 
     #[test]
