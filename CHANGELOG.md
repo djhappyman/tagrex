@@ -192,6 +192,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   are, and an edited comment keeps the language and description its frame had
   instead of turning into `XXX`
   ([#644](https://github.com/tagrex/tagrex/issues/644)).
+- A save no longer rewrites ReplayGain values in an MP3 under capitalised
+  names: a `replaygain_track_gain` frame stays `replaygain_track_gain`, as do
+  other user-text frames whose name differs from the standard spelling only in
+  case ([#645](https://github.com/tagrex/tagrex/issues/645)).
 
 ## [1.1.1] - 2026-11-02
 

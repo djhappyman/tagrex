@@ -2326,6 +2326,76 @@ fn a_comment_keeps_its_language() {
 }
 
 #[test]
+fn a_user_text_frame_keeps_the_case_of_its_description() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{ExtendedTextFrame, Frame, Id3v2Tag};
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::{Accessor, TagExt};
+    use lofty::TextEncoding;
+
+    let user_text = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mpeg = MpegFile::read_from(&mut file, ParseOptions::new()).unwrap();
+        let mut frames: Vec<(String, String)> = mpeg
+            .id3v2()
+            .map(|tag| {
+                tag.iter()
+                    .filter_map(|frame| match frame {
+                        Frame::UserText(user) => {
+                            Some((user.description.to_string(), user.content.to_string()))
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        frames.sort();
+        frames
+    };
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-txxx-case-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).unwrap();
+    let mut seeded = Id3v2Tag::new();
+    seeded.set_artist("Original".to_string());
+    for (description, content) in [
+        ("replaygain_track_gain", "-6.50 dB"),
+        ("replaygain_track_peak", "0.988"),
+    ] {
+        seeded.insert(Frame::UserText(ExtendedTextFrame::new(
+            TextEncoding::UTF8,
+            description.to_string(),
+            content.to_string(),
+        )));
+    }
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    let before = user_text(&path);
+
+    // An unrelated edit leaves the frames as the file spelled them.
+    let mut file = TagEngine::read(&path).unwrap();
+    file.tags.insert(TagField::Title, "New title".into());
+    TagEngine::write(&file).unwrap();
+    assert_eq!(user_text(&path), before);
+
+    // An edited value lands in the same frame.
+    let mut file = TagEngine::read(&path).unwrap();
+    let gain = TagField::Custom("REPLAYGAIN_TRACK_GAIN".to_string());
+    assert_eq!(file.tags.get(&gain).map(String::as_str), Some("-6.50 dB"));
+    file.tags.insert(gain, "-7.00 dB".into());
+    TagEngine::write(&file).unwrap();
+    assert_eq!(
+        user_text(&path),
+        vec![
+            ("replaygain_track_gain".to_string(), "-7.00 dB".to_string()),
+            ("replaygain_track_peak".to_string(), "0.988".to_string()),
+        ]
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn vorbis_lyrics_round_trip_as_a_custom_field() {
     let path = temp_flac_path("lyrics");
     std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");

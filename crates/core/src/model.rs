@@ -2607,6 +2607,28 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
                 true
             });
         }
+        // A `TXXX` the backend knows by a name of its own (ReplayGain is the
+        // usual one) is written under the backend's spelling of it, in capitals,
+        // whatever case the file used (#645). It is the same frame either way,
+        // so it goes back under the description the file gave it.
+        let own_descriptions: Vec<String> = (&original)
+            .into_iter()
+            .filter_map(|frame| match frame {
+                Frame::UserText(text) => Some(text.description.to_string()),
+                _ => None,
+            })
+            .collect();
+        updated.retain_mut(|frame| {
+            if let Frame::UserText(text) = frame {
+                let own = own_descriptions.iter().find(|own| {
+                    own.eq_ignore_ascii_case(&text.description) && **own != text.description
+                });
+                if let Some(own) = own {
+                    text.description = own.clone().into();
+                }
+            }
+            true
+        });
         // Dates (#504). The model holds every timestamp frame and has just
         // written each one from what it read — for a timestamp lofty cannot
         // parse whole, the trimmed date. Where the model still holds that date,
