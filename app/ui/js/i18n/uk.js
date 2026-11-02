@@ -190,6 +190,8 @@ export const uk = {
   "editor.tagFields": "Поля тегів",
   "editor.fieldsHint": "Записуються лише змінені поля; поле, значення якого різниться по виділенню, показує <em>&lt;кілька значень&gt;</em> і лишається недоторканим, доки ви в ньому не надрукуєте.",
   "editor.addField": "Додати поле",
+  "editor.pairNumber": "{field}: номер",
+  "editor.pairTotal": "{field}: усього",
   "editor.fieldName": "ім'я поля",
   "editor.fieldValue": "значення",
   "editor.coverArt": "Обкладинка",

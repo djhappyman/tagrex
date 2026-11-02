@@ -189,6 +189,8 @@ export const en = {
   "editor.tagFields": "Tag fields",
   "editor.fieldsHint": "Only fields you change are written; a field whose value differs across the selection shows <em>&lt;multiple values&gt;</em> and is left alone unless you type in it.",
   "editor.addField": "Add field",
+  "editor.pairNumber": "{field} number",
+  "editor.pairTotal": "{field} total",
   "editor.fieldName": "field name",
   "editor.fieldValue": "value",
   "editor.coverArt": "Cover art",

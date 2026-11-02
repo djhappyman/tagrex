@@ -189,6 +189,8 @@ export const ru = {
   "editor.tagFields": "Поля тегов",
   "editor.fieldsHint": "Записываются только изменённые поля; поле, значение которого различается по выделению, показывает <em>&lt;несколько значений&gt;</em> и остаётся нетронутым, пока вы в нём не напечатаете.",
   "editor.addField": "Добавить поле",
+  "editor.pairNumber": "{field}: номер",
+  "editor.pairTotal": "{field}: всего",
   "editor.fieldName": "имя поля",
   "editor.fieldValue": "значение",
   "editor.coverArt": "Обложка",

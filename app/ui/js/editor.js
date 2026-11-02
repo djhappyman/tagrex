@@ -628,7 +628,7 @@ function fieldDuoRow(pairs, paths) {
     row.classList.toggle("error", anyError);
   };
 
-  const makeSub = (key, label, aria) => {
+  const makeSub = (key, aria) => {
     const values = new Set(paths.map((path) => currentFieldValue(path, key)));
     const shared = values.size === 1 ? [...values][0] : null;
     const input = document.createElement("input");
@@ -637,7 +637,7 @@ function fieldDuoRow(pairs, paths) {
     input.dataset.key = key;
     input.spellcheck = false;
     input.inputMode = "numeric";
-    input.setAttribute("aria-label", `${label} ${aria}`);
+    input.setAttribute("aria-label", aria);
     if (shared === null) {
       input.classList.add("multiple");
       input.placeholder = "—"; // narrow numeric box: a dash reads better than "<multiple values>"
@@ -671,7 +671,11 @@ function fieldDuoRow(pairs, paths) {
     const sep = document.createElement("span");
     sep.className = "fe-pair-sep";
     sep.textContent = "/";
-    group.append(makeSub(p.pair[0], p.label, "number"), sep, makeSub(p.pair[1], p.label, "total"));
+    group.append(
+      makeSub(p.pair[0], tr("editor.pairNumber", { field: p.label })),
+      sep,
+      makeSub(p.pair[1], tr("editor.pairTotal", { field: p.label })),
+    );
     unit.append(group);
     value.append(unit);
   });

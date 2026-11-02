@@ -107,6 +107,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ([#626](https://github.com/tagrex/tagrex/issues/626)).
 - Shortcuts named the Space key, and off macOS the arrow keys, in English in
   every language ([#627](https://github.com/tagrex/tagrex/issues/627)).
+- Editor: a screen reader heard the track and disc number inputs as the
+  field's name followed by the English "number" and "total" in every language
+  ([#628](https://github.com/tagrex/tagrex/issues/628)).
 
 ## [1.1.1] - 2026-11-02
 

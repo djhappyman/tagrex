@@ -187,6 +187,8 @@ export const es = {
   "editor.tagFields": "Campos de etiqueta",
   "editor.fieldsHint": "Solo se escriben los campos que cambias; un campo cuyo valor difiere en la selección muestra <em>&lt;varios valores&gt;</em> y no se toca a menos que escribas en él.",
   "editor.addField": "Añadir campo",
+  "editor.pairNumber": "{field}: número",
+  "editor.pairTotal": "{field}: total",
   "editor.fieldName": "nombre del campo",
   "editor.fieldValue": "valor",
   "editor.coverArt": "Portada",

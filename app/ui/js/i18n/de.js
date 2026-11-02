@@ -185,6 +185,8 @@ export const de = {
   "editor.tagFields": "Tag-Felder",
   "editor.fieldsHint": "Geschrieben werden nur die Felder, die du änderst; ein Feld mit unterschiedlichen Werten in der Auswahl zeigt <em>&lt;mehrere Werte&gt;</em> und bleibt unberührt, solange du nichts hineinschreibst.",
   "editor.addField": "Feld hinzufügen",
+  "editor.pairNumber": "{field}: Nummer",
+  "editor.pairTotal": "{field}: gesamt",
   "editor.fieldName": "Feldname",
   "editor.fieldValue": "Wert",
   "editor.coverArt": "Cover",

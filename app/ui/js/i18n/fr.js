@@ -189,6 +189,8 @@ export const fr = {
   "editor.tagFields": "Champs de tag",
   "editor.fieldsHint": "Seuls les champs que vous modifiez sont écrits ; un champ dont la valeur diffère dans la sélection affiche <em>&lt;plusieurs valeurs&gt;</em> et n'est pas touché tant que vous n'y écrivez rien.",
   "editor.addField": "Ajouter un champ",
+  "editor.pairNumber": "{field} : numéro",
+  "editor.pairTotal": "{field} : total",
   "editor.fieldName": "nom du champ",
   "editor.fieldValue": "valeur",
   "editor.coverArt": "Pochette",

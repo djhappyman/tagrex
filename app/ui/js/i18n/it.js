@@ -189,6 +189,8 @@ export const it = {
   "editor.tagFields": "Campi tag",
   "editor.fieldsHint": "Vengono scritti solo i campi che modifichi; un campo con valore diverso tra i file selezionati mostra <em>&lt;valori multipli&gt;</em> e viene lasciato stare a meno che tu non ci scriva.",
   "editor.addField": "Aggiungi campo",
+  "editor.pairNumber": "{field}: numero",
+  "editor.pairTotal": "{field}: totale",
   "editor.fieldName": "nome campo",
   "editor.fieldValue": "valore",
   "editor.coverArt": "Copertina",
