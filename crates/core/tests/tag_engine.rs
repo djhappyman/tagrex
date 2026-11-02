@@ -2730,3 +2730,25 @@ fn a_vorbis_block_written_back_keeps_custom_fields_and_order() {
     );
     assert_eq!(back.get(&custom).map(String::as_str), Some("custom value"));
 }
+
+/// #617: ID3v1 holds 30 bytes of Latin-1 per field. The preview measured the
+/// tag in memory, where it holds anything, and so called a Cyrillic or an
+/// over-long title kept.
+#[test]
+fn the_id3v1_preview_names_what_the_bytes_cannot_hold() {
+    let content = TagBlockContent {
+        tags: BTreeMap::from([
+            (TagField::Title, "Заголовок".to_string()),
+            (
+                TagField::Album,
+                "An album title well over thirty characters".to_string(),
+            ),
+            (TagField::Artist, "Plain Artist".to_string()),
+        ]),
+        covers: Vec::new(),
+    };
+    let lost = content.conversion_loss(TagBlockKind::Id3v1).fields;
+    assert!(lost.contains(&TagField::Title), "got {lost:?}");
+    assert!(lost.contains(&TagField::Album), "got {lost:?}");
+    assert!(!lost.contains(&TagField::Artist), "got {lost:?}");
+}

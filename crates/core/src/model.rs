@@ -820,7 +820,7 @@ fn tag_for_block(kind: TagBlockKind, content: &TagBlockContent) -> Tag {
 /// what a write of that block does and therefore what survives it.
 fn round_trip_through(kind: TagBlockKind, tag: Tag) -> Tag {
     match kind {
-        TagBlockKind::Id3v1 => Tag::from(Id3v1Tag::from(tag)),
+        TagBlockKind::Id3v1 => Tag::from(id3v1_as_written(Id3v1Tag::from(tag))),
         TagBlockKind::Id3v2 => Tag::from(Id3v2Tag::from(tag)),
         TagBlockKind::VorbisComments => Tag::from(vorbis_comments_from(tag)),
         TagBlockKind::Ape => Tag::from(ApeTag::from(tag)),
@@ -828,6 +828,29 @@ fn round_trip_through(kind: TagBlockKind, tag: Tag) -> Tag {
         TagBlockKind::RiffInfo => Tag::from(RiffInfoList::from(tag)),
         TagBlockKind::AiffText => Tag::from(AiffTextChunks::from(tag)),
     }
+}
+
+/// An ID3v1 tag as it reads back once written (#617).
+///
+/// In memory the tag holds any text; on disk it is 30 bytes of Latin-1 per
+/// field, so what survives is only known from the bytes. They are written out
+/// and read back the way [`TagEngine::restore_id3v2_bytes`] reads an ID3v2
+/// chunk: behind silent MPEG frames, as an MP3. Should that fail, the tag is
+/// answered as it was.
+fn id3v1_as_written(tag: Id3v1Tag) -> Id3v1Tag {
+    let mut synthetic = Vec::new();
+    let mut silence = vec![0xFF, 0xFB, 0x90, 0x00];
+    silence.resize(SILENT_MPEG_FRAME_LEN, 0);
+    for _ in 0..SILENT_MPEG_FRAMES {
+        synthetic.extend_from_slice(&silence);
+    }
+    if tag.dump_to(&mut synthetic, write_options()).is_err() {
+        return tag;
+    }
+    MpegFile::read_from(&mut Cursor::new(synthetic), tag_only_options())
+        .ok()
+        .and_then(|file| file.id3v1().cloned())
+        .unwrap_or(tag)
 }
 
 /// A generic tag as Vorbis Comments, with its items in their order (#616).

@@ -65,6 +65,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   them as lost. Before, they were dropped while the preview called them kept.
   A conversion into APE also keeps every value of a multi-value field now
   ([#616](https://github.com/tagrex/tagrex/issues/616)).
+- The preview of a conversion to ID3v1 now lists a field that ID3v1 cannot hold
+  as written: text past 30 characters, or letters outside Latin-1, such as
+  Cyrillic
+  ([#617](https://github.com/tagrex/tagrex/issues/617)).
 
 ## [1.1.1] - 2026-11-02
 
