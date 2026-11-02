@@ -56,6 +56,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   cover. They used to read as empty, and the next edit erased them from the
   ID3v1 tag too
   ([#615](https://github.com/tagrex/tagrex/issues/615)).
+- Saving an M4A with a BPM no longer swaps the first values of a multi-value
+  field such as the artist
+  ([#618](https://github.com/tagrex/tagrex/issues/618)).
 
 ## [1.1.1] - 2026-11-02
 

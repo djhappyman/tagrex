@@ -2924,7 +2924,10 @@ fn save_with_custom_items(
             // file's own integer atom beside it; both go.
             match tags.get(&TagField::Bpm) {
                 Some(bpm) => {
-                    merged.remove(&MP4_TEMPO).for_each(drop);
+                    // `retain`, not `remove`: the backend's remove swaps each
+                    // match to the front, moving the first atom — one value of
+                    // a multi-value field — out of its place (#618).
+                    merged.retain(|atom| atom.ident() != &MP4_TEMPO);
                     merged.insert(mp4_tempo_atom(bpm));
                 }
                 // With no BPM in the model a tempo the file states goes, but

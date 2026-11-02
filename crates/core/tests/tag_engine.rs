@@ -2605,3 +2605,26 @@ fn a_zero_filled_id3v1_tag_is_not_read_in_place_of_an_empty_id3v2_tag() {
         read.blocks
     );
 }
+
+/// #618: setting a BPM on an M4A took the tempo atoms out with a swap, which
+/// moved the first value of a multi-value field out of its place.
+#[test]
+fn an_m4a_save_with_a_bpm_keeps_multi_values_in_order() {
+    let path = temp_m4a_path("order-with-bpm");
+    std::fs::write(&path, MINIMAL_M4A).expect("write fixture");
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Artist, "Artist One; Artist Two".to_string());
+    tags.insert(TagField::Bpm, "124".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::M4a,
+        tags,
+    })
+    .expect("write tags");
+    let back = TagEngine::read(&path).expect("read tags").tags;
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        back.get(&TagField::Artist).map(String::as_str),
+        Some("Artist One; Artist Two")
+    );
+}
