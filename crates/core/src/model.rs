@@ -2390,10 +2390,36 @@ fn has_id3v1(path: &Path) -> Result<bool, TagIoError> {
 /// the model has nothing it can hold. One is never created where there wasn't
 /// one — nobody asked for a legacy tag — and neither cover art nor DJ cue
 /// points are involved, since ID3v1 cannot hold either.
-fn sync_id3v1(path: &Path, tags: &TagMap) -> Result<(), TagIoError> {
+///
+/// A field the model has no value for keeps the file's own, unless the file
+/// read with a value for it (`before`) and the model cleared it (#653). A file
+/// with an ID3v2 tag is read from that alone, so an album or a genre only the
+/// ID3v1 tag states never reached the model, and rewriting the tag from the
+/// model deleted it on a save that changed nothing.
+fn sync_id3v1(
+    path: &Path,
+    container: FileType,
+    tags: &TagMap,
+    before: &TagMap,
+) -> Result<(), TagIoError> {
     if !has_id3v1(path)? {
         return Ok(());
     }
+    let old = {
+        let mut file = buffered(path)?;
+        match container {
+            FileType::Mpeg => MpegFile::read_from(&mut file, tag_only_options())?
+                .id3v1()
+                .cloned(),
+            FileType::Aac => AacFile::read_from(&mut file, tag_only_options())?
+                .id3v1()
+                .cloned(),
+            _ => None,
+        }
+        .unwrap_or_default()
+    };
+    let stated = |map: &TagMap, field: &TagField| map.get(field).is_some_and(|v| !v.is_empty());
+    let untouched = |field: &TagField| !stated(tags, field) && !stated(before, field);
     // The seven fields ID3v1 has room for; lofty truncates the text on write.
     let mut legacy = Id3v1Tag {
         title: tags.get(&TagField::Title).cloned(),
@@ -2416,6 +2442,27 @@ fn sync_id3v1(path: &Path, tags: &TagMap) -> Result<(), TagIoError> {
     // nowhere to go; `set_genre` leaves the field alone in that case.
     if let Some(genre) = tags.get(&TagField::Genre) {
         legacy.set_genre(genre.clone());
+    }
+    if untouched(&TagField::Title) {
+        legacy.title = old.title;
+    }
+    if untouched(&TagField::Artist) {
+        legacy.artist = old.artist;
+    }
+    if untouched(&TagField::Album) {
+        legacy.album = old.album;
+    }
+    if untouched(&TagField::Year) {
+        legacy.year = old.year;
+    }
+    if untouched(&TagField::Comment) {
+        legacy.comment = old.comment;
+    }
+    if untouched(&TagField::TrackNumber) {
+        legacy.track_number = old.track_number;
+    }
+    if untouched(&TagField::Genre) {
+        legacy.genre = old.genre;
     }
     if legacy.is_empty() {
         // Not `remove_from_path`: on the 0.25 backend that opens the file for
@@ -2766,19 +2813,20 @@ fn keep_spelled_number_pair(tags: &mut TagMap, number: &TagField, total: &TagFie
 /// only then gives up with an honest error rather than a false success.
 fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
     // What the file read as before this write, so the legacy text blocks of a
-    // WAV or an AIFF lose only what the model cleared (#652).
-    let before = if matches!(container, FileType::Wav | FileType::Aiff) {
+    // WAV or an AIFF, and an ID3v1 tag, lose only what the model cleared
+    // (#652, #653).
+    let before = if matches!(container, FileType::Wav | FileType::Aiff) || has_id3v1(path)? {
         TagEngine::read(path)?.tags
     } else {
         TagMap::new()
     };
-    save_id3v2(path, container, tags)?;
+    save_id3v2(path, container, tags, &before)?;
     if id3v2_write_landed(path, container, tags)? {
         return sync_iff_text(path, container, tags, &before);
     }
     // The write was a silent no-op. Repair a broken AIFF once and retry.
     if container == FileType::Aiff && repair_aiff_container(path)? {
-        save_id3v2(path, container, tags)?;
+        save_id3v2(path, container, tags, &before)?;
         if id3v2_write_landed(path, container, tags)? {
             return sync_iff_text(path, container, tags, &before);
         }
@@ -2802,7 +2850,12 @@ fn id3v2_write_landed(path: &Path, container: FileType, tags: &TagMap) -> Result
     Ok(readback.is_some_and(|tag| !tag.is_empty()))
 }
 
-fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
+fn save_id3v2(
+    path: &Path,
+    container: FileType,
+    tags: &TagMap,
+    before: &TagMap,
+) -> Result<(), TagIoError> {
     let mut generic = Tag::new(TagType::Id3v2);
     for (field, value) in tags {
         push_field_items(&mut generic, field, value);
@@ -3066,7 +3119,7 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
     save_id3v2_tag(path, container, &updated)?;
     // Whatever the file also carries in an ID3v1 block has to say the same
     // thing (#194).
-    sync_id3v1(path, tags)?;
+    sync_id3v1(path, container, tags, before)?;
     Ok(())
 }
 

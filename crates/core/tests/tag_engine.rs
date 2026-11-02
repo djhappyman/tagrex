@@ -1329,6 +1329,60 @@ fn clearing_the_tags_removes_the_id3v1_tag() {
     assert_eq!(read_back.tags.get(&TagField::Album), None);
 }
 
+/// #653: a file with an ID3v2 tag reads from that alone, so an album, a track
+/// number or a genre only its ID3v1 tag states never reached the model, and
+/// the #194 rewrite deleted them on a save that changed nothing.
+#[test]
+fn an_id3v1_field_the_id3v2_tag_lacks_survives_a_save() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v1::Id3v1Tag;
+    use lofty::id3::v2::Id3v2Tag;
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::{Accessor, TagExt};
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-id3v1-beside-id3v2-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut id3v2 = Id3v2Tag::new();
+    id3v2.set_title("Title".to_string());
+    id3v2
+        .save_to_path(&path, WriteOptions::default())
+        .expect("seed id3v2");
+    Id3v1Tag {
+        title: Some("Old title".to_string()),
+        album: Some("Only in v1".to_string()),
+        track_number: Some(7),
+        genre: Some(12),
+        ..Default::default()
+    }
+    .save_to_path(&path, WriteOptions::default())
+    .expect("seed id3v1");
+
+    let mut file = TagEngine::read(&path).expect("read");
+    assert_eq!(
+        file.tags.get(&TagField::Album),
+        None,
+        "read from ID3v2 alone"
+    );
+    file.tags.insert(TagField::Title, "New title".to_string());
+    TagEngine::write(&file).expect("write");
+    let mut handle = std::fs::File::open(&path).unwrap();
+    let id3v1 = MpegFile::read_from(&mut handle, ParseOptions::new())
+        .unwrap()
+        .id3v1()
+        .cloned()
+        .expect("ID3v1 kept");
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(id3v1.title.as_deref(), Some("New title"));
+    assert_eq!(id3v1.album.as_deref(), Some("Only in v1"));
+    assert_eq!(id3v1.track_number, Some(7));
+    assert_eq!(id3v1.genre, Some(12));
+}
+
 /// And a file that never had one does not acquire a legacy tag on write —
 /// nobody asked for it (#194).
 #[test]

@@ -227,6 +227,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   state beside an ID3v2 chunk that lacks it, such as a genre or an
   annotation only the legacy block had. Only a field you clear is taken out
   of it ([#652](https://github.com/tagrex/tagrex/issues/652)).
+- The same for an MP3's ID3v1 tag: a year, album, track number or genre only
+  the ID3v1 tag states is no longer deleted on a save; only a field you clear
+  is taken out ([#653](https://github.com/tagrex/tagrex/issues/653)).
 
 ## [1.1.1] - 2026-11-02
 
