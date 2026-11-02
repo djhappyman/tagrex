@@ -3814,6 +3814,12 @@ fn save_with_custom_items(
                 .items()
                 .filter_map(|(name, _)| Some((vorbis_field_of(name)?, name.to_string())))
                 .collect();
+            let own_fields: Vec<(TagField, String, String)> = existing
+                .items()
+                .filter_map(|(name, value)| {
+                    Some((vorbis_field_of(name)?, name.to_string(), value.to_string()))
+                })
+                .collect();
             let (remainder, _) = existing.split_tag();
             // Carried by hand, because the conversion below measures every image
             // and silently drops one it cannot read — where a plain save wrote it
@@ -3825,6 +3831,7 @@ fn save_with_custom_items(
             }
             let mut merged = remainder.merge_tag(tag);
             rename_to_own_names(&mut merged, &own_names);
+            keep_unedited_fields(&mut merged, &own_fields);
             merged.set_vendor(vendor);
             merged.remove(VORBIS_ENCODER).for_each(drop);
             for encoder in encoders {
@@ -3984,6 +3991,49 @@ fn rename_to_own_names(vorbis: &mut VorbisComments, own_names: &[(TagField, Stri
         let values: Vec<String> = vorbis.remove(&name).collect();
         for value in values {
             vorbis.push(own_name.to_string(), value);
+        }
+    }
+}
+
+/// Put back, as the file had them, the comments of every field `vorbis` states
+/// with exactly the values the file did, in the same order (#650). Nobody
+/// edited such a field, yet the backend writes it under one upper-case name:
+/// `title` came back as `TITLE`, and a field the file stated under two names
+/// (`ORGANIZATION` and `LABEL`, `TRACKTOTAL` and `totaltracks`) lost one of
+/// them. `own_fields` is the file's comments in order, by field.
+fn keep_unedited_fields(vorbis: &mut VorbisComments, own_fields: &[(TagField, String, String)]) {
+    let fields: std::collections::BTreeSet<&TagField> =
+        own_fields.iter().map(|(field, _, _)| field).collect();
+    for field in fields {
+        let own: Vec<(&str, &str)> = own_fields
+            .iter()
+            .filter(|(own_field, _, _)| own_field == field)
+            .map(|(_, name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let written: Vec<(String, String)> = vorbis
+            .items()
+            .filter(|(name, _)| vorbis_field_of(name).as_ref() == Some(field))
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        // In order where the file used one name for the field. The backend
+        // groups a field's values by name when it reads several names, so
+        // across names only the values themselves can be compared.
+        let mut written_values: Vec<&str> =
+            written.iter().map(|(_, value)| value.as_str()).collect();
+        let mut own_values: Vec<&str> = own.iter().map(|(_, value)| *value).collect();
+        if own.iter().any(|(name, _)| *name != own[0].0) {
+            written_values.sort_unstable();
+            own_values.sort_unstable();
+        }
+        let unedited = written_values == own_values;
+        if !unedited {
+            continue;
+        }
+        for (name, _) in &written {
+            vorbis.remove(name).for_each(drop);
+        }
+        for (name, value) in own {
+            vorbis.push(name.to_string(), value.to_string());
         }
     }
 }

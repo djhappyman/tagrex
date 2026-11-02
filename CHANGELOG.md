@@ -215,6 +215,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   of, such as two `ARTISTS` or two label entries, down to its last value. A
   field nobody edited keeps every value it had, in every format
   ([#649](https://github.com/tagrex/tagrex/issues/649)).
+- A save no longer renames FLAC and Ogg comments of fields nobody edited:
+  `title` stays `title` instead of becoming `TITLE`, and a field the file
+  states under two names (`ORGANIZATION` and `LABEL`, `TRACKTOTAL` and
+  `totaltracks`) keeps both instead of losing one
+  ([#650](https://github.com/tagrex/tagrex/issues/650)).
 
 ## [1.1.1] - 2026-11-02
 

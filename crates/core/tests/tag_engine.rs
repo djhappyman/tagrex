@@ -4238,3 +4238,67 @@ fn an_unrelated_edit_keeps_every_value_of_an_id3v2_text_frame() {
         "{after_edit:?}"
     );
 }
+
+/// #650: a save wrote every field the backend knows under its one upper-case
+/// name, so `title` became `TITLE` and a field stated under two names lost one.
+/// A field nobody edited now goes back exactly as the file had it.
+#[test]
+fn an_unedited_vorbis_field_keeps_the_names_the_file_gave_it() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::flac::FlacFile;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+
+    let path = temp_flac_path("own-names");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let seeded = [
+        ("title", "Lower Title"),
+        ("ORGANIZATION", "Org"),
+        ("LABEL", "Lab"),
+        ("TRACKTOTAL", "4"),
+        ("totaltracks", "4"),
+        ("Replaygain_Track_Gain", "-7.94 dB"),
+    ];
+    let mut comments = VorbisComments::new();
+    for (name, value) in seeded {
+        comments.push(name.to_string(), value.to_string());
+    }
+    comments
+        .save_to_path(&path, WriteOptions::default())
+        .unwrap();
+
+    let sorted_comments = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        let flac = FlacFile::read_from(&mut file, ParseOptions::new()).unwrap();
+        let mut items: Vec<(String, String)> = flac
+            .vorbis_comments()
+            .unwrap()
+            .items()
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        items.sort();
+        items
+    };
+
+    let mut read = TagEngine::read(&path).expect("read");
+    TagEngine::write(&read).expect("save unchanged");
+    let unchanged = sorted_comments(&path);
+    read.tags.insert(TagField::Publisher, "New".to_string());
+    TagEngine::write(&read).expect("save the edit");
+    let edited = sorted_comments(&path);
+    std::fs::remove_file(&path).ok();
+
+    let mut expected: Vec<(String, String)> = seeded
+        .iter()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
+    expected.sort();
+    assert_eq!(unchanged, expected);
+    // The edited field is one value, under a name the file used for it; the
+    // others are left as they were.
+    expected.retain(|(name, _)| name != "ORGANIZATION" && name != "LABEL");
+    expected.push(("LABEL".to_string(), "New".to_string()));
+    expected.sort();
+    assert_eq!(edited, expected);
+}
