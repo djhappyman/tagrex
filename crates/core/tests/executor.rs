@@ -550,10 +550,19 @@ fn a_revision_switch_keeps_every_frame_and_undo_restores_the_revision() {
     )));
     tag.save_to_path(&track, WriteOptions::default().use_id3v23(true))
         .unwrap();
+    // And a picture, which the switch used to drop (#607).
+    let cover = tagrex_core::model::CoverArt {
+        mime: "image/png".to_string(),
+        data: vec![0x89, 0x50, 0x4e, 0x47, 9, 9],
+        ..tagrex_core::model::CoverArt::default()
+    };
+    TagEngine::write_covers(&track, std::slice::from_ref(&cover)).unwrap();
+    TagEngine::set_id3v2_revision(&track, Id3v2Revision::V3).unwrap();
     assert_eq!(
         TagEngine::id3v2_revision(&track).unwrap(),
         Some(Id3v2Revision::V3)
     );
+    assert_eq!(TagEngine::read_covers(&track).unwrap(), vec![cover.clone()]);
 
     let content = TagEngine::read_block(&track, TagBlockKind::Id3v2)
         .unwrap()
@@ -599,6 +608,11 @@ fn a_revision_switch_keeps_every_frame_and_undo_restores_the_revision() {
         1,
         "the cue-point frame did not survive the revision switch"
     );
+    assert_eq!(
+        TagEngine::read_covers(&track).unwrap(),
+        vec![cover.clone()],
+        "the picture did not survive the revision switch"
+    );
 
     Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
     assert_eq!(
@@ -607,6 +621,7 @@ fn a_revision_switch_keeps_every_frame_and_undo_restores_the_revision() {
         "undo left the file in the revision it was converted to"
     );
     assert_eq!(private_frames(&track), 1);
+    assert_eq!(TagEngine::read_covers(&track).unwrap(), vec![cover]);
 }
 
 /// #206: undoing a change that destroyed an ID3v2 block must give back the

@@ -1439,7 +1439,9 @@ impl TagEngine {
         let Some(container) = container_of(path)? else {
             return Ok(false);
         };
-        let Some(tag) = read_id3v2(path, container, custom_item_options())? else {
+        // With the pictures: what is read here is what gets written back, and a
+        // read without them saved a tag without them (#607).
+        let Some(tag) = read_id3v2(path, container, tag_only_options())? else {
             return Ok(false);
         };
         save_id3v2_tag_with(

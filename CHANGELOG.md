@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   stops and names the file instead. An undo that stopped half-way can now be
   run again and finishes the rest
   ([#604](https://github.com/tagrex/tagrex/issues/604)).
+- Switching an ID3v2 tag between 2.3 and 2.4 no longer deletes its pictures,
+  and undoing the switch keeps them too
+  ([#607](https://github.com/tagrex/tagrex/issues/607)).
 
 ## [1.1.1] - 2026-11-02
 
