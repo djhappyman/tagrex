@@ -18,6 +18,9 @@ image = { version = "0.25.5", default-features = false, features = ["jpeg", "png
 # (`ensure_audio_after_tags`, #416).
 lofty = "0.25.5"
 regex = "1.13.1"
+# Reads an oversized PNG cover row by row, so shrinking it never holds the full
+# decoded image (#622). Already in the tree via image.
+png = "0.18.1"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 # Tells a case-only rename of one file from a move onto another file on a
 # case-insensitive file system (#604, #605). Already in the tree via walkdir.

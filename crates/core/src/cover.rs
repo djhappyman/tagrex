@@ -8,6 +8,8 @@
 use crate::model::CoverArt;
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
+use image::{DynamicImage, Rgb, RgbImage};
+use std::io::Cursor;
 
 /// Downscale `art` so its longer side is at most `max_px`, re-encoding as JPEG
 /// at `quality` (1..=100). Aspect ratio is preserved.
@@ -19,12 +21,29 @@ pub fn resize_cover(art: &CoverArt, max_px: u32, quality: u8) -> CoverArt {
     if max_px == 0 {
         return art.clone();
     }
-    let Ok(image) = image::load_from_memory(&art.data) else {
+    // The size from the header alone (#622): a cover that fits is never
+    // decoded at all.
+    let Ok(reader) = image::ImageReader::new(Cursor::new(&art.data)).with_guessed_format() else {
         return art.clone();
     };
-    if image.width() <= max_px && image.height() <= max_px {
+    let is_png = reader.format() == Some(image::ImageFormat::Png);
+    let Ok((width, height)) = reader.into_dimensions() else {
+        return art.clone();
+    };
+    if width <= max_px && height <= max_px {
         return art.clone();
     }
+    let huge = u64::from(width) * u64::from(height) > ROW_SHRINK_PIXELS;
+    let shrunk = (is_png && huge)
+        .then(|| shrink_png_rows(&art.data, width, height, max_px.saturating_mul(2)))
+        .flatten();
+    let image = match shrunk {
+        Some(image) => DynamicImage::ImageRgb8(image),
+        None => match image::load_from_memory(&art.data) {
+            Ok(image) => image,
+            Err(_) => return art.clone(),
+        },
+    };
 
     // `resize` preserves aspect ratio within the max×max box; Lanczos3 is the
     // quality choice for downscaling photographic art.
@@ -45,6 +64,78 @@ pub fn resize_cover(art: &CoverArt, max_px: u32, quality: u8) -> CoverArt {
         kind: art.kind,
         description: art.description.clone(),
     }
+}
+
+/// The size past which a PNG cover is shrunk by [`shrink_png_rows`] before the
+/// final pass instead of being decoded whole: 16 megapixels, 64 MB as RGBA.
+/// Covers below it, which is nearly all of them, come out exactly as before.
+const ROW_SHRINK_PIXELS: u64 = 16_000_000;
+
+/// Shrink a PNG of `width`×`height` so its longer side is at most `box_px`,
+/// reading it a row at a time and averaging each output pixel over the input
+/// pixels it covers (#622).
+///
+/// A PNG decoded whole costs its full size in memory however small the file:
+/// an 11500 px square of a few hundred kilobytes took 600 MB to resize. Read
+/// this way, it costs one input row and one output image. The result is left
+/// at twice the target so the final Lanczos pass still decides the detail.
+///
+/// `None` for what this does not handle (an interlaced PNG, whose rows arrive
+/// in passes, or a stream it cannot read), so the caller decodes it whole.
+fn shrink_png_rows(data: &[u8], width: u32, height: u32, box_px: u32) -> Option<RgbImage> {
+    let mut decoder = png::Decoder::new(Cursor::new(data));
+    decoder.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = decoder.read_info().ok()?;
+    if reader.info().interlaced {
+        return None;
+    }
+    let channels = match reader.output_color_type().0 {
+        png::ColorType::Grayscale => 1,
+        png::ColorType::GrayscaleAlpha => 2,
+        png::ColorType::Rgb => 3,
+        png::ColorType::Rgba => 4,
+        png::ColorType::Indexed => return None,
+    };
+    let scale = f64::from(box_px) / f64::from(width.max(height));
+    let out_w = ((f64::from(width) * scale).round() as u32).clamp(1, width);
+    let out_h = ((f64::from(height) * scale).round() as u32).clamp(1, height);
+    let mut out = RgbImage::new(out_w, out_h);
+    let mut sums = vec![0u64; out_w as usize * 3];
+    let mut counts = vec![0u64; out_w as usize];
+    let flush = |out: &mut RgbImage, row: u32, sums: &mut [u64], counts: &mut [u64]| {
+        for x in 0..out_w as usize {
+            let count = counts[x].max(1);
+            let pixel = std::array::from_fn(|c| (sums[x * 3 + c] / count) as u8);
+            out.put_pixel(x as u32, row, Rgb(pixel));
+        }
+        sums.fill(0);
+        counts.fill(0);
+    };
+    let mut current = 0u32;
+    for y in 0..height {
+        let row = reader.next_row().ok()??;
+        let target = (u64::from(y) * u64::from(out_h) / u64::from(height)) as u32;
+        if target != current {
+            flush(&mut out, current, &mut sums, &mut counts);
+            current = target;
+        }
+        for (x, pixel) in row.data().chunks_exact(channels).enumerate() {
+            let column = (x as u64 * u64::from(out_w) / u64::from(width)) as usize;
+            // Gray is spread over the three channels; alpha is dropped, as
+            // the JPEG it becomes has none.
+            let rgb = if channels < 3 {
+                [pixel[0]; 3]
+            } else {
+                [pixel[0], pixel[1], pixel[2]]
+            };
+            for (c, value) in rgb.into_iter().enumerate() {
+                sums[column * 3 + c] += u64::from(value);
+            }
+            counts[column] += 1;
+        }
+    }
+    flush(&mut out, current, &mut sums, &mut counts);
+    Some(out)
 }
 
 #[cfg(test)]
@@ -105,5 +196,77 @@ mod tests {
             ..CoverArt::default()
         };
         assert_eq!(resize_cover(&junk, 500, 85), junk);
+    }
+
+    /// #622: the row-by-row shrink averages each output pixel over the input
+    /// it covers, keeps the aspect ratio, spreads gray over the three channels
+    /// and drops alpha.
+    #[test]
+    fn a_png_shrinks_row_by_row() {
+        // Left half red, right half blue, 400×200 down to a 100 px box.
+        let halves = ImageBuffer::from_fn(400, 200, |x, _| {
+            if x < 200 {
+                Rgb([255u8, 0, 0])
+            } else {
+                Rgb([0, 0, 255])
+            }
+        });
+        let encode = |image: image::DynamicImage| {
+            let mut out = Vec::new();
+            image
+                .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+                .unwrap();
+            out
+        };
+        let shrunk = shrink_png_rows(
+            &encode(image::DynamicImage::ImageRgb8(halves)),
+            400,
+            200,
+            100,
+        )
+        .unwrap();
+        assert_eq!(shrunk.dimensions(), (100, 50));
+        assert_eq!(shrunk.get_pixel(10, 25), &Rgb([255, 0, 0]));
+        assert_eq!(shrunk.get_pixel(90, 25), &Rgb([0, 0, 255]));
+
+        // Alternating black and white rows average to mid-gray.
+        let stripes = ImageBuffer::from_fn(64, 64, |_, y| {
+            image::Luma([if y % 2 == 0 { 0u8 } else { 254 }])
+        });
+        let shrunk = shrink_png_rows(
+            &encode(image::DynamicImage::ImageLuma8(stripes)),
+            64,
+            64,
+            32,
+        )
+        .unwrap();
+        assert_eq!(shrunk.get_pixel(5, 5), &Rgb([127, 127, 127]));
+
+        let translucent = ImageBuffer::from_pixel(50, 50, image::Rgba([10u8, 20, 30, 0]));
+        let shrunk = shrink_png_rows(
+            &encode(image::DynamicImage::ImageRgba8(translucent)),
+            50,
+            50,
+            10,
+        )
+        .unwrap();
+        assert_eq!(shrunk.get_pixel(3, 3), &Rgb([10, 20, 30]));
+    }
+
+    /// #622: a PNG past the pixel threshold takes the row-by-row path and comes
+    /// out the size and colour the whole decode gave.
+    #[test]
+    fn a_huge_png_cover_is_resized() {
+        let art = CoverArt {
+            mime: "image/png".into(),
+            data: png(4100, 4000),
+            ..CoverArt::default()
+        };
+        let out = resize_cover(&art, 500, 95);
+        assert_eq!(out.mime, "image/jpeg");
+        assert_eq!(dimensions(&out.data), (500, 488));
+        let pixel = image::load_from_memory(&out.data).unwrap().to_rgb8();
+        let Rgb([r, g, b]) = *pixel.get_pixel(250, 244);
+        assert!(r.abs_diff(120) <= 3 && g.abs_diff(40) <= 3 && b.abs_diff(200) <= 3);
     }
 }

@@ -4709,6 +4709,7 @@ version = "1.1.1"
 dependencies = [
  "image",
  "lofty",
+ "png 0.18.1",
  "regex",
  "rusqlite",
  "same-file",

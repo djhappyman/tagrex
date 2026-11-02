@@ -85,6 +85,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   nothing is added, a block is never created, and the encoder, copyright and
   anything else the app has no field for are kept
   ([#621](https://github.com/tagrex/tagrex/issues/621)).
+- Shrinking a cover before it is embedded no longer decodes a cover that
+  already fits, and reads a very large PNG row by row: an 11500 px PNG took
+  over 600 MB of memory to resize and now takes about a fifth of that. A PNG
+  too large to decode at all was embedded at full size, and is resized now
+  ([#622](https://github.com/tagrex/tagrex/issues/622)).
 
 ## [1.1.1] - 2026-11-02
 
