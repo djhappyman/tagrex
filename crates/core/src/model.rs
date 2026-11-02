@@ -1302,14 +1302,24 @@ fn custom_items(path: &Path, container: FileType, tag: Tag) -> Result<Vec<Custom
             concrete.iter().filter_map(user_text_item).collect()
         }
         TagType::Mp4Ilst => ilst_custom_items(&Ilst::from(tag)),
-        TagType::VorbisComments => read_vorbis(path, container, custom_item_options())?
-            .map(|tag| {
-                tag.items()
-                    .filter(|(name, _)| !maps_to_item_key(TagType::VorbisComments, name))
-                    .map(|(name, value)| (name.to_string(), value.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        // Without the backend's implicit conversion, which parses a track or
+        // disc number into an integer: the comment comes through as the file
+        // spells it, for `insert_concrete_items` to put the digits back (#638).
+        TagType::VorbisComments => read_vorbis(
+            path,
+            container,
+            custom_item_options().implicit_conversions(false),
+        )?
+        .map(|tag| {
+            tag.items()
+                .filter(|(name, _)| {
+                    !maps_to_item_key(TagType::VorbisComments, name)
+                        || number_pair_fields(name).is_some()
+                })
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect()
+        })
+        .unwrap_or_default(),
         TagType::Ape => read_ape(path, container, custom_item_options())?
             .map(|tag| {
                 tag.into_iter()
@@ -1378,6 +1388,14 @@ fn insert_concrete_items(
     // the last showed one of them and let any edit drop the rest.
     let mut repeated = std::collections::BTreeSet::new();
     for (name, value) in custom {
+        // A Vorbis track or disc number as the file spells it (#638): it only
+        // puts the digits back on the number the generic read already holds.
+        if tag_type == TagType::VorbisComments {
+            if let Some((number, total)) = number_pair_fields(&name) {
+                keep_spelled_number_pair(tags, &number, &total, &value);
+                continue;
+            }
+        }
         let (field, from_alias) = match field_for_name_on_tag(&name, tag_type) {
             Some(field) => (field, false),
             None => field_for_custom_name(&name),
@@ -2273,6 +2291,62 @@ fn agreeing_value(field: &TagField, old: &str, model: &str) -> String {
     if agrees { old } else { model }.to_string()
 }
 
+/// The number and total fields a format's number-pair item states: ID3v2's
+/// `TRCK`/`TPOS`, APE's `Track`/`Disc`, Vorbis's `TRACKNUMBER`/`DISCNUMBER`.
+fn number_pair_fields(name: &str) -> Option<(TagField, TagField)> {
+    match name.to_ascii_uppercase().as_str() {
+        "TRCK" | "TRACK" | "TRACKNUMBER" => Some((TagField::TrackNumber, TagField::TrackTotal)),
+        "TPOS" | "DISC" | "DISCNUMBER" => Some((TagField::DiscNumber, TagField::DiscTotal)),
+        _ => None,
+    }
+}
+
+/// Whether two spellings state the same number, as `01` and `1` do.
+fn same_number(a: &str, b: &str) -> bool {
+    matches!(
+        (a.trim().parse::<u32>(), b.trim().parse::<u32>()),
+        (Ok(a), Ok(b)) if a == b
+    )
+}
+
+/// A number pair the backend built from integers, as `1/3`, with each part
+/// spelled the way the model spells that number (#638). Only the digits come
+/// from the model; what the pair states is the backend's.
+fn number_pair_as_spelled(
+    text: &str,
+    number: &TagField,
+    total: &TagField,
+    tags: &TagMap,
+) -> String {
+    let spelled = |part: &str, field: &TagField| match tags.get(field) {
+        Some(model) if same_number(part, model) => model.trim().to_string(),
+        _ => part.to_string(),
+    };
+    match text.split_once('/') {
+        Some((first, second)) => format!("{}/{}", spelled(first, number), spelled(second, total)),
+        None => spelled(text, number),
+    }
+}
+
+/// Put a number pair's own digits back on the fields a read parsed it into
+/// (#638): where the field holds the same number, it takes the file's spelling.
+fn keep_spelled_number_pair(tags: &mut TagMap, number: &TagField, total: &TagField, text: &str) {
+    let (first, second) = match text.split_once('/') {
+        Some((first, second)) => (first, Some(second)),
+        None => (text, None),
+    };
+    for (field, part) in [(number, Some(first)), (total, second)] {
+        let Some(part) = part.map(str::trim) else {
+            continue;
+        };
+        if let Some(value) = tags.get_mut(field) {
+            if same_number(value, part) {
+                *value = part.to_string();
+            }
+        }
+    }
+}
+
 /// Write text tags into an MP3's ID3v2 tag, then confirm they actually landed.
 ///
 /// A structurally broken container — most often an AIFF whose chunk chain is
@@ -2323,6 +2397,16 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
     // pushed above become one well-formed TPE1/TCON rather than duplicate
     // frames (#46).
     let mut updated = Id3v2Tag::from(generic);
+    // The conversion builds `TRCK` and `TPOS` from the numbers as integers, so
+    // a model's `01` went out as `1` (#638).
+    updated.retain_mut(|frame| {
+        if let Frame::Text(text) = frame {
+            if let Some((number, total)) = number_pair_fields(text.id().as_str()) {
+                text.value = number_pair_as_spelled(&text.value, &number, &total, tags).into();
+            }
+        }
+        true
+    });
 
     // The custom fields ID3v2 has no frame of its own for go on as `TXXX` frames
     // named the way the file spells them; the ones it does have a frame for went
@@ -3262,6 +3346,20 @@ fn save_with_custom_items(
                 .unwrap_or_default()
                 .split_tag();
             let mut merged = remainder.merge_tag(tag);
+            // `Track` and `Disc` are built from the numbers as integers, as
+            // ID3v2's `TRCK` is (#638).
+            for name in ["Track", "Disc"] {
+                let spelled = merged.get(name).and_then(|item| {
+                    let (number, total) = number_pair_fields(name)?;
+                    let text = item.value().text()?;
+                    Some(number_pair_as_spelled(text, &number, &total, tags))
+                });
+                if let Some(Ok(item)) =
+                    spelled.map(|text| ApeItem::new(name.to_string(), ItemValue::Text(text)))
+                {
+                    merged.insert(item);
+                }
+            }
             let stale: Vec<String> = (&merged)
                 .into_iter()
                 .filter(|item| {

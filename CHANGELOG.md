@@ -158,6 +158,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   items, and a `COUNTRY` one, now fold into the field and are rewritten under
   the standard name on the next save
   ([#612](https://github.com/tagrex/tagrex/issues/612)).
+- A track or disc number keeps its leading zero. Any save turned `01/03`
+  into `1/3` in ID3v2 and APE tags, and a FLAC or Ogg file stating `01`
+  showed `1`. MP4 stores the numbers as integers, so it has no zero to keep
+  ([#638](https://github.com/tagrex/tagrex/issues/638)).
 
 ## [1.1.1] - 2026-11-02
 

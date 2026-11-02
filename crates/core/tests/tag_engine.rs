@@ -3245,3 +3245,101 @@ fn saving_the_same_tags_twice_writes_the_same_bytes() {
         assert_eq!(ids[seeded_ids.len()..], ["COMM", "TDRC"], "{extension}");
     }
 }
+
+/// #638: a save dropped the leading zero from a track or disc number. ID3v2's
+/// `TRCK`/`TPOS` and APE's `Track`/`Disc` were built from the numbers as
+/// integers, and a Vorbis read parsed `TRACKNUMBER` into one, so `01/03` came
+/// back as `1/3` after an edit of something else. MP4 keeps the numbers as
+/// integers, so it has no zero to keep and is not checked.
+#[test]
+fn a_track_number_keeps_its_leading_zero() {
+    let fixtures: Vec<(&str, Vec<u8>)> = vec![
+        ("flac", MINIMAL_FLAC.to_vec()),
+        ("mp3", minimal_mp3()),
+        ("wav", minimal_wav()),
+        ("aiff", minimal_aiff()),
+        ("wv", MINIMAL_WAVPACK.to_vec()),
+    ];
+    let numbers = [
+        (TagField::TrackNumber, "01"),
+        (TagField::TrackTotal, "03"),
+        (TagField::DiscNumber, "1"),
+        (TagField::DiscTotal, "02"),
+    ];
+    for (extension, bytes) in fixtures {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-test-leading-zero-{}.{extension}",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write fixture");
+        let read = TagEngine::read(&path).expect("read tags");
+        let mut tags = read.tags.clone();
+        tags.insert(TagField::Title, "Title".to_string());
+        for (field, value) in &numbers {
+            tags.insert(field.clone(), value.to_string());
+        }
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format: read.format,
+            tags,
+        })
+        .expect("write tags");
+        let back = TagEngine::read(&path).expect("read tags");
+        for (field, value) in &numbers {
+            assert_eq!(
+                back.tags.get(field).map(String::as_str),
+                Some(*value),
+                "{field:?} on .{extension}"
+            );
+        }
+
+        // An edit writes what was typed, zero or not.
+        let mut tags = back.tags.clone();
+        tags.insert(TagField::TrackNumber, "2".to_string());
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format: back.format,
+            tags,
+        })
+        .expect("write tags");
+        let edited = TagEngine::read(&path).expect("read tags").tags;
+        std::fs::remove_file(&path).ok();
+        assert_eq!(
+            edited.get(&TagField::TrackNumber).map(String::as_str),
+            Some("2"),
+            "edited number on .{extension}"
+        );
+        assert_eq!(
+            edited.get(&TagField::TrackTotal).map(String::as_str),
+            Some("03"),
+            "untouched total on .{extension}"
+        );
+    }
+
+    // A Vorbis comment stating the pair in one, as another tagger writes it.
+    use lofty::config::WriteOptions;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+    let path = temp_flac_path("leading-zero-pair");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let mut comments = VorbisComments::new();
+    comments.insert("TRACKNUMBER".to_string(), "07/12".to_string());
+    comments.insert("DISCNUMBER".to_string(), "1/02".to_string());
+    comments
+        .save_to_path(&path, WriteOptions::default())
+        .unwrap();
+    let read = TagEngine::read(&path).expect("read tags").tags;
+    std::fs::remove_file(&path).ok();
+    for (field, value) in [
+        (TagField::TrackNumber, "07"),
+        (TagField::TrackTotal, "12"),
+        (TagField::DiscNumber, "1"),
+        (TagField::DiscTotal, "02"),
+    ] {
+        assert_eq!(
+            read.get(&field).map(String::as_str),
+            Some(value),
+            "{field:?}"
+        );
+    }
+}
