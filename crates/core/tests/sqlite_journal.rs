@@ -4,7 +4,9 @@
 
 use std::path::{Path, PathBuf};
 
-use tagrex_core::journal::{AppliedValue, BatchId, CopyStamp, SqliteJournal, UndoJournal};
+use tagrex_core::journal::{
+    AppliedBatch, AppliedValue, BatchId, CopyStamp, SqliteJournal, UndoJournal,
+};
 use tagrex_core::model::{TagEngine, TagField};
 use tagrex_core::plan::{ChangePlan, Executor, FieldChange, FileChange};
 
@@ -454,4 +456,123 @@ fn what_a_batch_left_survives_a_restart() {
             },
         ]
     );
+}
+
+/// #659: the batch is in the journal, marked interrupted, before the first file
+/// is written, and loses the mark once every file is.
+#[test]
+fn a_batch_is_journaled_before_its_first_write() {
+    use std::sync::atomic::AtomicBool;
+
+    let dir = TempDir::new("write-ahead");
+    let tracks = [dir.flac("a.flac"), dir.flac("b.flac")];
+    let plan = ChangePlan {
+        description: "set".to_string(),
+        changes: tracks
+            .iter()
+            .map(|path| FileChange {
+                path: path.clone(),
+                tag_changes: vec![FieldChange {
+                    field: TagField::Artist,
+                    old: None,
+                    new: Some("Y".to_string()),
+                }],
+                ..FileChange::default()
+            })
+            .collect(),
+        ..ChangePlan::default()
+    };
+    let mut journal = SqliteJournal::open(&dir.db()).unwrap();
+    let mut seen = Vec::new();
+    let batch = Executor::apply_with(
+        &plan,
+        &mut journal,
+        &roots(dir.path()),
+        &mut |_| {
+            // What another process would find, were this one to stop here.
+            let other = SqliteJournal::open(&dir.db()).unwrap();
+            seen.push(
+                other
+                    .batches()
+                    .unwrap()
+                    .iter()
+                    .map(|batch| batch.interrupted)
+                    .collect::<Vec<_>>(),
+            );
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+
+    assert!(!seen.is_empty());
+    assert!(seen.iter().all(|batches| batches == &[true]), "{seen:?}");
+    assert!(!batch.interrupted);
+    let reopened = SqliteJournal::open(&dir.db()).unwrap();
+    let stored = reopened.batch(batch.id).unwrap().unwrap();
+    assert!(!stored.interrupted);
+    assert_eq!(stored.applied_values.len(), 2);
+}
+
+/// #659: a batch the process never finished is still there at the next start,
+/// marked, and undoing it puts back what it reached and skips what it did not.
+#[test]
+fn an_interrupted_batch_can_be_undone_after_a_restart() {
+    let dir = TempDir::new("interrupted");
+    let reached = dir.flac("reached.flac");
+    let moved = dir.path().join("moved.flac");
+    let unreached = dir.flac("unreached.flac");
+    let never_moved = dir.path().join("never-moved.flac");
+    let change = |path: &PathBuf, rename_to: &PathBuf| FileChange {
+        path: path.clone(),
+        tag_changes: vec![FieldChange {
+            field: TagField::Artist,
+            old: None,
+            new: Some("Y".to_string()),
+        }],
+        rename_to: Some(rename_to.clone()),
+        ..FileChange::default()
+    };
+    let plan = ChangePlan {
+        description: "set and move".to_string(),
+        changes: vec![change(&reached, &moved), change(&unreached, &never_moved)],
+        ..ChangePlan::default()
+    };
+    // What the process got done before it stopped: the first file written and
+    // moved, the second not touched.
+    let mut file = TagEngine::read(&reached).unwrap();
+    file.tags.insert(TagField::Artist, "Y".to_string());
+    TagEngine::write(&file).unwrap();
+    std::fs::rename(&reached, &moved).unwrap();
+    SqliteJournal::open(&dir.db())
+        .unwrap()
+        .record(&AppliedBatch {
+            id: BatchId(0),
+            description: plan.description.clone(),
+            message: None,
+            applied_at: 0,
+            plan,
+            created_dirs: Vec::new(),
+            removed_dirs: Vec::new(),
+            allowed_roots: roots(dir.path()),
+            copy_stamps: Vec::new(),
+            applied_values: Vec::new(),
+            interrupted: true,
+        })
+        .unwrap();
+
+    let mut journal = SqliteJournal::open(&dir.db()).unwrap();
+    let batches = journal.batches().unwrap();
+    assert_eq!(batches.len(), 1);
+    assert!(batches[0].interrupted);
+    Executor::undo(&mut journal, batches[0].id, &roots(dir.path())).unwrap();
+
+    assert!(reached.exists() && !moved.exists());
+    assert!(unreached.exists() && !never_moved.exists());
+    for path in [&reached, &unreached] {
+        assert!(!TagEngine::read(path)
+            .unwrap()
+            .tags
+            .contains_key(&TagField::Artist));
+    }
+    assert!(journal.batches().unwrap().is_empty());
 }

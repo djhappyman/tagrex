@@ -733,6 +733,7 @@ export const de = {
   "plan.importSoundeo": "Soundeo-Release importieren",
   "plan.carryingExtras": { one: "mit {n} zusätzlichen Datei", other: "mit {n} zusätzlichen Dateien" },
   "plan.cleanedUp": "aufgeräumt",
+  "plan.interrupted": "vor dem Abschluss unterbrochen",
   // ---- the settings sheet ----
   "settings.discogs.token": "Persönlicher Token",
   "settings.discogs.hint": "Wird für die Suche, das Abrufen von Releases und Covern verwendet.",

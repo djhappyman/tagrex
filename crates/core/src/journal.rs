@@ -61,6 +61,9 @@ pub struct AppliedBatch {
     /// old values over somebody's later edit. Empty for a batch recorded before
     /// this existed; it is undone without the check, as it always was.
     pub applied_values: Vec<AppliedValue>,
+    /// Recorded before its first write and never finished (#659): the process
+    /// stopped part-way through the apply. Undoing it puts back what it reached.
+    pub interrupted: bool,
 }
 
 /// One field of one file as a batch left it (#658).
@@ -138,6 +141,11 @@ pub trait UndoJournal {
         Ok(self.batches()?.into_iter().find(|batch| batch.id == id))
     }
 
+    /// Finish a batch recorded before its write began (#659): add what only the
+    /// end of the write knows (the folders it created and removed, the copy
+    /// stamps, the values it left) and clear its `interrupted` mark.
+    fn finish(&mut self, id: BatchId, batch: &AppliedBatch) -> Result<(), JournalError>;
+
     /// Roll back a whole batch as a unit.
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError>;
 }
@@ -176,6 +184,20 @@ impl UndoJournal for VecJournal {
     fn batches(&self) -> Result<Vec<AppliedBatch>, JournalError> {
         // Newest first, per the trait contract.
         Ok(self.batches.iter().rev().cloned().collect())
+    }
+
+    fn finish(&mut self, id: BatchId, batch: &AppliedBatch) -> Result<(), JournalError> {
+        let stored = self
+            .batches
+            .iter_mut()
+            .find(|stored| stored.id == id)
+            .ok_or(JournalError::UnknownBatch(id))?;
+        *stored = AppliedBatch {
+            id,
+            interrupted: false,
+            ..batch.clone()
+        };
+        Ok(())
     }
 
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError> {
@@ -343,6 +365,13 @@ impl SqliteJournal {
         if !column_exists(&conn, "batches", "message")? {
             conn.execute_batch("ALTER TABLE batches ADD COLUMN message TEXT")?;
         }
+        // The write-ahead mark (#659), added the same way. Every existing row
+        // was recorded after its write had finished.
+        if !column_exists(&conn, "batches", "interrupted")? {
+            conn.execute_batch(
+                "ALTER TABLE batches ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0",
+            )?;
+        }
         // Every child table is read and deleted by its parent's id, and SQLite
         // does not index a foreign key by itself. Without these, each of the
         // lookups below — one per file, several per file — scanned its whole
@@ -375,8 +404,14 @@ impl UndoJournal for SqliteJournal {
     fn record(&mut self, batch: &AppliedBatch) -> Result<BatchId, JournalError> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "INSERT INTO batches (description, message, applied_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params![batch.description, batch.message, batch.applied_at],
+            "INSERT INTO batches (description, message, applied_at, interrupted) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                batch.description,
+                batch.message,
+                batch.applied_at,
+                batch.interrupted
+            ],
         )?;
         let batch_id = tx.last_insert_rowid();
 
@@ -494,71 +529,33 @@ impl UndoJournal for SqliteJournal {
             }
         }
 
-        for dir in &batch.created_dirs {
-            tx.execute(
-                "INSERT INTO created_dirs (batch_id, path) VALUES (?1, ?2)",
-                rusqlite::params![batch_id, dir.to_string_lossy()],
-            )?;
-        }
-        for dir in &batch.removed_dirs {
-            tx.execute(
-                "INSERT INTO removed_dirs (batch_id, path) VALUES (?1, ?2)",
-                rusqlite::params![batch_id, dir.to_string_lossy()],
-            )?;
-        }
-        for root in &batch.allowed_roots {
-            tx.execute(
-                "INSERT INTO allowed_roots (batch_id, path) VALUES (?1, ?2)",
-                rusqlite::params![batch_id, root.to_string_lossy()],
-            )?;
-        }
-        for stamp in &batch.copy_stamps {
-            tx.execute(
-                "INSERT INTO copy_stamps (batch_id, path, len, modified_ns) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![
-                    batch_id,
-                    stamp.path.to_string_lossy(),
-                    i64::try_from(stamp.len).unwrap_or(i64::MAX),
-                    stamp.modified_ns,
-                ],
-            )?;
-        }
-
-        for applied in &batch.applied_values {
-            tx.execute(
-                "INSERT INTO applied_values (batch_id, path, field, value) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                rusqlite::params![
-                    batch_id,
-                    applied.path.to_string_lossy(),
-                    applied.field.to_storage_key(),
-                    applied.value,
-                ],
-            )?;
-        }
+        insert_outcome(&tx, batch_id, batch)?;
 
         tx.commit()?;
         Ok(BatchId(batch_id))
     }
 
     fn batches(&self) -> Result<Vec<AppliedBatch>, JournalError> {
-        let mut batch_stmt = self
-            .conn
-            .prepare("SELECT id, description, message, applied_at FROM batches ORDER BY id DESC")?;
+        let mut batch_stmt = self.conn.prepare(
+            "SELECT id, description, message, applied_at, interrupted FROM batches \
+                 ORDER BY id DESC",
+        )?;
         let rows = batch_stmt.query_map([], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, i64>(3)?,
+                row.get::<_, bool>(4)?,
             ))
         })?;
 
         let mut batches = Vec::new();
         for row in rows {
-            let (id, description, message, applied_at) = row?;
-            batches.push(self.load_batch(id, description, message, applied_at)?);
+            let (id, description, message, applied_at, interrupted) = row?;
+            let mut batch = self.load_batch(id, description, message, applied_at)?;
+            batch.interrupted = interrupted;
+            batches.push(batch);
         }
         Ok(batches)
     }
@@ -567,13 +564,14 @@ impl UndoJournal for SqliteJournal {
         let row = self
             .conn
             .query_row(
-                "SELECT description, message, applied_at FROM batches WHERE id = ?1",
+                "SELECT description, message, applied_at, interrupted FROM batches WHERE id = ?1",
                 rusqlite::params![id.0],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, Option<String>>(1)?,
                         row.get::<_, i64>(2)?,
+                        row.get::<_, bool>(3)?,
                     ))
                 },
             )
@@ -582,10 +580,26 @@ impl UndoJournal for SqliteJournal {
                 rusqlite::Error::QueryReturnedNoRows => Ok(None),
                 other => Err(other),
             })?;
-        row.map(|(description, message, applied_at)| {
-            self.load_batch(id.0, description, message, applied_at)
+        row.map(|(description, message, applied_at, interrupted)| {
+            let mut batch = self.load_batch(id.0, description, message, applied_at)?;
+            batch.interrupted = interrupted;
+            Ok(batch)
         })
         .transpose()
+    }
+
+    fn finish(&mut self, id: BatchId, batch: &AppliedBatch) -> Result<(), JournalError> {
+        let tx = self.conn.transaction()?;
+        let affected = tx.execute(
+            "UPDATE batches SET interrupted = 0 WHERE id = ?1",
+            rusqlite::params![id.0],
+        )?;
+        if affected == 0 {
+            return Err(JournalError::UnknownBatch(id));
+        }
+        insert_outcome(&tx, id.0, batch)?;
+        tx.commit()?;
+        Ok(())
     }
 
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError> {
@@ -598,6 +612,59 @@ impl UndoJournal for SqliteJournal {
         }
         Ok(())
     }
+}
+
+/// The rows only the end of a batch's write knows (#659): the folders it
+/// created and removed, its copy stamps (#604) and the values it left (#658).
+fn insert_outcome(
+    tx: &rusqlite::Transaction<'_>,
+    batch_id: i64,
+    batch: &AppliedBatch,
+) -> Result<(), JournalError> {
+    for dir in &batch.created_dirs {
+        tx.execute(
+            "INSERT INTO created_dirs (batch_id, path) VALUES (?1, ?2)",
+            rusqlite::params![batch_id, dir.to_string_lossy()],
+        )?;
+    }
+    for dir in &batch.removed_dirs {
+        tx.execute(
+            "INSERT INTO removed_dirs (batch_id, path) VALUES (?1, ?2)",
+            rusqlite::params![batch_id, dir.to_string_lossy()],
+        )?;
+    }
+    for root in &batch.allowed_roots {
+        tx.execute(
+            "INSERT INTO allowed_roots (batch_id, path) VALUES (?1, ?2)",
+            rusqlite::params![batch_id, root.to_string_lossy()],
+        )?;
+    }
+    for stamp in &batch.copy_stamps {
+        tx.execute(
+            "INSERT INTO copy_stamps (batch_id, path, len, modified_ns) \
+                 VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                batch_id,
+                stamp.path.to_string_lossy(),
+                i64::try_from(stamp.len).unwrap_or(i64::MAX),
+                stamp.modified_ns,
+            ],
+        )?;
+    }
+
+    for applied in &batch.applied_values {
+        tx.execute(
+            "INSERT INTO applied_values (batch_id, path, field, value) \
+                 VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                batch_id,
+                applied.path.to_string_lossy(),
+                applied.field.to_storage_key(),
+                applied.value,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 impl SqliteJournal {
@@ -639,6 +706,8 @@ impl SqliteJournal {
             allowed_roots: self.load_paths("allowed_roots", id)?,
             copy_stamps: self.load_copy_stamps(id)?,
             applied_values: self.load_applied_values(id)?,
+            // Set by the caller, which read the batch row.
+            interrupted: false,
         })
     }
 

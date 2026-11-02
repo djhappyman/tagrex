@@ -524,6 +524,9 @@ pub enum PlanMessage {
     },
     /// A note: a rule chain has been over the plan this describes.
     CleanedUp,
+    /// A note on a History entry: the batch never finished, the app having
+    /// stopped part-way through it (#659).
+    Interrupted,
 }
 
 impl PlanMessage {
@@ -557,6 +560,7 @@ impl PlanMessage {
             },
             Self::CarryingExtras { .. } => "plan.carryingExtras",
             Self::CleanedUp => "plan.cleanedUp",
+            Self::Interrupted => "plan.interrupted",
         }
     }
 
@@ -639,6 +643,7 @@ impl PlanMessage {
                 n => format!("carrying {n} extra files"),
             },
             Self::CleanedUp => "cleaned up".to_string(),
+            Self::Interrupted => "interrupted before it finished".to_string(),
         }
     }
 }
@@ -6361,11 +6366,19 @@ impl PlanDto {
 impl From<&tagrex_core::journal::AppliedBatch> for BatchDto {
     fn from(batch: &tagrex_core::journal::AppliedBatch) -> Self {
         let stored = decode_plan_message(batch.message.as_deref());
+        let mut notes = stored.as_ref().map(|s| s.notes.clone()).unwrap_or_default();
+        let mut description = batch.description.clone();
+        // A batch the app stopped part-way through (#659) says so.
+        if batch.interrupted {
+            let interrupted = PlanMessage::Interrupted;
+            notes.push(MessageDto::from(&interrupted));
+            description = format!("{description} · {}", interrupted.english());
+        }
         Self {
             id: batch.id.0,
-            description: batch.description.clone(),
-            message: stored.as_ref().map(|s| s.message.clone()),
-            notes: stored.map(|s| s.notes).unwrap_or_default(),
+            description,
+            message: stored.map(|s| s.message),
+            notes,
             applied_at: batch.applied_at,
         }
     }
@@ -6502,6 +6515,40 @@ pub enum AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #659: a batch the app stopped part-way through says so in History, in
+    /// the catalogue and in the English fallback, after its own notes.
+    #[test]
+    fn an_interrupted_batch_is_marked_in_history() {
+        let stored = serde_json::to_string(&StoredMessage {
+            message: MessageDto::from(&PlanMessage::EditTags),
+            notes: vec![MessageDto::from(&PlanMessage::CleanedUp)],
+        })
+        .unwrap();
+        let mut batch = tagrex_core::journal::AppliedBatch {
+            id: BatchId(7),
+            description: "Edit tags".to_string(),
+            message: Some(stored),
+            applied_at: 0,
+            plan: ChangePlan::default(),
+            created_dirs: Vec::new(),
+            removed_dirs: Vec::new(),
+            allowed_roots: Vec::new(),
+            copy_stamps: Vec::new(),
+            applied_values: Vec::new(),
+            interrupted: false,
+        };
+        assert_eq!(BatchDto::from(&batch).notes.len(), 1);
+
+        batch.interrupted = true;
+        let dto = BatchDto::from(&batch);
+        let codes: Vec<&str> = dto.notes.iter().map(|note| note.code.as_str()).collect();
+        assert_eq!(codes, ["plan.cleanedUp", "plan.interrupted"]);
+        assert_eq!(
+            dto.description,
+            "Edit tags · interrupted before it finished"
+        );
+    }
 
     const MINIMAL_FLAC: [u8; 76] = [
         0x66, 0x4c, 0x61, 0x43, 0x00, 0x00, 0x00, 0x22, 0x10, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00,

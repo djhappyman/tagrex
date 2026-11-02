@@ -282,14 +282,11 @@ impl Executor {
         // library half-applied with nothing in the journal for Undo to find
         // (#441), so what was done is tracked and put back before the error goes
         // up. Rollback is best-effort: it tries every step and keeps going.
-        let mut written = Written::new(plan.changes.len());
-        let mut steps = Steps::new(count_steps(plan), progress, cancel);
-        let removed_dirs = match Self::write_phase(plan, &roots, &mut written, &mut steps) {
-            Ok(removed_dirs) => removed_dirs,
-            Err(error) => return Err(written.roll_back_after(plan, &[], error)),
-        };
-        let created_dirs = std::mem::take(&mut written.created_dirs);
-
+        //
+        // A rollback needs a process to run it, though. So the batch is in the
+        // journal before the first write, marked interrupted (#659): should the
+        // process stop part-way, the next start finds it there to undo. A
+        // journal that cannot record it means nothing is written at all.
         let mut batch = AppliedBatch {
             // Placeholder: the journal assigns the real id on record so ids
             // stay unique across restarts.
@@ -298,18 +295,35 @@ impl Executor {
             message: plan.message.clone(),
             applied_at: now_unix_secs(),
             plan: plan.clone(),
-            created_dirs,
-            removed_dirs,
-            allowed_roots: roots,
-            copy_stamps: copy_stamps(plan),
-            applied_values: applied_values(plan),
+            created_dirs: Vec::new(),
+            removed_dirs: Vec::new(),
+            allowed_roots: roots.clone(),
+            copy_stamps: Vec::new(),
+            applied_values: Vec::new(),
+            interrupted: true,
         };
-        match journal.record(&batch) {
-            Ok(id) => batch.id = id,
+        batch.id = journal.record(&batch)?;
+
+        let mut written = Written::new(plan.changes.len());
+        let mut steps = Steps::new(count_steps(plan), progress, cancel);
+        let removed_dirs = match Self::write_phase(plan, &roots, &mut written, &mut steps) {
+            Ok(removed_dirs) => removed_dirs,
             Err(error) => {
-                written.created_dirs = batch.created_dirs;
-                return Err(written.roll_back_after(plan, &batch.removed_dirs, error.into()));
+                let error = written.roll_back_after(plan, &[], error);
+                let _ = journal.rollback(batch.id);
+                return Err(error);
             }
+        };
+        batch.created_dirs = std::mem::take(&mut written.created_dirs);
+        batch.removed_dirs = removed_dirs;
+        batch.copy_stamps = copy_stamps(plan);
+        batch.applied_values = applied_values(plan);
+        batch.interrupted = false;
+        if let Err(error) = journal.finish(batch.id, &batch) {
+            written.created_dirs = batch.created_dirs;
+            let error = written.roll_back_after(plan, &batch.removed_dirs, error.into());
+            let _ = journal.rollback(batch.id);
+            return Err(error);
         }
         Ok(batch)
     }

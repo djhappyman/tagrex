@@ -735,6 +735,7 @@ export const es = {
   "plan.importSoundeo": "Importar lanzamiento de Soundeo",
   "plan.carryingExtras": { one: "llevando {n} archivo adicional", other: "llevando {n} archivos adicionales" },
   "plan.cleanedUp": "limpiado",
+  "plan.interrupted": "interrumpido antes de terminar",
   // ---- the settings sheet ----
   "settings.discogs.token": "Token personal",
   "settings.discogs.hint": "Se usa para buscar, consultar lanzamientos y descargar portadas.",

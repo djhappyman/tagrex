@@ -252,6 +252,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   refused, naming the file, and nothing is written. Undo the later change
   first. Changes recorded by an earlier version are undone as before
   ([#658](https://github.com/tagrex/tagrex/issues/658)).
+- A change is now in the undo history before its first file is written, so
+  if the app is killed or the machine loses power part-way through, the next
+  start lists it in History as interrupted and it can be undone, instead of
+  leaving changed files with nothing to undo
+  ([#659](https://github.com/tagrex/tagrex/issues/659)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -737,6 +737,7 @@ export const ru = {
   "plan.importSoundeo": "Импорт релиза с Soundeo",
   "plan.carryingExtras": { one: "переносится {n} дополнительный файл", few: "переносится {n} дополнительных файла", many: "переносится {n} дополнительных файлов" },
   "plan.cleanedUp": "очищено",
+  "plan.interrupted": "прервано до завершения",
   // ---- the settings sheet ----
   "settings.discogs.token": "Личный токен",
   "settings.discogs.hint": "Используется для поиска, запросов релизов и загрузки обложек.",
