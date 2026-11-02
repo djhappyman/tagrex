@@ -1126,19 +1126,41 @@ fn user_text_item(frame: &Frame<'_>) -> Option<CustomItem> {
     Some((user.description.to_string(), user.content.to_string()))
 }
 
-/// A freeform MP4 atom the generic tag has no key for, as a custom item.
-fn freeform_item(atom: &Atom<'_>) -> Option<CustomItem> {
+/// A freeform MP4 atom the generic tag has no key for, as custom items: one per
+/// text value, because an atom can carry several and every one of them is the
+/// file's (#609). An atom with no text in it gives none.
+fn freeform_items(atom: &Atom<'_>) -> Vec<CustomItem> {
     let AtomIdent::Freeform { mean, name } = atom.ident() else {
-        return None;
+        return Vec::new();
     };
     if maps_to_item_key(TagType::Mp4Ilst, &format!("----:{mean}:{name}")) {
-        return None;
+        return Vec::new();
     }
-    let value = atom.data().find_map(|data| match data {
-        AtomData::UTF8(text) | AtomData::UTF16(text) => Some(text.clone()),
-        _ => None,
-    })?;
-    Some((name.to_string(), value))
+    atom.data()
+        .filter_map(|data| match data {
+            AtomData::UTF8(text) | AtomData::UTF16(text) => Some((name.to_string(), text.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every custom item of an MP4 `ilst`, in the order the file has them.
+fn ilst_custom_items(ilst: &Ilst) -> Vec<CustomItem> {
+    ilst.into_iter()
+        .flat_map(|atom| freeform_items(atom))
+        .collect()
+}
+
+/// The values a custom field is written back as: the file's own, when it had
+/// several and the model still says what they read as joined together (#609),
+/// or else the model's one value. An untouched field therefore goes back the
+/// way it came instead of collapsing into a single joined string.
+fn custom_values_to_write(own: Vec<String>, value: &str) -> Vec<String> {
+    if own.len() > 1 && own.join(&multi_value_separator()) == value {
+        own
+    } else {
+        vec![value.to_string()]
+    }
 }
 
 /// Every format-specific item of the file's `tag_type` block — what
@@ -1163,10 +1185,7 @@ fn custom_items(path: &Path, container: FileType, tag: Tag) -> Result<Vec<Custom
             let concrete = Id3v2Tag::from(tag);
             concrete.iter().filter_map(user_text_item).collect()
         }
-        TagType::Mp4Ilst => Ilst::from(tag)
-            .into_iter()
-            .filter_map(|atom| freeform_item(&atom))
-            .collect(),
+        TagType::Mp4Ilst => ilst_custom_items(&Ilst::from(tag)),
         TagType::VorbisComments => read_vorbis(path, container, custom_item_options())?
             .map(|tag| {
                 tag.items()
@@ -1298,8 +1317,21 @@ impl TagEngine {
             // The rest of the fields are the format-specific items the generic
             // tag has no key for, which it therefore cannot hand over at all
             // (#201) — they come off the concrete tag, under their own names.
-            for (name, value) in custom_items(path, container, tag)? {
+            let custom = custom_items(path, container, tag)?;
+            // A name the block repeats — a comment stated twice, an atom with
+            // several values — is the file stating several values, and they
+            // are joined the way a multi-value field is (#609). Keeping only
+            // the last showed one of them and let any edit drop the rest.
+            let mut repeated = std::collections::BTreeSet::new();
+            for (name, value) in custom {
                 let (field, from_alias) = field_for_custom_name(&name);
+                if !from_alias && !repeated.insert(field.clone()) {
+                    if let Some(joined) = tags.get_mut(&field) {
+                        joined.push_str(&multi_value_separator());
+                        joined.push_str(&value);
+                        continue;
+                    }
+                }
                 insert_read_value(&mut tags, field, from_alias, value);
             }
         }
@@ -2608,6 +2640,11 @@ fn save_with_custom_items(
                 .get_all(VORBIS_ENCODER)
                 .map(str::to_string)
                 .collect();
+            let own: Vec<(String, String)> = existing
+                .items()
+                .filter(|(name, _)| !maps_to_item_key(tag_type, name))
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect();
             let (remainder, _) = existing.split_tag();
             // Carried by hand, because the conversion below measures every image
             // and silently drops one it cannot read — where a plain save wrote it
@@ -2636,7 +2673,14 @@ fn save_with_custom_items(
                 merged.remove(&name).for_each(drop);
             }
             for (name, value) in raw_custom_fields(tags, tag_type) {
-                merged.push(name.to_string(), value.to_string());
+                let own_values = own
+                    .iter()
+                    .filter(|(own_name, _)| own_name.eq_ignore_ascii_case(name))
+                    .map(|(_, own_value)| own_value.clone())
+                    .collect();
+                for value in custom_values_to_write(own_values, value) {
+                    merged.push(name.to_string(), value);
+                }
             }
             merged.save_to_path(path, write_options())?;
         }
@@ -2670,11 +2714,40 @@ fn save_with_custom_items(
             // here the stale ones have to be taken back off before the model's
             // go on.
             let mut merged = Ilst::from(tag);
-            merged.retain(|atom| freeform_item(atom).is_none());
+            let own: Vec<Atom<'static>> = (&merged)
+                .into_iter()
+                .filter(|atom| !freeform_items(atom).is_empty())
+                .cloned()
+                .collect();
+            merged.retain(|atom| freeform_items(atom).is_empty());
             for (name, value) in raw_custom_fields(tags, tag_type) {
+                let own_atoms: Vec<&Atom<'static>> = own
+                    .iter()
+                    .filter(|atom| {
+                        matches!(atom.ident(), AtomIdent::Freeform { name: own_name, .. } if own_name == name)
+                    })
+                    .collect();
+                let own_values = own_atoms
+                    .iter()
+                    .flat_map(|atom| freeform_items(atom))
+                    .map(|(_, own_value)| own_value)
+                    .collect();
+                // An untouched field goes back as the very atoms it came from;
+                // a changed one keeps the namespace the file filed it under
+                // (#609), which only a field new to the file lacks.
+                if custom_values_to_write(own_values, value).len() > 1 {
+                    for atom in own_atoms {
+                        merged.insert(atom.clone());
+                    }
+                    continue;
+                }
+                let mean = match own_atoms.first().map(|atom| atom.ident()) {
+                    Some(AtomIdent::Freeform { mean, .. }) => mean.to_string(),
+                    _ => FREEFORM_MEAN.to_string(),
+                };
                 merged.insert(Atom::new(
                     AtomIdent::Freeform {
-                        mean: FREEFORM_MEAN.into(),
+                        mean: mean.into(),
                         name: name.to_string().into(),
                     },
                     AtomData::UTF8(value.to_string()),

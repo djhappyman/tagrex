@@ -2069,3 +2069,198 @@ fn vorbis_lyrics_round_trip_as_a_custom_field() {
     );
     let _ = std::fs::remove_file(&path);
 }
+
+/// The smallest M4A an encoder writes: a fraction of a second of AAC silence,
+/// with no metadata of its own.
+const MINIMAL_M4A: &[u8] = include_bytes!("fixtures/minimal.m4a");
+
+fn temp_m4a_path(name: &str) -> PathBuf {
+    let mut path = std::env::temp_dir();
+    path.push(format!(
+        "tagrex-tag-engine-test-{name}-{}.m4a",
+        std::process::id()
+    ));
+    path
+}
+
+/// The `ilst` of an M4A, straight off the file.
+fn mp4_ilst(path: &PathBuf) -> lofty::mp4::Ilst {
+    use lofty::config::ParseOptions;
+    use lofty::file::AudioFile;
+    use lofty::mp4::Mp4File;
+    let mut file = std::fs::File::open(path).unwrap();
+    Mp4File::read_from(&mut file, ParseOptions::new())
+        .unwrap()
+        .ilst()
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Every freeform atom of an M4A as (mean, name, text values).
+fn mp4_freeform(path: &PathBuf) -> Vec<(String, String, Vec<String>)> {
+    use lofty::mp4::{AtomData, AtomIdent};
+    mp4_ilst(path)
+        .into_iter()
+        .filter_map(|atom| {
+            let AtomIdent::Freeform { mean, name } = atom.ident() else {
+                return None;
+            };
+            let values = atom
+                .data()
+                .filter_map(|data| match data {
+                    AtomData::UTF8(text) => Some(text.clone()),
+                    _ => None,
+                })
+                .collect();
+            Some((mean.to_string(), name.to_string(), values))
+        })
+        .collect()
+}
+
+/// #609: a freeform atom can carry several values, and another tagger can file
+/// one under its own namespace. The read showed only the first value, and any
+/// edit wrote that one back under the default namespace, so the rest of the
+/// values and the namespace were gone after changing the title.
+#[test]
+fn an_mp4_freeform_atom_keeps_every_value_and_its_namespace() {
+    use lofty::config::WriteOptions;
+    use lofty::mp4::{Atom, AtomData, AtomIdent};
+    use lofty::prelude::TagExt;
+
+    let path = temp_m4a_path("freeform");
+    std::fs::write(&path, MINIMAL_M4A).expect("write fixture");
+    let mut ilst = mp4_ilst(&path);
+    let mut multi = Atom::new(
+        AtomIdent::Freeform {
+            mean: "com.apple.iTunes".into(),
+            name: "MYMULTI".into(),
+        },
+        AtomData::UTF8("one".into()),
+    );
+    multi.push_data(AtomData::UTF8("two".into()));
+    ilst.insert(multi);
+    ilst.insert(Atom::new(
+        AtomIdent::Freeform {
+            mean: "org.example".into(),
+            name: "ELSEWHERE".into(),
+        },
+        AtomData::UTF8("kept".into()),
+    ));
+    ilst.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let read = TagEngine::read(&path).expect("read tags");
+    let multi_field = TagField::Custom("MYMULTI".to_string());
+    let elsewhere_field = TagField::Custom("ELSEWHERE".to_string());
+    assert_eq!(
+        read.tags.get(&multi_field).map(String::as_str),
+        Some("one; two"),
+        "every value of the atom is the file's"
+    );
+
+    // An unrelated edit puts both atoms back the way they were.
+    let mut tags = read.tags.clone();
+    tags.insert(TagField::Title, "Edited".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: read.format,
+        tags: tags.clone(),
+    })
+    .expect("write tags");
+    let atoms = mp4_freeform(&path);
+    assert!(
+        atoms.contains(&(
+            "com.apple.iTunes".to_string(),
+            "MYMULTI".to_string(),
+            vec!["one".to_string(), "two".to_string()]
+        )),
+        "an unrelated edit collapsed the values, got {atoms:?}"
+    );
+    assert!(
+        atoms.contains(&(
+            "org.example".to_string(),
+            "ELSEWHERE".to_string(),
+            vec!["kept".to_string()]
+        )),
+        "an unrelated edit moved the atom to another namespace, got {atoms:?}"
+    );
+
+    // Editing the fields themselves writes the new value, still in the
+    // namespace the file had.
+    tags.insert(multi_field, "three".to_string());
+    tags.insert(elsewhere_field, "changed".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: read.format,
+        tags,
+    })
+    .expect("write tags");
+    let atoms = mp4_freeform(&path);
+    std::fs::remove_file(&path).ok();
+    assert!(
+        atoms.contains(&(
+            "com.apple.iTunes".to_string(),
+            "MYMULTI".to_string(),
+            vec!["three".to_string()]
+        )),
+        "the edited value did not land, got {atoms:?}"
+    );
+    assert!(
+        atoms.contains(&(
+            "org.example".to_string(),
+            "ELSEWHERE".to_string(),
+            vec!["changed".to_string()]
+        )),
+        "an edit moved the atom to another namespace, got {atoms:?}"
+    );
+}
+
+/// #609, the Vorbis side: a comment repeated under one name read as its last
+/// value, and the next edit of anything wrote that value back alone.
+#[test]
+fn a_repeated_custom_comment_survives_an_unrelated_edit() {
+    use lofty::config::WriteOptions;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+
+    let path = temp_flac_path("repeated-comment");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let mut seeded = VorbisComments::default();
+    seeded.push("ARTIST".to_string(), "Original".to_string());
+    seeded.push("SOMEONE_ELSES_FIELD".to_string(), "one".to_string());
+    seeded.push("SOMEONE_ELSES_FIELD".to_string(), "two".to_string());
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(
+        read.tags
+            .get(&TagField::Custom("SOMEONE_ELSES_FIELD".to_string()))
+            .map(String::as_str),
+        Some("one; two")
+    );
+    let mut tags = read.tags.clone();
+    tags.insert(TagField::Artist, "Edited".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Flac,
+        tags,
+    })
+    .expect("write tags");
+
+    let values: Vec<String> = {
+        use lofty::config::ParseOptions;
+        use lofty::file::AudioFile;
+        use lofty::flac::FlacFile;
+        let mut file = std::fs::File::open(&path).unwrap();
+        FlacFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .vorbis_comments()
+            .map(|tag| {
+                tag.get_all("SOMEONE_ELSES_FIELD")
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    std::fs::remove_file(&path).ok();
+    assert_eq!(values, vec!["one".to_string(), "two".to_string()]);
+}

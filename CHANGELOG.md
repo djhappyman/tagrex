@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Embedding, replacing or removing a cover on a FLAC, Ogg, Opus or WavPack file
   no longer deletes the file's custom fields
   ([#606](https://github.com/tagrex/tagrex/issues/606)).
+- A custom field with several values (an M4A atom holding more than one, or a
+  comment repeated in a FLAC or Ogg file) now shows all of them, and editing
+  something else no longer cuts it down to one. An M4A custom field filed under
+  another tagger's namespace stays there when the file is saved
+  ([#609](https://github.com/tagrex/tagrex/issues/609)).
 
 ## [1.1.1] - 2026-11-02
 
