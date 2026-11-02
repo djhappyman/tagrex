@@ -79,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and extended attributes, a read-only file is refused as it is for every other
   format, and the audio is no longer rewritten
   ([#620](https://github.com/tagrex/tagrex/issues/620)).
+- Editing a WAV or an AIFF now also updates its RIFF INFO list or AIFF text
+  chunks, which kept showing the old title, artist or comment to software that
+  reads them. Only what such a block already states is updated or cleared:
+  nothing is added, a block is never created, and the encoder, copyright and
+  anything else the app has no field for are kept
+  ([#621](https://github.com/tagrex/tagrex/issues/621)).
 
 ## [1.1.1] - 2026-11-02
 

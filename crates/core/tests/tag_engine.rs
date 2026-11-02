@@ -2845,3 +2845,176 @@ fn an_edited_or_cleared_rating_reaches_the_file() {
     std::fs::remove_file(&path).ok();
     assert_eq!(left, vec![("other@y".to_string(), 64, 1)]);
 }
+
+/// A minimal AIFF (8 kHz mono 8-bit silence) lofty accepts.
+fn minimal_aiff() -> Vec<u8> {
+    let frames: u32 = 800;
+    let mut comm = Vec::new();
+    comm.extend_from_slice(&1u16.to_be_bytes()); // mono
+    comm.extend_from_slice(&frames.to_be_bytes());
+    comm.extend_from_slice(&8u16.to_be_bytes());
+    // 8000 Hz as an 80-bit extended float.
+    comm.extend_from_slice(&[0x40, 0x0B, 0xFA, 0, 0, 0, 0, 0, 0, 0]);
+    let mut ssnd = vec![0u8; 8]; // offset, block size
+    ssnd.resize(8 + frames as usize, 0);
+    let mut body = Vec::new();
+    for (id, payload) in [(b"COMM", &comm), (b"SSND", &ssnd)] {
+        body.extend_from_slice(id);
+        body.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        body.extend_from_slice(payload);
+    }
+    let mut data = Vec::new();
+    data.extend_from_slice(b"FORM");
+    data.extend_from_slice(&((4 + body.len()) as u32).to_be_bytes());
+    data.extend_from_slice(b"AIFF");
+    data.extend_from_slice(&body);
+    data
+}
+
+/// #621: a WAV or an AIFF is written as ID3v2, so a RIFF INFO list or AIFF
+/// text chunks the file arrived with kept stating the old values beside it.
+/// They follow the model now, keep what the model has no field for, and are
+/// never created.
+#[test]
+fn a_wav_or_aiff_keeps_its_legacy_text_block_in_step() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::iff::aiff::{AiffFile, AiffTextChunks};
+    use lofty::iff::wav::{RiffInfoList, WavFile};
+    use lofty::prelude::TagExt;
+
+    let write = |path: &PathBuf, format: AudioFormat, tags: &BTreeMap<TagField, String>| {
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format,
+            tags: tags.clone(),
+        })
+        .expect("write tags")
+    };
+
+    // WAV.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-riff-info-{}.wav",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_wav()).expect("write fixture");
+    let mut info = RiffInfoList::new();
+    for (id, value) in [
+        ("INAM", "Old title"),
+        ("IART", "Artist"),
+        ("ICRD", "2001-05-17"),
+        ("ITRK", "3/12"),
+        ("ISFT", "Some encoder"),
+        ("ICOP", "(c) Label"),
+    ] {
+        info.insert(id.to_string(), value.to_string());
+    }
+    info.save_to_path(&path, WriteOptions::default()).unwrap();
+    let riff = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        WavFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .riff_info()
+            .map(|list| {
+                let mut items: Vec<(String, String)> = list
+                    .into_iter()
+                    .map(|(id, value)| (id.clone(), value.trim_end_matches('\0').to_string()))
+                    .collect();
+                // The backend's writer does not keep the list's order.
+                items.sort();
+                items
+            })
+            .unwrap_or_default()
+    };
+    let mut tags = TagEngine::read(&path).expect("read tags").tags;
+    tags.insert(TagField::Title, "New title".to_string());
+    tags.insert(TagField::Genre, "House".to_string());
+    // An ID3v2 year beside a full INFO date.
+    tags.insert(TagField::Year, "2001".to_string());
+    write(&path, AudioFormat::Wav, &tags);
+    let pairs = |list: &[(&str, &str)]| -> Vec<(String, String)> {
+        let mut items: Vec<(String, String)> = list
+            .iter()
+            .map(|(id, value)| (id.to_string(), value.to_string()))
+            .collect();
+        items.sort();
+        items
+    };
+    assert_eq!(
+        riff(&path),
+        pairs(&[
+            ("INAM", "New title"),
+            ("IART", "Artist"),
+            // A full date agreeing with the year is kept whole.
+            ("ICRD", "2001-05-17"),
+            // The file's own id and notation for the track number.
+            ("ITRK", "3/12"),
+            ("ISFT", "Some encoder"),
+            ("ICOP", "(c) Label"),
+            // No `IGNR`: a field the block never stated is not added.
+        ])
+    );
+    assert_eq!(
+        TagEngine::read(&path)
+            .unwrap()
+            .tags
+            .get(&TagField::Title)
+            .map(String::as_str),
+        Some("New title")
+    );
+
+    // A clear takes out what the model owns; the rest stays.
+    write(&path, AudioFormat::Wav, &BTreeMap::new());
+    assert_eq!(
+        riff(&path),
+        pairs(&[("ISFT", "Some encoder"), ("ICOP", "(c) Label")])
+    );
+
+    // A file without one does not get one.
+    std::fs::write(&path, minimal_wav()).expect("write fixture");
+    write(&path, AudioFormat::Wav, &tags);
+    assert!(riff(&path).is_empty());
+    std::fs::remove_file(&path).ok();
+
+    // AIFF.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-aiff-text-{}.aiff",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_aiff()).expect("write fixture");
+    let text = AiffTextChunks {
+        name: Some("Old title".to_string()),
+        author: Some("Artist".to_string()),
+        copyright: Some("(c) Label".to_string()),
+        annotations: Some(vec!["Old note".to_string()]),
+        comments: None,
+    };
+    text.save_to_path(&path, WriteOptions::default()).unwrap();
+    let chunks = |path: &PathBuf| {
+        let mut file = std::fs::File::open(path).unwrap();
+        AiffFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .text_chunks()
+            .cloned()
+    };
+    let mut tags = TagEngine::read(&path).expect("read tags").tags;
+    tags.insert(TagField::Title, "New title".to_string());
+    tags.insert(TagField::Comment, "New note".to_string());
+    write(&path, AudioFormat::Aiff, &tags);
+    let after = chunks(&path).expect("text chunks kept");
+    assert_eq!(after.name.as_deref(), Some("New title"));
+    assert_eq!(after.author.as_deref(), Some("Artist"));
+    assert_eq!(after.copyright.as_deref(), Some("(c) Label"));
+    assert_eq!(after.annotations, Some(vec!["New note".to_string()]));
+
+    tags.remove(&TagField::Title);
+    tags.remove(&TagField::Artist);
+    tags.remove(&TagField::Comment);
+    write(&path, AudioFormat::Aiff, &tags);
+    let after = chunks(&path).expect("copyright kept");
+    assert_eq!(after.name, None);
+    assert_eq!(after.author, None);
+    assert_eq!(after.annotations, None);
+    assert_eq!(after.copyright.as_deref(), Some("(c) Label"));
+    std::fs::remove_file(&path).ok();
+}

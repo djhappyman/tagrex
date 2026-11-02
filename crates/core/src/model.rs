@@ -2116,6 +2116,151 @@ fn sync_id3v1(path: &Path, tags: &TagMap) -> Result<(), TagIoError> {
     Ok(())
 }
 
+/// Keep the RIFF INFO list of a WAV, or the text chunks of an AIFF, in step
+/// with the ID3v2 tag just written (#621), the way [`sync_id3v1`] keeps an
+/// ID3v1 tag.
+///
+/// Both containers are written as ID3v2, so a file that arrived with only the
+/// legacy block got the edit in a new ID3v2 chunk beside it, and the old block
+/// went on stating the old title to everything that reads it. So what a block
+/// the file has states is kept in step with the model: a value the model
+/// disagrees with is replaced, one it cleared is taken out. Nothing is added,
+/// since a field the block never stated is not stale, and a block is never
+/// created. What the model has no field of its own for (the encoder, a
+/// copyright, an INFO id it does not know) stays as the file has it, and a
+/// block nothing changed in is not written at all.
+fn sync_iff_text(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
+    let owned = |key: Option<ItemKey>, tag_type: TagType| {
+        key.is_some_and(|key| {
+            !is_provenance_key(key)
+                && !matches!(item_key_to_tag_field(key, tag_type), TagField::Custom(_))
+        })
+    };
+    match container {
+        FileType::Wav => {
+            let mut file = buffered(path)?;
+            let Some(old) = WavFile::read_from(&mut file, tag_only_options())?
+                .riff_info()
+                .cloned()
+            else {
+                return Ok(());
+            };
+            drop(file);
+            let field_of = |id: &str| {
+                ItemKey::from_key(TagType::RiffInfo, id)
+                    .map(|key| item_key_to_tag_field(key, TagType::RiffInfo))
+            };
+            let model = |field: &TagField| tags.get(field).filter(|value| !value.is_empty());
+            let mut synced = RiffInfoList::new();
+            let mut written: std::collections::BTreeSet<TagField> = Default::default();
+            for (id, value) in &old {
+                if !owned(ItemKey::from_key(TagType::RiffInfo, id), TagType::RiffInfo) {
+                    synced.insert(id.clone(), value.clone());
+                    continue;
+                }
+                // The file's own id keeps the value: a track number stays in
+                // `ITRK` if that is where the file had it.
+                let Some(field) = field_of(id) else { continue };
+                // A track number that states the total as well, as `1/15`,
+                // goes on stating both.
+                let wanted = if field == TagField::TrackNumber && value.contains('/') {
+                    model(&field).map(|number| match model(&TagField::TrackTotal) {
+                        Some(total) => format!("{number}/{total}"),
+                        None => number.clone(),
+                    })
+                } else {
+                    model(&field).cloned()
+                };
+                if let Some(wanted) = wanted {
+                    if written.insert(field.clone()) {
+                        synced.insert(id.clone(), agreeing_value(&field, value, &wanted));
+                    }
+                }
+            }
+            // In any order: the backend's writer does not keep the list's.
+            let sorted = |list: &RiffInfoList| {
+                let mut items: Vec<(String, String)> = list.into_iter().cloned().collect();
+                items.sort();
+                items
+            };
+            if sorted(&old) == sorted(&synced) {
+                return Ok(());
+            }
+            if synced.is_empty() {
+                let mut handle = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)?;
+                TagType::RiffInfo.remove_from(&mut handle, write_options())?;
+            } else {
+                synced.save_to_path(path, write_options())?;
+            }
+        }
+        FileType::Aiff => {
+            let mut file = buffered(path)?;
+            let Some(old) = AiffFile::read_from(&mut file, tag_only_options())?
+                .text_chunks()
+                .cloned()
+            else {
+                return Ok(());
+            };
+            drop(file);
+            let model = |field: &TagField| tags.get(field).filter(|value| !value.is_empty());
+            let mut synced = old.clone();
+            if old.name.is_some() {
+                synced.name = model(&TagField::Title).cloned();
+            }
+            if old.author.is_some() {
+                synced.author = model(&TagField::Artist).cloned();
+            }
+            // Annotations and comments both read as the comment. One that
+            // still says what the model says leaves both as they were, since a
+            // comment carries a timestamp and a marker the model has no room
+            // for; otherwise the model's comment becomes the one annotation.
+            let comment = model(&TagField::Comment);
+            let stated: Vec<&str> = old
+                .annotations
+                .iter()
+                .flatten()
+                .map(String::as_str)
+                .chain(old.comments.iter().flatten().map(|note| note.text.as_str()))
+                .collect();
+            let kept = stated.is_empty()
+                || comment.is_some_and(|comment| stated.contains(&comment.as_str()));
+            if !kept {
+                synced.annotations = comment.map(|comment| vec![comment.clone()]);
+                synced.comments = None;
+            }
+            if synced == old {
+                return Ok(());
+            }
+            if synced.is_empty() {
+                let mut handle = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(path)?;
+                TagType::AiffText.remove_from(&mut handle, write_options())?;
+            } else {
+                synced.save_to_path(path, write_options())?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// The value a legacy block gets for `field`: its own `old` one where that
+/// already agrees with the model, so a full date the model shows as a year is
+/// not cut down to it (#621); the model's otherwise.
+fn agreeing_value(field: &TagField, old: &str, model: &str) -> String {
+    let stated = old.trim_end_matches('\0');
+    let agrees = match field {
+        TagField::Year => stated.get(..4) == Some(model) || stated == model,
+        _ => stated == model,
+    };
+    if agrees { old } else { model }.to_string()
+}
+
 /// Write text tags into an MP3's ID3v2 tag, then confirm they actually landed.
 ///
 /// A structurally broken container — most often an AIFF whose chunk chain is
@@ -2128,13 +2273,13 @@ fn sync_id3v1(path: &Path, tags: &TagMap) -> Result<(), TagIoError> {
 fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), TagIoError> {
     save_id3v2(path, container, tags)?;
     if id3v2_write_landed(path, container, tags)? {
-        return Ok(());
+        return sync_iff_text(path, container, tags);
     }
     // The write was a silent no-op. Repair a broken AIFF once and retry.
     if container == FileType::Aiff && repair_aiff_container(path)? {
         save_id3v2(path, container, tags)?;
         if id3v2_write_landed(path, container, tags)? {
-            return Ok(());
+            return sync_iff_text(path, container, tags);
         }
     }
     Err(TagIoError::Malformed(format!(
