@@ -3491,17 +3491,16 @@ fn save_with_custom_items(
                 .filter(|(name, _)| !maps_to_item_key(tag_type, name))
                 .map(|(name, value)| (name.to_string(), value.to_string()))
                 .collect();
-            // The label has three names here and the backend writes it under
-            // `PUBLISHER` whichever the file used, so a save turned the
-            // standard `ORGANIZATION` (or `LABEL`) into another name (#646). It
-            // goes back under the name its value was read from: the last one,
-            // since the read keeps the last.
-            let label_name = existing
+            // Several fields have more than one name here, and the backend
+            // writes each under one of them whichever the file used, so a save
+            // turned the standard `ORGANIZATION` (or `LABEL`) into `PUBLISHER`
+            // (#646), `ALBUM ARTIST` into `ALBUMARTIST` and `TOTALTRACKS` into
+            // `TRACKTOTAL` (#647). Each goes back under the name its value was
+            // read from.
+            let own_names: Vec<(TagField, String)> = existing
                 .items()
-                .map(|(name, _)| name)
-                .filter(|name| is_vorbis_label_name(name))
-                .last()
-                .map(str::to_string);
+                .filter_map(|(name, _)| Some((vorbis_field_of(name)?, name.to_string())))
+                .collect();
             let (remainder, _) = existing.split_tag();
             // Carried by hand, because the conversion below measures every image
             // and silently drops one it cannot read — where a plain save wrote it
@@ -3512,12 +3511,7 @@ fn save_with_custom_items(
                 tag.remove_picture(0);
             }
             let mut merged = remainder.merge_tag(tag);
-            if let Some(name) = label_name.filter(|name| name != VORBIS_PUBLISHER) {
-                let labels: Vec<String> = merged.remove(VORBIS_PUBLISHER).collect();
-                for label in labels {
-                    merged.push(name.clone(), label);
-                }
-            }
+            rename_to_own_names(&mut merged, &own_names);
             merged.set_vendor(vendor);
             merged.remove(VORBIS_ENCODER).for_each(drop);
             for encoder in encoders {
@@ -3641,16 +3635,44 @@ fn save_with_custom_items(
     Ok(())
 }
 
-/// The Vorbis comment name the backend writes the label under.
-const VORBIS_PUBLISHER: &str = "PUBLISHER";
+/// The model field a Vorbis comment name is read into, if the backend knows the
+/// name.
+fn vorbis_field_of(name: &str) -> Option<TagField> {
+    ItemKey::from_key(TagType::VorbisComments, name)
+        .map(|key| item_key_to_tag_field(key, TagType::VorbisComments))
+}
 
-/// Whether a Vorbis comment name is one the label is read from (#646):
-/// `ORGANIZATION` is the format's own, `LABEL` is common, and `PUBLISHER` is
-/// what the backend writes.
-fn is_vorbis_label_name(name: &str) -> bool {
-    ["ORGANIZATION", "LABEL", VORBIS_PUBLISHER]
-        .iter()
-        .any(|label| label.eq_ignore_ascii_case(name))
+/// Move each field `vorbis` states under a name the file did not use for it
+/// to the name the file did (#646, #647). `own_names` is the file's comments
+/// in order, by field; where it has several names for one field, the last is
+/// the one the read kept. A field the file already states under the written
+/// name, or does not state at all, is left as written.
+fn rename_to_own_names(vorbis: &mut VorbisComments, own_names: &[(TagField, String)]) {
+    let mut written: Vec<String> = vorbis.items().map(|(name, _)| name.to_string()).collect();
+    written.dedup();
+    for name in written {
+        let Some(field) = vorbis_field_of(&name) else {
+            continue;
+        };
+        let own: Vec<&String> = own_names
+            .iter()
+            .filter(|(own_field, _)| *own_field == field)
+            .map(|(_, own_name)| own_name)
+            .collect();
+        if own
+            .iter()
+            .any(|own_name| own_name.eq_ignore_ascii_case(&name))
+        {
+            continue;
+        }
+        let Some(own_name) = own.last() else {
+            continue;
+        };
+        let values: Vec<String> = vorbis.remove(&name).collect();
+        for value in values {
+            vorbis.push(own_name.to_string(), value);
+        }
+    }
 }
 
 /// Load the file's primary tag (cloned, owned) or a fresh empty one, so the

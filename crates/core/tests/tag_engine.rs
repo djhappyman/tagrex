@@ -2461,6 +2461,77 @@ fn the_vorbis_label_keeps_the_name_the_file_gave_it() {
 }
 
 #[test]
+fn a_vorbis_field_keeps_the_alternative_name_the_file_gave_it() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::flac::FlacFile;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+
+    let comments = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        let mut items: Vec<(String, String)> = FlacFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .vorbis_comments()
+            .map(|tag| {
+                tag.items()
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        items.sort();
+        items
+    };
+    let path = temp_flac_path("alternative-names");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let mut seeded = VorbisComments::default();
+    for (name, value) in [
+        ("ARTIST", "Original"),
+        ("ALBUM ARTIST", "Various Artists"),
+        ("TRACKNUMBER", "3"),
+        ("TOTALTRACKS", "12"),
+        ("DISCNUMBER", "1"),
+        ("TOTALDISCS", "2"),
+    ] {
+        seeded.push(name.to_string(), value.to_string());
+    }
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    let before = comments(&path);
+
+    let mut file = TagEngine::read(&path).unwrap();
+    assert_eq!(
+        file.tags.get(&TagField::AlbumArtist).map(String::as_str),
+        Some("Various Artists")
+    );
+    assert_eq!(
+        file.tags.get(&TagField::TrackTotal).map(String::as_str),
+        Some("12")
+    );
+    file.tags.insert(TagField::Title, "New title".into());
+    TagEngine::write(&file).unwrap();
+    let mut expected = before.clone();
+    expected.push(("TITLE".to_string(), "New title".to_string()));
+    expected.sort();
+    assert_eq!(
+        comments(&path),
+        expected,
+        "an unrelated edit renames nothing"
+    );
+
+    let mut file = TagEngine::read(&path).unwrap();
+    file.tags.insert(TagField::AlbumArtist, "Someone".into());
+    file.tags.insert(TagField::TrackTotal, "13".into());
+    TagEngine::write(&file).unwrap();
+    let after = comments(&path);
+    assert!(after.contains(&("ALBUM ARTIST".to_string(), "Someone".to_string())));
+    assert!(after.contains(&("TOTALTRACKS".to_string(), "13".to_string())));
+    assert!(after
+        .iter()
+        .all(|(name, _)| name != "ALBUMARTIST" && name != "TRACKTOTAL"));
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
 fn vorbis_lyrics_round_trip_as_a_custom_field() {
     let path = temp_flac_path("lyrics");
     std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");

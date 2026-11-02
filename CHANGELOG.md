@@ -200,6 +200,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `ORGANIZATION` (the format's own name for it) or `LABEL` but always written
   back as `PUBLISHER`; it now goes back under the name the file used
   ([#646](https://github.com/tagrex/tagrex/issues/646)).
+- The same holds now for every FLAC and Ogg field with more than one common
+  name: `ALBUM ARTIST`, `TOTALTRACKS`, `TOTALDISCS` and the like stay as the
+  file spells them instead of turning into `ALBUMARTIST`, `TRACKTOTAL` and
+  `DISCTOTAL` on a save
+  ([#647](https://github.com/tagrex/tagrex/issues/647)).
 
 ## [1.1.1] - 2026-11-02
 
