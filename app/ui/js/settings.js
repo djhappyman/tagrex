@@ -106,6 +106,7 @@ function setLanguageChoice(mode) {
     hooks.retranslate();
     relabelImportFields();
     renderShortcuts();
+    setMediaGlyphChoice();
   });
 }
 
@@ -425,10 +426,13 @@ function setMediaGlyphChoice() {
     for (const opt of MEDIA_GLYPH_SET_OPTIONS) {
       const o = document.createElement("option");
       o.value = opt.value;
-      o.textContent = opt.label;
       sel.append(o);
     }
   }
+  // Labelled on every call, so a language change shows (#626).
+  MEDIA_GLYPH_SET_OPTIONS.forEach((opt, i) => {
+    sel.options[i].textContent = opt.labelKey ? t(opt.labelKey) : opt.label;
+  });
   sel.value = mediaGlyphSet();
 }
 

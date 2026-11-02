@@ -102,6 +102,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   language: in the preset list, each job's presets menu, the preset editor and
   a copy made with Duplicate. They are translated in all seven languages now
   ([#625](https://github.com/tagrex/tagrex/issues/625)).
+- Settings: the Media glyphs row (its label, its hint and the two descriptive
+  choices in its menu) was English in every language
+  ([#626](https://github.com/tagrex/tagrex/issues/626)).
 
 ## [1.1.1] - 2026-11-02
 

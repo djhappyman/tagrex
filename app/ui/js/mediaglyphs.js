@@ -15,8 +15,12 @@ export const MEDIA_GLYPH_SETS = {
 };
 
 export const MEDIA_GLYPH_SET_OPTIONS = [
-  { value: "ours", label: "Ours (current)" },
-  { value: "ours-plus", label: "Ours+ (Tabler vinyl, smaller CD centre)" },
+  { value: "ours", label: "Ours (current)", labelKey: "settings.mediaGlyphs.ours" },
+  {
+    value: "ours-plus",
+    label: "Ours+ (Tabler vinyl, smaller CD centre)",
+    labelKey: "settings.mediaGlyphs.oursPlus",
+  },
   { value: "phosphor-thin", label: "Phosphor thin" },
   { value: "phosphor-light", label: "Phosphor light" },
   { value: "phosphor-regular", label: "Phosphor regular" },
