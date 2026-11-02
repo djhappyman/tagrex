@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - An M4A tempo of 0, which many taggers write to mean there is none, no longer
   shows as a BPM of 0, and saving the file leaves it as it was
   ([#611](https://github.com/tagrex/tagrex/issues/611)).
+- The URL field is now saved to FLAC, Ogg, Opus, M4A, WavPack, Monkey's Audio
+  and Musepack files, as a `WWW` item; before, it was dropped on save without
+  a word. A `WWW` item another tagger wrote now shows as the URL
+  ([#613](https://github.com/tagrex/tagrex/issues/613)).
 
 ## [1.1.1] - 2026-11-02
 

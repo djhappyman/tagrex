@@ -2386,3 +2386,59 @@ fn an_mp4_tempo_of_zero_is_no_tempo_and_stays_as_it_was() {
         "an unrelated edit rewrote the atom"
     );
 }
+
+/// #613: the URL went out under ID3v2's `WOAF` key, which only ID3v2 maps; on
+/// every other tag type the backend dropped it on save, without an error.
+#[test]
+fn the_url_is_kept_on_every_tag_type() {
+    let url = "https://example.com/release/12345".to_string();
+    let fixtures: [(&str, &[u8]); 3] = [
+        ("flac", &MINIMAL_FLAC),
+        ("m4a", MINIMAL_M4A),
+        ("wv", &MINIMAL_WAVPACK),
+    ];
+    for (extension, bytes) in fixtures {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-test-url-{}.{extension}",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write fixture");
+        let read = TagEngine::read(&path).expect("read tags");
+        let mut tags = read.tags.clone();
+        tags.insert(TagField::Url, url.clone());
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format: read.format,
+            tags,
+        })
+        .expect("write tags");
+        let back = TagEngine::read(&path).expect("read tags").tags;
+        std::fs::remove_file(&path).ok();
+        assert_eq!(back.get(&TagField::Url), Some(&url), "lost on .{extension}");
+        assert_eq!(
+            back.get(&TagField::Custom("WWW".to_string())),
+            None,
+            "the URL must read back as the URL on .{extension}"
+        );
+    }
+}
+
+/// #613: the `WWW` comment other taggers write is the URL.
+#[test]
+fn a_www_comment_reads_as_the_url() {
+    use lofty::config::WriteOptions;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+
+    let path = temp_flac_path("www-comment");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let mut seeded = VorbisComments::default();
+    seeded.push("www".to_string(), "https://example.com/a".to_string());
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    let read = TagEngine::read(&path).expect("read tags");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        read.tags.get(&TagField::Url).map(String::as_str),
+        Some("https://example.com/a")
+    );
+}

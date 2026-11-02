@@ -1268,13 +1268,46 @@ fn custom_items(path: &Path, container: FileType, tag: Tag) -> Result<Vec<Custom
 /// The custom fields that have no generic key for `tag_type`, and so have to be
 /// put onto the concrete tag by name. A custom field whose name *does* map is
 /// left to the generic tag, which spells it the way the format wants.
+///
+/// A model field the generic tag cannot carry on `tag_type` at all goes the same
+/// way, under its name from [`field_name_on_tag`].
 fn raw_custom_fields(tags: &TagMap, tag_type: TagType) -> impl Iterator<Item = (&str, &str)> {
     tags.iter().filter_map(move |(field, value)| match field {
-        TagField::Custom(name) if item_key_for_custom_name(tag_type, name).is_none() => {
-            Some((name.as_str(), value.as_str()))
+        TagField::Custom(name) => item_key_for_custom_name(tag_type, name)
+            .is_none()
+            .then_some((name.as_str(), value.as_str())),
+        other => field_name_on_tag(other, tag_type).map(|name| (name, value.as_str())),
+    })
+}
+
+/// The name the URL is stored under where the format has no frame for it.
+const URL_ITEM_NAME: &str = "WWW";
+
+/// The name a model field is written under, by hand, on a tag type whose
+/// generic tag has no key for it (#613). The backend maps the URL to ID3v2's
+/// `WOAF` and nothing else, and drops the item from every other tag type on
+/// save; `WWW` is what most taggers write there instead.
+fn field_name_on_tag(field: &TagField, tag_type: TagType) -> Option<&'static str> {
+    match field {
+        TagField::Url
+            if matches!(
+                tag_type,
+                TagType::VorbisComments | TagType::Ape | TagType::Mp4Ilst
+            ) =>
+        {
+            Some(URL_ITEM_NAME)
         }
         _ => None,
-    })
+    }
+}
+
+/// The model field a format-specific item name is, on `tag_type` — the inverse
+/// of [`field_name_on_tag`].
+fn field_for_name_on_tag(name: &str, tag_type: TagType) -> Option<TagField> {
+    let url = TagField::Url;
+    field_name_on_tag(&url, tag_type)
+        .filter(|own| own.eq_ignore_ascii_case(name))
+        .map(|_| url)
 }
 
 /// Facade over the tag I/O backend (lofty). The rest of the codebase must
@@ -1383,7 +1416,10 @@ impl TagEngine {
             // the last showed one of them and let any edit drop the rest.
             let mut repeated = std::collections::BTreeSet::new();
             for (name, value) in custom {
-                let (field, from_alias) = field_for_custom_name(&name);
+                let (field, from_alias) = match field_for_name_on_tag(&name, tag_type) {
+                    Some(field) => (field, false),
+                    None => field_for_custom_name(&name),
+                };
                 if !from_alias && !repeated.insert(field.clone()) {
                     if let Some(joined) = tags.get_mut(&field) {
                         joined.push_str(&multi_value_separator());
@@ -2972,6 +3008,8 @@ fn legacy_alias_field(name: &str) -> Option<TagField> {
 /// tag instead — see [`raw_custom_fields`].
 fn item_key_for(field: &TagField, tag_type: TagType) -> Option<ItemKey> {
     match field {
+        // Written by name instead, onto the concrete tag (#613).
+        field if field_name_on_tag(field, tag_type).is_some() => None,
         TagField::Bpm if tag_type == TagType::VorbisComments => Some(ItemKey::Bpm),
         TagField::Publisher if matches!(tag_type, TagType::Mp4Ilst | TagType::Ape) => {
             Some(ItemKey::Label)
@@ -3170,6 +3208,7 @@ mod tests {
             TagField::Isrc,
             TagField::InitialKey,
             TagField::CatalogNumber,
+            TagField::Url,
             TagField::MediaType,
         ]
     }
@@ -3191,9 +3230,13 @@ mod tests {
         let mut holes = Vec::new();
         for tag_type in tag_types {
             for field in known_fields() {
+                // Either the generic tag can carry it, or it is written onto
+                // the concrete tag by name (#613) — the URL was missing from
+                // this list, and so was its hole.
                 let mapped = item_key_for(&field, tag_type)
                     .and_then(|key| key.map_key(tag_type))
-                    .is_some();
+                    .is_some()
+                    || field_name_on_tag(&field, tag_type).is_some();
                 if !mapped {
                     holes.push(format!("{field:?} on {tag_type:?}"));
                 }
@@ -3237,8 +3280,12 @@ mod tests {
             item_key_to_tag_field(ItemKey::IntegerBpm, TagType::Id3v2),
             TagField::Bpm
         );
-        // Every other field on Vorbis is untouched by the tag type.
-        for field in known_fields().into_iter().filter(|f| *f != TagField::Bpm) {
+        // Every other field on Vorbis is untouched by the tag type, bar the URL,
+        // which is written by name (#613).
+        for field in known_fields()
+            .into_iter()
+            .filter(|f| !matches!(f, TagField::Bpm | TagField::Url))
+        {
             assert_eq!(
                 item_key_for(&field, TagType::VorbisComments),
                 tag_field_to_item_key(&field)
