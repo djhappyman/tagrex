@@ -181,6 +181,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   as the file had it. An APE tag kept the position on read but wrote `0/04`
   and lost a disc side such as `A`; it keeps both now
   ([#640](https://github.com/tagrex/tagrex/issues/640)).
+- The tagger guide no longer says an import never brings the release's cover:
+  it describes the **Cover art** import setting and the **Embed cover** button
+  ([#643](https://github.com/tagrex/tagrex/issues/643)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -201,9 +201,13 @@ them exactly as the file has them, instead of writing them and making you undo
 it. Everything is on by default, and a field added to the import in a later
 version arrives switched on too.
 
-Cover art is not in that list: embedding one is its own button on the release
-card, so it is already something you ask for rather than something an import
-does on its own.
+Cover art is not in that list; it has its own setting on the same page,
+**Cover art**. With **If missing** (the default) an import embeds the release's
+cover only in files that carry no artwork at all, **Always** replaces the cover a
+file already has, and **Never** leaves the artwork alone. The tags and the cover
+are one change, so a single undo takes back both, and the toast after an import
+says how many files are getting the cover. To put a release's cover on files
+without importing anything, use **Embed cover** on the release card.
 
 ## FROM TEXT — a tracklist that exists only as text
 
