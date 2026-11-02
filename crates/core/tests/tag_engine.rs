@@ -2174,6 +2174,157 @@ fn lyrics_in_another_language_are_left_where_they_are() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// Every comment frame in the file, as (language, description, text) (#644).
+fn comment_frames(path: &PathBuf) -> Vec<(String, String, String)> {
+    use lofty::config::ParseOptions;
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::Frame;
+    use lofty::mpeg::MpegFile;
+
+    let mut file = std::fs::File::open(path).unwrap();
+    let mp3 = MpegFile::read_from(&mut file, ParseOptions::new()).unwrap();
+    let mut frames: Vec<_> = mp3
+        .id3v2()
+        .map(|tag| {
+            tag.into_iter()
+                .filter_map(|frame| match frame {
+                    Frame::Comment(comment) => Some((
+                        String::from_utf8_lossy(&comment.language).into_owned(),
+                        comment.description.to_string(),
+                        comment.content.to_string(),
+                    )),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    frames.sort();
+    frames
+}
+
+/// Seed an MP3 with the given `COMM` frames (language, description, text).
+fn mp3_with_comments(name: &str, comments: &[(&[u8; 3], &str, &str)]) -> PathBuf {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v2::{CommentFrame, Frame, Id3v2Tag};
+    use lofty::prelude::{Accessor, TagExt};
+    use lofty::TextEncoding;
+
+    let path = std::env::temp_dir().join(format!("tagrex-comm-{name}-{}.mp3", std::process::id()));
+    std::fs::write(&path, minimal_mp3()).unwrap();
+
+    let mut seeded = Id3v2Tag::new();
+    seeded.set_artist("Original".to_string());
+    for (language, description, text) in comments {
+        seeded.insert(Frame::Comment(CommentFrame::new(
+            TextEncoding::UTF8,
+            **language,
+            description.to_string(),
+            text.to_string(),
+        )));
+    }
+    seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+    path
+}
+
+const ITUNES_GAPLESS: &str = " 00000000 00000210 0000099C 00000000000A0B54";
+const ITUNES_SOUND_CHECK: &str = " 000002B4 000002A3 00002A9D 0000298D";
+
+#[test]
+fn itunes_comment_frames_survive_a_save_and_are_not_the_comment() {
+    let path = mp3_with_comments(
+        "itunes",
+        &[
+            (b"eng", "", "a real comment"),
+            (b"eng", "iTunSMPB", ITUNES_GAPLESS),
+            (b"eng", "iTunNORM", ITUNES_SOUND_CHECK),
+        ],
+    );
+    assert_eq!(comment_frames(&path).len(), 3, "seeding failed");
+
+    let mut file = TagEngine::read(&path).unwrap();
+    assert_eq!(
+        file.tags.get(&TagField::Comment).map(String::as_str),
+        Some("a real comment"),
+        "the comment is the frame without a description, not iTunes' data"
+    );
+    file.tags.insert(TagField::Comment, "edited".into());
+    TagEngine::write(&file).unwrap();
+
+    assert_eq!(
+        comment_frames(&path),
+        vec![
+            ("eng".to_string(), String::new(), "edited".to_string()),
+            (
+                "eng".to_string(),
+                "iTunNORM".to_string(),
+                ITUNES_SOUND_CHECK.to_string()
+            ),
+            (
+                "eng".to_string(),
+                "iTunSMPB".to_string(),
+                ITUNES_GAPLESS.to_string()
+            ),
+        ],
+        "the edit lands in the comment's own frame, keeping its language, and the iTunes frames stay"
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_file_with_only_itunes_comment_frames_has_no_comment() {
+    let path = mp3_with_comments(
+        "itunes-only",
+        &[
+            (b"eng", "iTunSMPB", ITUNES_GAPLESS),
+            (b"eng", "iTunNORM", ITUNES_SOUND_CHECK),
+        ],
+    );
+    let before = comment_frames(&path);
+
+    let mut file = TagEngine::read(&path).unwrap();
+    assert_eq!(file.tags.get(&TagField::Comment), None);
+    file.tags.insert(TagField::Title, "New title".into());
+    TagEngine::write(&file).unwrap();
+    assert_eq!(
+        comment_frames(&path),
+        before,
+        "an unrelated save keeps them"
+    );
+
+    // A comment typed into such a file is a new frame beside them.
+    let mut file = TagEngine::read(&path).unwrap();
+    file.tags.insert(TagField::Comment, "typed".into());
+    TagEngine::write(&file).unwrap();
+    let after = comment_frames(&path);
+    assert_eq!(after.len(), 3, "{after:?}");
+    assert!(after
+        .iter()
+        .any(|(_, description, text)| description.is_empty() && text == "typed"));
+    assert_eq!(
+        TagEngine::read(&path)
+            .unwrap()
+            .tags
+            .get(&TagField::Comment)
+            .map(String::as_str),
+        Some("typed")
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_comment_keeps_its_language() {
+    let path = mp3_with_comments("language", &[(b"deu", "", "Kommentar")]);
+    for _ in 0..2 {
+        let file = TagEngine::read(&path).unwrap();
+        TagEngine::write(&file).unwrap();
+    }
+    assert_eq!(
+        comment_frames(&path),
+        vec![("deu".to_string(), String::new(), "Kommentar".to_string())]
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
 #[test]
 fn vorbis_lyrics_round_trip_as_a_custom_field() {
     let path = temp_flac_path("lyrics");

@@ -14,7 +14,8 @@ use lofty::file::{AudioFile, FileType, TaggedFileExt};
 use lofty::flac::FlacFile;
 use lofty::id3::v1::Id3v1Tag;
 use lofty::id3::v2::{
-    BinaryFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version, TextInformationFrame,
+    BinaryFrame, CommentFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version,
+    TextInformationFrame,
 };
 use lofty::iff::aiff::{AiffFile, AiffTextChunks};
 use lofty::iff::wav::{RiffInfoList, WavFile};
@@ -25,7 +26,7 @@ use lofty::ogg::tag::VorbisComments;
 use lofty::ogg::{OggPictureStorage, OpusFile, SpeexFile, VorbisFile};
 use lofty::picture::{MimeType, Picture, PictureInformation, PictureType};
 use lofty::probe::Probe;
-use lofty::tag::items::Timestamp;
+use lofty::tag::items::{Lang, Timestamp};
 use lofty::tag::{Accessor, ItemKey, ItemValue, MergeTag, SplitTag, Tag, TagExt, TagItem, TagType};
 use lofty::wavpack::WavPackFile;
 use lofty::TextEncoding;
@@ -871,13 +872,62 @@ fn vorbis_comments_from(mut tag: Tag) -> VorbisComments {
     vorbis
 }
 
+/// The comment a tag's comment items are read as (#644), by its language and
+/// description. ID3v2 tells its `COMM` frames apart by description, and iTunes
+/// adds machine ones (`iTunSMPB` for gapless playback, `iTunNORM` for Sound
+/// Check) that the backend hands over as comments too: the comment is the last
+/// one without a description, or else the last that is not a machine one.
+/// [`owned_comment_frame`] is the same rule on the concrete tag.
+fn owned_comment(tag: &Tag) -> Option<(Lang, &str)> {
+    let comments = || tag.items().filter(|item| item.key() == ItemKey::Comment);
+    comments()
+        .filter(|item| item.description().is_empty())
+        .last()
+        .or_else(|| {
+            comments()
+                .filter(|item| !is_machine_comment(item.description()))
+                .last()
+        })
+        .map(|item| (*item.lang(), item.description()))
+}
+
+/// Whether `item` is a comment other than the one [`owned_comment`] chose.
+fn is_unowned_comment(item: &TagItem, owned: Option<(Lang, &str)>) -> bool {
+    item.key() == ItemKey::Comment && owned != Some((*item.lang(), item.description()))
+}
+
+/// [`owned_comment`] on a concrete ID3v2 tag: the `COMM` frame the model's
+/// comment is.
+/// (`Id3v2Tag::comments` only lists the ones without a description.)
+fn owned_comment_frame<'a>(tag: &'a Id3v2Tag) -> Option<&'a CommentFrame<'a>> {
+    let comments = || {
+        tag.into_iter().filter_map(|frame| match frame {
+            Frame::Comment(comment) => Some(comment),
+            _ => None,
+        })
+    };
+    comments()
+        .rfind(|comment| comment.description.is_empty())
+        .or_else(|| comments().rfind(|comment| !is_machine_comment(&comment.description)))
+}
+
+/// A comment description a program writes for itself rather than for the
+/// reader: iTunes' `iTunSMPB`, `iTunNORM`, `iTunPGAP`, `iTunes_CDDB_IDs`.
+fn is_machine_comment(description: &str) -> bool {
+    description.starts_with("iTun")
+}
+
 /// A generic tag's text items in the model's field vocabulary. Shared by
 /// [`TagEngine::read_block`] and the conversion-loss check so the two agree on
 /// what "the block holds this" means.
 fn tag_to_map(tag: &Tag) -> TagMap {
     let tag_type = tag.tag_type();
     let mut tags = TagMap::new();
+    let comment = owned_comment(tag);
     for item in tag.items() {
+        if is_unowned_comment(item, comment) {
+            continue;
+        }
         let value = match item.value() {
             ItemValue::Text(text) | ItemValue::Locator(text) => text.clone(),
             _ => continue,
@@ -1543,9 +1593,13 @@ impl TagEngine {
                 continue;
             };
             let tag_type = tag.tag_type();
+            let comment = owned_comment(&tag);
             for item in tag.items() {
                 // What made the file is not what the file is about (#197).
                 if is_provenance_key(item.key()) {
+                    continue;
+                }
+                if is_unowned_comment(item, comment) {
                     continue;
                 }
                 // Text items (most fields), plus the release URL — its value is a
@@ -2538,6 +2592,21 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
                 true
             });
         }
+        // The comment (#644), the same way: the model holds its text, and the
+        // file's own frame says which language and description it goes under.
+        // Every other `COMM`, iTunes' gapless and Sound Check data among them,
+        // is carried over below.
+        let owned_comment = owned_comment_frame(&original)
+            .map(|comment| (comment.language, comment.description.to_string()));
+        if let Some((language, description)) = &owned_comment {
+            updated.retain_mut(|frame| {
+                if let Frame::Comment(comment) = frame {
+                    comment.language = *language;
+                    comment.description = description.clone().into();
+                }
+                true
+            });
+        }
         // Dates (#504). The model holds every timestamp frame and has just
         // written each one from what it read — for a timestamp lofty cannot
         // parse whole, the trimmed date. Where the model still holds that date,
@@ -2611,7 +2680,11 @@ fn save_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Tag
             Vec::new()
         };
         for frame in &original {
-            if is_model_text_frame(frame) {
+            let foreign_comment = matches!(frame, Frame::Comment(comment)
+            if !owned_comment.as_ref().is_some_and(|(language, description)| {
+                *language == comment.language && *description == comment.description
+            }));
+            if is_model_text_frame(frame) && !foreign_comment {
                 continue;
             }
             if let (Frame::Popularimeter(rating), Some(email)) = (frame, &owned_email) {

@@ -184,6 +184,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The tagger guide no longer says an import never brings the release's cover:
   it describes the **Cover art** import setting and the **Embed cover** button
   ([#643](https://github.com/tagrex/tagrex/issues/643)).
+- An MP3 that iTunes has played no longer loses its gapless playback and Sound
+  Check data on a save. iTunes keeps them in comment frames of their own
+  (`iTunSMPB`, `iTunNORM`), which were read as the comment, so a file without a
+  plain comment showed a row of hex numbers there, and every save dropped them.
+  The comment is now the frame without a description, the others stay as they
+  are, and an edited comment keeps the language and description its frame had
+  instead of turning into `XXX`
+  ([#644](https://github.com/tagrex/tagrex/issues/644)).
 
 ## [1.1.1] - 2026-11-02
 
