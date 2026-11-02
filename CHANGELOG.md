@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and Musepack files, as a `WWW` item; before, it was dropped on save without
   a word. A `WWW` item another tagger wrote now shows as the URL
   ([#613](https://github.com/tagrex/tagrex/issues/613)).
+- A file whose APE tag the tag library misreads as an ID3v1 tag is no longer
+  written to: the write used to replace the APE tag and lose everything in it,
+  and is now refused with an error instead
+  ([#614](https://github.com/tagrex/tagrex/issues/614)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -2442,3 +2442,49 @@ fn a_www_comment_reads_as_the_url() {
         Some("https://example.com/a")
     );
 }
+
+/// #614: an APE tag that ends the file with `TAG` at 128 bytes from the end —
+/// a 131-byte one always does, from its own header — is misread by the tag
+/// library as an ID3v1 tag, and its writer then writes over the APE tag. Such
+/// a file is refused before anything is touched.
+#[test]
+fn an_ape_tag_misread_as_id3v1_is_never_written_over() {
+    use lofty::ape::{ApeItem, ApeTag};
+    use lofty::config::WriteOptions;
+    use lofty::prelude::TagExt;
+    use lofty::tag::ItemValue;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-misread-id3v1-{}.wv",
+        std::process::id()
+    ));
+    std::fs::write(&path, MINIMAL_WAVPACK).expect("write fixture");
+    // Header and footer are 32 bytes each; one item of 8 + "WWW\0" + 55 bytes
+    // makes the 131.
+    let mut ape = ApeTag::new();
+    ape.insert(ApeItem::new("WWW".to_string(), ItemValue::Text("x".repeat(55))).unwrap());
+    ape.save_to_path(&path, WriteOptions::default()).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let tail = &before[before.len() - 128..];
+    assert_eq!(&tail[..3], b"TAG", "fixture does not have the shape");
+    assert_eq!(
+        &tail[96..104],
+        b"APETAGEX",
+        "fixture does not have the shape"
+    );
+
+    let read = TagEngine::read(&path).expect("read tags");
+    let mut tags = read.tags.clone();
+    tags.insert(TagField::Title, "New title".to_string());
+    let result = TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: read.format,
+        tags,
+    });
+    let covers = TagEngine::write_covers(&path, &[]);
+    let after = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+    assert!(result.is_err(), "the write went ahead");
+    assert!(covers.is_err(), "the cover write went ahead");
+    assert_eq!(before, after, "the file was touched");
+}

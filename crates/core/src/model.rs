@@ -1471,6 +1471,7 @@ impl TagEngine {
     /// see the crate-level invariant.
     pub fn write(file: &TrackFile) -> Result<(), TagIoError> {
         ensure_audio_after_tags(&file.path)?;
+        ensure_no_misread_id3v1(&file.path)?;
         // Guard the year before touching the file. It is written as a timestamp
         // (ID3v2.4 TDRC / Vorbis DATE / MP4 ©day) whose year MUST be exactly 4
         // digits; lofty accepts a shorter one like "222" on write but then
@@ -1575,6 +1576,7 @@ impl TagEngine {
         revision: Option<Id3v2Revision>,
     ) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
+        ensure_no_misread_id3v1(path)?;
         let mut synthetic = bytes.to_vec();
         let mut silence = vec![0xFF, 0xFB, 0x90, 0x00];
         silence.resize(SILENT_MPEG_FRAME_LEN, 0);
@@ -1617,6 +1619,7 @@ impl TagEngine {
     /// Only [`Executor`](crate::plan::Executor) should call this.
     pub fn set_id3v2_revision(path: &Path, revision: Id3v2Revision) -> Result<bool, TagIoError> {
         ensure_audio_after_tags(path)?;
+        ensure_no_misread_id3v1(path)?;
         let Some(container) = container_of(path)? else {
             return Ok(false);
         };
@@ -1675,6 +1678,7 @@ impl TagEngine {
     /// Only [`Executor`](crate::plan::Executor) should call this.
     pub fn remove_block(path: &Path, kind: TagBlockKind) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
+        ensure_no_misread_id3v1(path)?;
         // An AIFF's or a WAV's ID3v2 is a chunk this module writes itself
         // (#358, #505); taking it out goes the same way.
         if kind == TagBlockKind::Id3v2
@@ -1722,6 +1726,7 @@ impl TagEngine {
         content: &TagBlockContent,
     ) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
+        ensure_no_misread_id3v1(path)?;
         let options = match (kind, revision) {
             (TagBlockKind::Id3v2, Some(revision)) => {
                 write_options().use_id3v23(revision == Id3v2Revision::V3)
@@ -1783,6 +1788,7 @@ impl TagEngine {
     /// Only [`Executor`](crate::plan::Executor) should call this.
     pub fn write_covers(path: &Path, covers: &[CoverArt]) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
+        ensure_no_misread_id3v1(path)?;
         // Same reason as `write`: going through the generic tag would drop an
         // MP3's non-representable frames, so edit the concrete tag instead.
         if is_id3v2_container(path) {
@@ -2460,6 +2466,31 @@ fn ensure_audio_after_tags(path: &Path) -> Result<(), TagIoError> {
     if tags_reach_eof(path)? {
         return Err(TagIoError::Malformed(format!(
             "{} holds tags but no audio after them; writing to it could cut it short",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Refuse to write a file whose APE tag the tag library mistakes for an ID3v1
+/// tag (#614). It takes `TAG` at 128 bytes from the end as an ID3v1 tag without
+/// checking, so an APE tag that ends the file with those bytes at that offset
+/// (a 131-byte one always does: the `TAG` of its own header lands there) is
+/// read as ID3v1 — and the writer then writes over the APE tag, destroying
+/// every item in it. An APE footer in the last 32 bytes says the file ends in
+/// an APE tag, so there is no ID3v1 tag after it.
+fn ensure_no_misread_id3v1(path: &Path) -> Result<(), TagIoError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    if file.metadata()?.len() < 128 {
+        return Ok(());
+    }
+    let mut tail = [0u8; 128];
+    file.seek(SeekFrom::End(-128))?;
+    file.read_exact(&mut tail)?;
+    if &tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX" {
+        return Err(TagIoError::Malformed(format!(
+            "{} ends in an APE tag the tag library misreads as an ID3v1 tag; writing to it would destroy the APE tag",
             path.display()
         )));
     }
