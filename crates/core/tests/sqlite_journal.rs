@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
+use tagrex_core::journal::{BatchId, CopyStamp, SqliteJournal, UndoJournal};
 use tagrex_core::model::{TagEngine, TagField};
 use tagrex_core::plan::{ChangePlan, Executor, FieldChange, FileChange};
 
@@ -367,10 +367,38 @@ fn the_journal_tables_are_indexed_by_their_parent() {
         "SELECT * FROM block_changes WHERE file_change_id = 1",
         "SELECT * FROM block_change_fields WHERE block_change_id = 1",
         "SELECT * FROM allowed_roots WHERE batch_id = 1",
+        "SELECT * FROM copy_stamps WHERE batch_id = 1",
     ] {
         let plan: String = conn
             .query_row(&format!("EXPLAIN QUERY PLAN {query}"), [], |row| row.get(3))
             .unwrap();
         assert!(plan.contains("USING INDEX"), "{query}: {plan}");
     }
+}
+
+#[test]
+fn the_stamp_of_a_copy_survives_a_restart() {
+    let dir = TempDir::new("copy-stamp");
+    let track = dir.flac("track.flac");
+    let target = dir.path().join("copy.flac");
+    let plan = ChangePlan {
+        description: "copy".to_string(),
+        changes: vec![FileChange {
+            path: track,
+            rename_to: Some(target.clone()),
+            copy: true,
+            ..FileChange::default()
+        }],
+        ..ChangePlan::default()
+    };
+    let id = {
+        let mut journal = SqliteJournal::open(&dir.db()).unwrap();
+        Executor::apply(&plan, &mut journal, &roots(dir.path()))
+            .unwrap()
+            .id
+    };
+
+    let journal = SqliteJournal::open(&dir.db()).unwrap();
+    let batch = journal.batch(id).unwrap().unwrap();
+    assert_eq!(batch.copy_stamps, vec![CopyStamp::of(&target).unwrap()]);
 }

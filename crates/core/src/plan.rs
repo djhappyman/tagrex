@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
-use crate::journal::{AppliedBatch, BatchId, JournalError, UndoJournal};
+use crate::journal::{AppliedBatch, BatchId, CopyStamp, JournalError, UndoJournal};
 use crate::model::{
     CoverArt, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine, TagField, TrackFile,
 };
@@ -301,6 +301,7 @@ impl Executor {
             created_dirs,
             removed_dirs,
             allowed_roots: roots,
+            copy_stamps: copy_stamps(plan),
         };
         match journal.record(&batch) {
             Ok(id) => batch.id = id,
@@ -453,19 +454,30 @@ impl Executor {
         // Validate before touching disk: the file's current location (rename
         // target if it was renamed, else its path) and the restore
         // destination must both sit within a root.
+        // A transfer that is already undone — by an earlier attempt that stopped
+        // half-way (#604) — has nothing left to check or do.
         for change in &batch.plan.changes {
             match effective_rename(change) {
+                Some(target) if is_untransferred(target, &change.path, change.copy) => {
+                    resolve_target_within_roots(&change.path, &roots)?;
+                }
                 Some(target) => {
                     ensure_within_roots(target, &roots)?;
                     resolve_target_within_roots(&change.path, &roots)?;
+                    ensure_untransfer_safe(target, &change.path, change.copy, &batch.copy_stamps)?;
                 }
                 None => ensure_within_roots(&change.path, &roots)?,
             }
             // A sidecar currently lives at its `to`; it must go back to `from`,
             // and both must sit within a root (#58).
             for (from, to) in &change.sidecar_renames {
+                if is_untransferred(to, from, change.copy) {
+                    resolve_target_within_roots(from, &roots)?;
+                    continue;
+                }
                 ensure_within_roots(to, &roots)?;
                 resolve_target_within_roots(from, &roots)?;
+                ensure_untransfer_safe(to, from, change.copy, &batch.copy_stamps)?;
             }
         }
 
@@ -477,12 +489,16 @@ impl Executor {
         for change in &batch.plan.changes {
             if let Some(target) = effective_rename(change) {
                 steps.begin(target)?;
-                untransfer(target, &change.path, change.copy)?;
+                if !is_untransferred(target, &change.path, change.copy) {
+                    untransfer(target, &change.path, change.copy)?;
+                }
                 steps.done();
             }
             for (from, to) in &change.sidecar_renames {
                 steps.begin(to)?;
-                untransfer(to, from, change.copy)?;
+                if !is_untransferred(to, from, change.copy) {
+                    untransfer(to, from, change.copy)?;
+                }
                 steps.done();
             }
         }
@@ -765,6 +781,46 @@ fn ensure_target_free(from: &Path, to: &Path, copy: bool) -> Result<(), PlanErro
         Ok(_) if !copy && same_file::is_same_file(from, to).unwrap_or(false) => Ok(()),
         Ok(_) => Err(PlanError::RenameCollision(to.to_path_buf())),
     }
+}
+
+/// Whether undoing one transfer only touches what the batch made (#604).
+///
+/// A move goes back only onto a free path: a file put at the original path
+/// since is not the batch's to replace (the file itself is fine, which is what a
+/// case-only rename looks like). A copy is removed only while the file at its
+/// path is still the copy as the batch left it; a batch recorded before stamps
+/// existed has none, and its copies are removed as before.
+fn ensure_untransfer_safe(
+    target: &Path,
+    original: &Path,
+    copy: bool,
+    stamps: &[CopyStamp],
+) -> Result<(), PlanError> {
+    if copy {
+        let Some(stamp) = stamps.iter().find(|stamp| stamp.path == target) else {
+            return Ok(());
+        };
+        if CopyStamp::of(target).as_ref() == Some(stamp) {
+            Ok(())
+        } else {
+            Err(PlanError::Stale(target.to_path_buf()))
+        }
+    } else {
+        ensure_target_free(target, original, false)
+    }
+}
+
+/// The stamp of every copy `plan` made, read once the batch is written (#604).
+/// A copy whose stamp cannot be read gets none, and is undone unchecked.
+fn copy_stamps(plan: &ChangePlan) -> Vec<CopyStamp> {
+    let mut stamps = Vec::new();
+    for change in plan.changes.iter().filter(|change| change.copy) {
+        let targets = effective_rename(change)
+            .into_iter()
+            .chain(change.sidecar_renames.iter().map(|(_, to)| to.as_path()));
+        stamps.extend(targets.filter_map(CopyStamp::of));
+    }
+    stamps
 }
 
 /// Move or copy one file. The one place the two differ, so nothing above has to

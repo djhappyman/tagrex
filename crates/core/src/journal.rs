@@ -51,6 +51,39 @@ pub struct AppliedBatch {
     /// recording it here is what lets undo still reach those files in a later
     /// session, when the caller knows nothing about that folder.
     pub allowed_roots: Vec<PathBuf>,
+    /// What each copy this batch made looked like once the batch was done
+    /// (#604). Undo removes a copy only while the file at its path still
+    /// matches. Empty for a batch recorded before this existed; its copies are
+    /// removed without the check, as they always were.
+    pub copy_stamps: Vec<CopyStamp>,
+}
+
+/// A file's size and modification time (#604): enough to tell the copy a batch
+/// made from a file put at the same path since, or the copy edited since.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyStamp {
+    pub path: PathBuf,
+    pub len: u64,
+    /// Nanoseconds since the Unix epoch.
+    pub modified_ns: i64,
+}
+
+impl CopyStamp {
+    /// The stamp of the file at `path` as it is now, or `None` when there is no
+    /// such file or its time cannot be read.
+    pub fn of(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        let since_epoch = metadata
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        Some(Self {
+            path: path.to_path_buf(),
+            len: metadata.len(),
+            modified_ns: i64::try_from(since_epoch.as_nanos()).ok()?,
+        })
+    }
 }
 
 /// Whether `table` already has `column`. Used to make the `copied` migration
@@ -262,6 +295,13 @@ impl SqliteJournal {
                  description     TEXT NOT NULL,
                  mime            TEXT NOT NULL,
                  data            BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS copy_stamps (
+                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                 batch_id    INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+                 path        TEXT NOT NULL,
+                 len         INTEGER NOT NULL,
+                 modified_ns INTEGER NOT NULL
              );",
         )?;
         // `copied` (#153) arrived after the table did, and a journal from an
@@ -300,7 +340,8 @@ impl SqliteJournal {
              CREATE INDEX IF NOT EXISTS idx_block_removal_images_block ON block_removal_images(block_removal_id);
              CREATE INDEX IF NOT EXISTS idx_created_dirs_batch ON created_dirs(batch_id);
              CREATE INDEX IF NOT EXISTS idx_removed_dirs_batch ON removed_dirs(batch_id);
-             CREATE INDEX IF NOT EXISTS idx_allowed_roots_batch ON allowed_roots(batch_id);",
+             CREATE INDEX IF NOT EXISTS idx_allowed_roots_batch ON allowed_roots(batch_id);
+             CREATE INDEX IF NOT EXISTS idx_copy_stamps_batch ON copy_stamps(batch_id);",
         )?;
         Ok(Self { conn })
     }
@@ -447,6 +488,18 @@ impl UndoJournal for SqliteJournal {
                 rusqlite::params![batch_id, root.to_string_lossy()],
             )?;
         }
+        for stamp in &batch.copy_stamps {
+            tx.execute(
+                "INSERT INTO copy_stamps (batch_id, path, len, modified_ns) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![
+                    batch_id,
+                    stamp.path.to_string_lossy(),
+                    i64::try_from(stamp.len).unwrap_or(i64::MAX),
+                    stamp.modified_ns,
+                ],
+            )?;
+        }
 
         tx.commit()?;
         Ok(BatchId(batch_id))
@@ -547,7 +600,22 @@ impl SqliteJournal {
             created_dirs: self.load_paths("created_dirs", id)?,
             removed_dirs: self.load_paths("removed_dirs", id)?,
             allowed_roots: self.load_paths("allowed_roots", id)?,
+            copy_stamps: self.load_copy_stamps(id)?,
         })
+    }
+
+    fn load_copy_stamps(&self, batch_id: i64) -> Result<Vec<CopyStamp>, JournalError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, len, modified_ns FROM copy_stamps WHERE batch_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![batch_id], |row| {
+            Ok(CopyStamp {
+                path: PathBuf::from(row.get::<_, String>(0)?),
+                len: u64::try_from(row.get::<_, i64>(1)?).unwrap_or(0),
+                modified_ns: row.get::<_, i64>(2)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
     }
 
     fn load_file_changes(&self, batch_id: i64) -> Result<Vec<FileChange>, JournalError> {

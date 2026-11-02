@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   case or Unicode form, which a case-insensitive file system treats as one
   name: the batch is refused and rolled back instead
   ([#605](https://github.com/tagrex/tagrex/issues/605)).
+- Undo no longer replaces a file that was put at a moved file's old path, and
+  no longer deletes a file that replaced a copy or a copy edited since; it
+  stops and names the file instead. An undo that stopped half-way can now be
+  run again and finishes the rest
+  ([#604](https://github.com/tagrex/tagrex/issues/604)).
 
 ## [1.1.1] - 2026-11-02
 

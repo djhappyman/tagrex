@@ -1193,3 +1193,108 @@ fn two_targets_the_file_system_folds_together_are_refused() {
     assert!(!dir.path().join("track.flac").exists());
     assert!(journal.batches().unwrap().is_empty());
 }
+
+#[test]
+fn undo_never_replaces_a_file_put_back_at_the_original_path() {
+    let dir = TempDir::new("undo-occupied");
+    let track = dir.flac("track.flac");
+    let renamed = dir.path().join("renamed.flac");
+    let mut journal = VecJournal::new();
+    let plan = ChangePlan {
+        description: "rename".to_string(),
+        changes: vec![FileChange {
+            path: track.clone(),
+            rename_to: Some(renamed.clone()),
+            ..FileChange::default()
+        }],
+        ..ChangePlan::default()
+    };
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+    // Another file takes the old name.
+    std::fs::write(&track, b"someone else").unwrap();
+
+    let err = Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap_err();
+
+    assert!(matches!(err, PlanError::RenameCollision(_)));
+    assert_eq!(std::fs::read(&track).unwrap(), b"someone else");
+    assert_eq!(std::fs::read(&renamed).unwrap(), MINIMAL_FLAC);
+    assert_eq!(journal.batches().unwrap().len(), 1);
+}
+
+#[test]
+fn undo_removes_a_copy_only_while_it_is_still_the_copy() {
+    let dir = TempDir::new("undo-copy-replaced");
+    let track = dir.flac("track.flac");
+    let target = dir.path().join("copy.flac");
+    let mut journal = VecJournal::new();
+    let plan = ChangePlan {
+        description: "copy".to_string(),
+        changes: vec![FileChange {
+            path: track.clone(),
+            rename_to: Some(target.clone()),
+            copy: true,
+            ..FileChange::default()
+        }],
+        ..ChangePlan::default()
+    };
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+    // The copy is replaced by another file under the same name.
+    std::fs::write(&target, b"a different file").unwrap();
+
+    let err = Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap_err();
+
+    assert!(matches!(err, PlanError::Stale(_)));
+    assert_eq!(std::fs::read(&target).unwrap(), b"a different file");
+    assert_eq!(journal.batches().unwrap().len(), 1);
+
+    // Once that file is out of the way, the undo goes through.
+    std::fs::remove_file(&target).unwrap();
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+    assert!(track.exists());
+    assert!(journal.batches().unwrap().is_empty());
+}
+
+#[test]
+fn undo_of_an_untouched_copy_still_removes_it() {
+    let dir = TempDir::new("undo-copy");
+    let track = dir.flac("track.flac");
+    let target = dir.path().join("copy.flac");
+    let mut journal = VecJournal::new();
+    let mut plan = set_artist(&track, None, Some("Copied"));
+    plan.changes[0].rename_to = Some(target.clone());
+    plan.changes[0].copy = true;
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+
+    assert!(!target.exists());
+    assert_eq!(std::fs::read(&track).unwrap(), MINIMAL_FLAC);
+}
+
+#[test]
+fn an_undo_that_stopped_half_way_can_be_finished() {
+    let dir = TempDir::new("undo-resume");
+    let a = dir.flac("a.flac");
+    let b = dir.flac("b.flac");
+    let a2 = dir.path().join("a2.flac");
+    let b2 = dir.path().join("b2.flac");
+    let mut journal = VecJournal::new();
+    let mut plan = set_artist_on(&[&a, &b]);
+    plan.changes[0].rename_to = Some(a2.clone());
+    plan.changes[1].rename_to = Some(b2.clone());
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+    // The first attempt got as far as moving `a` back, then stopped.
+    std::fs::rename(&a2, &a).unwrap();
+
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+
+    assert!(a.exists() && b.exists());
+    assert!(!a2.exists() && !b2.exists());
+    for path in [&a, &b] {
+        assert!(!TagEngine::read(path)
+            .unwrap()
+            .tags
+            .contains_key(&TagField::Artist));
+    }
+    assert!(journal.batches().unwrap().is_empty());
+}
