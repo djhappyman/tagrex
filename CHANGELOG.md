@@ -196,6 +196,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   names: a `replaygain_track_gain` frame stays `replaygain_track_gain`, as do
   other user-text frames whose name differs from the standard spelling only in
   case ([#645](https://github.com/tagrex/tagrex/issues/645)).
+- A save no longer renames the label of a FLAC or Ogg file. It was read from
+  `ORGANIZATION` (the format's own name for it) or `LABEL` but always written
+  back as `PUBLISHER`; it now goes back under the name the file used
+  ([#646](https://github.com/tagrex/tagrex/issues/646)).
 
 ## [1.1.1] - 2026-11-02
 

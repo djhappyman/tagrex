@@ -2396,6 +2396,71 @@ fn a_user_text_frame_keeps_the_case_of_its_description() {
 }
 
 #[test]
+fn the_vorbis_label_keeps_the_name_the_file_gave_it() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::flac::FlacFile;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+
+    let comments = |path: &PathBuf| -> Vec<(String, String)> {
+        let mut file = std::fs::File::open(path).unwrap();
+        FlacFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .vorbis_comments()
+            .map(|tag| {
+                tag.items()
+                    .filter(|(name, _)| name.as_bytes()[0] != b'A')
+                    .map(|(name, value)| (name.to_string(), value.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for (name, case) in [
+        ("ORGANIZATION", "organization"),
+        ("LABEL", "label"),
+        ("", "none"),
+    ] {
+        let path = temp_flac_path(&format!("label-{case}"));
+        std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+        let mut seeded = VorbisComments::default();
+        seeded.push("ARTIST".to_string(), "Original".to_string());
+        if !name.is_empty() {
+            seeded.push(name.to_string(), "Some Label".to_string());
+        }
+        seeded.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        let mut file = TagEngine::read(&path).unwrap();
+        if name.is_empty() {
+            file.tags.insert(TagField::Publisher, "Some Label".into());
+        } else {
+            assert_eq!(
+                file.tags.get(&TagField::Publisher).map(String::as_str),
+                Some("Some Label")
+            );
+            file.tags.insert(TagField::Artist, "Edited".into());
+        }
+        TagEngine::write(&file).unwrap();
+        let expected = if name.is_empty() { "PUBLISHER" } else { name };
+        assert_eq!(
+            comments(&path),
+            vec![(expected.to_string(), "Some Label".to_string())],
+            "{case}"
+        );
+
+        let mut file = TagEngine::read(&path).unwrap();
+        file.tags.insert(TagField::Publisher, "Other Label".into());
+        TagEngine::write(&file).unwrap();
+        assert_eq!(
+            comments(&path),
+            vec![(expected.to_string(), "Other Label".to_string())],
+            "{case}: an edit goes under the same name"
+        );
+        std::fs::remove_file(&path).ok();
+    }
+}
+
+#[test]
 fn vorbis_lyrics_round_trip_as_a_custom_field() {
     let path = temp_flac_path("lyrics");
     std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");

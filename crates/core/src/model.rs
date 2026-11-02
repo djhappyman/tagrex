@@ -3491,6 +3491,17 @@ fn save_with_custom_items(
                 .filter(|(name, _)| !maps_to_item_key(tag_type, name))
                 .map(|(name, value)| (name.to_string(), value.to_string()))
                 .collect();
+            // The label has three names here and the backend writes it under
+            // `PUBLISHER` whichever the file used, so a save turned the
+            // standard `ORGANIZATION` (or `LABEL`) into another name (#646). It
+            // goes back under the name its value was read from: the last one,
+            // since the read keeps the last.
+            let label_name = existing
+                .items()
+                .map(|(name, _)| name)
+                .filter(|name| is_vorbis_label_name(name))
+                .last()
+                .map(str::to_string);
             let (remainder, _) = existing.split_tag();
             // Carried by hand, because the conversion below measures every image
             // and silently drops one it cannot read — where a plain save wrote it
@@ -3501,6 +3512,12 @@ fn save_with_custom_items(
                 tag.remove_picture(0);
             }
             let mut merged = remainder.merge_tag(tag);
+            if let Some(name) = label_name.filter(|name| name != VORBIS_PUBLISHER) {
+                let labels: Vec<String> = merged.remove(VORBIS_PUBLISHER).collect();
+                for label in labels {
+                    merged.push(name.clone(), label);
+                }
+            }
             merged.set_vendor(vendor);
             merged.remove(VORBIS_ENCODER).for_each(drop);
             for encoder in encoders {
@@ -3622,6 +3639,18 @@ fn save_with_custom_items(
         _ => tag.save_to_path(path, write_options())?,
     }
     Ok(())
+}
+
+/// The Vorbis comment name the backend writes the label under.
+const VORBIS_PUBLISHER: &str = "PUBLISHER";
+
+/// Whether a Vorbis comment name is one the label is read from (#646):
+/// `ORGANIZATION` is the format's own, `LABEL` is common, and `PUBLISHER` is
+/// what the backend writes.
+fn is_vorbis_label_name(name: &str) -> bool {
+    ["ORGANIZATION", "LABEL", VORBIS_PUBLISHER]
+        .iter()
+        .any(|label| label.eq_ignore_ascii_case(name))
 }
 
 /// Load the file's primary tag (cloned, owned) or a fresh empty one, so the
