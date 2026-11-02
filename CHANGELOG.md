@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   writes one integer tempo instead of adding a second, text one next to the
   old value, and clearing the tags removes the tempo too
   ([#610](https://github.com/tagrex/tagrex/issues/610)).
+- An M4A tempo of 0, which many taggers write to mean there is none, no longer
+  shows as a BPM of 0, and saving the file leaves it as it was
+  ([#611](https://github.com/tagrex/tagrex/issues/611)).
 
 ## [1.1.1] - 2026-11-02
 

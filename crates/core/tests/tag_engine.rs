@@ -2343,3 +2343,46 @@ fn an_mp4_integer_tempo_is_read_written_and_cleared() {
         "clearing every field left the tempo, got {left:?}"
     );
 }
+
+/// #611: many taggers write a `tmpo` of 0 to mean there is no tempo. It read
+/// as a BPM of 0, and the next edit wrote that 0 back as the model's value.
+#[test]
+fn an_mp4_tempo_of_zero_is_no_tempo_and_stays_as_it_was() {
+    use lofty::config::WriteOptions;
+    use lofty::mp4::{Atom, AtomData, AtomIdent};
+    use lofty::prelude::TagExt;
+
+    let path = temp_m4a_path("zero-tempo");
+    std::fs::write(&path, MINIMAL_M4A).expect("write fixture");
+    let mut ilst = mp4_ilst(&path);
+    let mut zero = Atom::new(AtomIdent::Fourcc(*b"tmpo"), AtomData::SignedInteger(0));
+    zero.push_data(AtomData::SignedInteger(0));
+    ilst.insert(zero);
+    ilst.save_to_path(&path, WriteOptions::default()).unwrap();
+
+    let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(read.tags.get(&TagField::Bpm), None);
+
+    let mut tags = read.tags.clone();
+    tags.insert(TagField::Title, "Edited".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: read.format,
+        tags,
+    })
+    .expect("write tags");
+    let tempo: Vec<Vec<String>> = mp4_ilst(&path)
+        .into_iter()
+        .filter(|atom| atom.ident() == &AtomIdent::Fourcc(*b"tmpo"))
+        .map(|atom| atom.data().map(|data| format!("{data:?}")).collect())
+        .collect();
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        tempo,
+        vec![vec![
+            "SignedInteger(0)".to_string(),
+            "SignedInteger(0)".to_string()
+        ]],
+        "an unrelated edit rewrote the atom"
+    );
+}

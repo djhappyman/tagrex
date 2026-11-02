@@ -1159,15 +1159,24 @@ const MP4_TEMPO: AtomIdent<'static> = AtomIdent::Fourcc(*b"tmpo");
 /// item; the integer one every other tagger writes is left on the concrete tag,
 /// so this is where it is picked up.
 fn ilst_integer_tempo(ilst: &Ilst) -> Option<String> {
-    ilst.get(&MP4_TEMPO)?.data().find_map(|data| match data {
-        AtomData::SignedInteger(n) => Some(n.to_string()),
-        AtomData::UnsignedInteger(n) => Some(n.to_string()),
-        AtomData::Unknown { data, .. } if (1..=4).contains(&data.len()) => {
-            let n = data.iter().fold(0u32, |n, byte| n << 8 | u32::from(*byte));
-            Some(n.to_string())
-        }
-        _ => None,
-    })
+    ilst.get(&MP4_TEMPO)
+        .and_then(atom_integer_tempo)
+        .map(|n| n.to_string())
+}
+
+/// The tempo one `tmpo` atom states as an integer. A tempo of 0 is how many
+/// taggers say there is none, and is read as none (#611).
+fn atom_integer_tempo(atom: &Atom<'_>) -> Option<i64> {
+    atom.data()
+        .find_map(|data| match data {
+            AtomData::SignedInteger(n) => Some(i64::from(*n)),
+            AtomData::UnsignedInteger(n) => Some(i64::from(*n)),
+            AtomData::Unknown { data, .. } if (1..=4).contains(&data.len()) => {
+                Some(data.iter().fold(0i64, |n, byte| n << 8 | i64::from(*byte)))
+            }
+            _ => None,
+        })
+        .filter(|n| *n > 0)
 }
 
 /// The `tmpo` atom a BPM string is written as: a 2-byte big-endian integer,
@@ -2806,9 +2815,16 @@ fn save_with_custom_items(
             // The tempo is the model's to state, once and as an integer
             // (#610). The conversion above writes it as text and leaves the
             // file's own integer atom beside it; both go.
-            merged.remove(&MP4_TEMPO).for_each(drop);
-            if let Some(bpm) = tags.get(&TagField::Bpm) {
-                merged.insert(mp4_tempo_atom(bpm));
+            match tags.get(&TagField::Bpm) {
+                Some(bpm) => {
+                    merged.remove(&MP4_TEMPO).for_each(drop);
+                    merged.insert(mp4_tempo_atom(bpm));
+                }
+                // With no BPM in the model a tempo the file states goes, but
+                // an atom stating none (#611) was never the model's to drop.
+                None => merged.retain(|atom| {
+                    atom.ident() != &MP4_TEMPO || atom_integer_tempo(atom).is_none()
+                }),
             }
             merged.save_to_path(path, write_options())?;
         }
