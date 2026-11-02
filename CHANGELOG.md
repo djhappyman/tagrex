@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-11-02
+
+A security fix, and the first release that installed copies of 1.1.0 receive
+through the in-app updater. A cover image whose MIME type held markup could
+reach the interface unescaped; the type is now sanitized on its way in, and the
+main window runs under a Content-Security-Policy. Updating is recommended.
+
 ### Security
 
 - The MIME type of a cover image, which comes from the audio file or from the
