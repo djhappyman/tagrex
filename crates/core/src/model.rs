@@ -4002,39 +4002,73 @@ fn rename_to_own_names(vorbis: &mut VorbisComments, own_names: &[(TagField, Stri
 /// (`ORGANIZATION` and `LABEL`, `TRACKTOTAL` and `totaltracks`) lost one of
 /// them. `own_fields` is the file's comments in order, by field.
 fn keep_unedited_fields(vorbis: &mut VorbisComments, own_fields: &[(TagField, String, String)]) {
+    let items: Vec<(String, String)> = vorbis
+        .items()
+        .map(|(name, value)| (name.to_string(), value.to_string()))
+        .collect();
     let fields: std::collections::BTreeSet<&TagField> =
         own_fields.iter().map(|(field, _, _)| field).collect();
+    let mut unedited: Vec<(&TagField, Vec<(&str, &str)>)> = Vec::new();
     for field in fields {
         let own: Vec<(&str, &str)> = own_fields
             .iter()
             .filter(|(own_field, _, _)| own_field == field)
             .map(|(_, name, value)| (name.as_str(), value.as_str()))
             .collect();
-        let written: Vec<(String, String)> = vorbis
-            .items()
+        let mut written_values: Vec<&str> = items
+            .iter()
             .filter(|(name, _)| vorbis_field_of(name).as_ref() == Some(field))
-            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .map(|(_, value)| value.as_str())
             .collect();
         // In order where the file used one name for the field. The backend
         // groups a field's values by name when it reads several names, so
         // across names only the values themselves can be compared.
-        let mut written_values: Vec<&str> =
-            written.iter().map(|(_, value)| value.as_str()).collect();
         let mut own_values: Vec<&str> = own.iter().map(|(_, value)| *value).collect();
         if own.iter().any(|(name, _)| *name != own[0].0) {
             written_values.sort_unstable();
             own_values.sort_unstable();
         }
-        let unedited = written_values == own_values;
-        if !unedited {
-            continue;
+        if written_values == own_values {
+            unedited.push((field, own));
         }
-        for (name, _) in &written {
-            vorbis.remove(name).for_each(drop);
+    }
+
+    // The file's comments go where the field's first written one is, and
+    // every other comment keeps its place.
+    let mut kept: Vec<(String, String)> = Vec::with_capacity(items.len());
+    let mut placed: Vec<&TagField> = Vec::new();
+    for (name, value) in &items {
+        let field = vorbis_field_of(name);
+        let own = field.as_ref().and_then(|field| {
+            unedited
+                .iter()
+                .find(|(unedited_field, _)| *unedited_field == field)
+        });
+        match own {
+            Some((field, own)) => {
+                if !placed.contains(field) {
+                    placed.push(field);
+                    kept.extend(
+                        own.iter()
+                            .map(|(name, value)| (name.to_string(), value.to_string())),
+                    );
+                }
+            }
+            None => kept.push((name.clone(), value.clone())),
         }
-        for (name, value) in own {
-            vorbis.push(name.to_string(), value.to_string());
-        }
+    }
+    if kept == items {
+        return;
+    }
+    // Emptied by name and refilled in order: the backend's removal moves the
+    // last comment into the gap, which would reorder another field's values.
+    let mut names: Vec<&String> = items.iter().map(|(name, _)| name).collect();
+    names.dedup();
+    for name in names {
+        vorbis.remove(name).for_each(drop);
+    }
+    for (name, value) in kept {
+        vorbis.push(name, value);
     }
 }
 

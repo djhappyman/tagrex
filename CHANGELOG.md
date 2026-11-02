@@ -220,6 +220,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   states under two names (`ORGANIZATION` and `LABEL`, `TRACKTOTAL` and
   `totaltracks`) keeps both instead of losing one
   ([#650](https://github.com/tagrex/tagrex/issues/650)).
+- That change no longer reorders another field's values on the same save: two
+  artists stay in the order the file had them
+  ([#651](https://github.com/tagrex/tagrex/issues/651)).
 
 ## [1.1.1] - 2026-11-02
 
