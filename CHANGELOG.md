@@ -123,6 +123,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Spanish: four messages called presets *ajustes*, the word for Settings,
   and five said *carátula* where the rest of the interface says *portada*
   ([#632](https://github.com/tagrex/tagrex/issues/632)).
+- French: the case options read *bas* / *HAUT* instead of *minuscules* /
+  *MAJUSCULES*, two messages stacked a double negative, a release was
+  called both *sortie* and *parution*, and 35 strings let a colon,
+  question mark or closing quote wrap onto a line of its own
+  ([#633](https://github.com/tagrex/tagrex/issues/633)).
 
 ## [1.1.1] - 2026-11-02
 
