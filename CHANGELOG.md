@@ -205,6 +205,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   file spells them instead of turning into `ALBUMARTIST`, `TRACKTOTAL` and
   `DISCTOTAL` on a save
   ([#647](https://github.com/tagrex/tagrex/issues/647)).
+- Saving an MP3 whose ID3v2 tag has an extended header no longer cuts the
+  first bytes of its audio, and an ID3v2.3 tag with one (in an MP3, an AIFF or
+  a WAV) no longer reads as empty and then loses every frame on the next save.
+  The extended header, which only holds a checksum, tag restrictions or a
+  padding size, is dropped on save
+  ([#648](https://github.com/tagrex/tagrex/issues/648)).
 
 ## [1.1.1] - 2026-11-02
 

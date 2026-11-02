@@ -1025,7 +1025,7 @@ fn custom_item_options() -> ParseOptions {
 /// file as it actually presents itself, which is what someone looking at the
 /// message needs.
 fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
-    let first = match Probe::open(path)?
+    let first = match probe_source(path)?
         .guess_file_type()?
         .options(parse_options())
         .read()
@@ -1034,7 +1034,7 @@ fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
         Err(error) => error,
     };
 
-    if let Ok(file) = Probe::open(path)?
+    if let Ok(file) = probe_source(path)?
         .guess_file_type()?
         .options(parse_options().parsing_mode(ParsingMode::BestAttempt))
         .read()
@@ -1043,7 +1043,7 @@ fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
     }
 
     if let Some(by_extension) = FileType::from_path(path) {
-        if let Ok(file) = Probe::open(path)?
+        if let Ok(file) = probe_source(path)?
             .set_file_type(by_extension)
             .options(parse_options().max_junk_bytes(STUBBORN_JUNK_BYTES))
             .read()
@@ -1076,8 +1076,229 @@ fn container_of(path: &Path) -> Result<Option<FileType>, TagIoError> {
 /// small reads, and handing the backend a bare `File` makes every one of them a
 /// syscall — enough to cost more than the whole first parse, which the probe
 /// buffers for itself.
-fn buffered(path: &Path) -> Result<std::io::BufReader<std::fs::File>, TagIoError> {
-    Ok(std::io::BufReader::new(std::fs::File::open(path)?))
+///
+/// A file whose ID3v2 block, leading or an AIFF's or a WAV's `ID3 ` chunk, has
+/// an extended header is handed over from memory instead, as a copy without
+/// that header (#648): the backend reads a 2.3 extended header with the 2.4
+/// layout and then takes every frame for padding.
+fn buffered(path: &Path) -> Result<TagSource, TagIoError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    let mut head = [0u8; 12];
+    let read = file.read_exact(&mut head).is_ok();
+    let leading = read && starts_with_id3v2_extended_header(&head[..10]);
+    let chunk = if read && !leading {
+        iff_id3_chunk_with_extended_header(&mut file, &head)?
+    } else {
+        None
+    };
+    file.seek(SeekFrom::Start(0))?;
+    if leading || chunk.is_some() {
+        let mut raw = Vec::new();
+        file.read_to_end(&mut raw)?;
+        let fixed = match chunk {
+            Some((at, len)) => without_iff_id3_extended_header(&raw, at, len),
+            None => without_id3v2_extended_header(&raw),
+        };
+        return Ok(TagSource::Memory(Cursor::new(fixed.unwrap_or(raw))));
+    }
+    Ok(TagSource::File(std::io::BufReader::new(file)))
+}
+
+/// Where an AIFF's or a WAV's `ID3 ` chunk payload sits, as offset and length,
+/// when that payload opens with an extended header (#648). Walked by seeking,
+/// so the audio is never read; `head` is the file's first twelve bytes.
+fn iff_id3_chunk_with_extended_header(
+    file: &mut std::fs::File,
+    head: &[u8; 12],
+) -> Result<Option<(usize, usize)>, TagIoError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let big_endian = match (&head[0..4], &head[8..12]) {
+        (b"FORM", b"AIFF" | b"AIFC") => true,
+        (b"RIFF", b"WAVE") => false,
+        _ => return Ok(None),
+    };
+    let len = file.metadata()?.len();
+    let mut pos = 12u64;
+    while pos + 8 <= len {
+        let mut chunk = [0u8; 18];
+        file.seek(SeekFrom::Start(pos))?;
+        let got = file.read(&mut chunk)?;
+        if got < 8 {
+            break;
+        }
+        let size_bytes = [chunk[4], chunk[5], chunk[6], chunk[7]];
+        let size = u64::from(if big_endian {
+            u32::from_be_bytes(size_bytes)
+        } else {
+            u32::from_le_bytes(size_bytes)
+        });
+        if chunk[..4].eq_ignore_ascii_case(b"ID3 ") {
+            let payload = (pos + 8, size);
+            let found = got == 18 && starts_with_id3v2_extended_header(&chunk[8..]);
+            return Ok((found && payload.0 + payload.1 <= len)
+                .then_some((payload.0 as usize, payload.1 as usize)));
+        }
+        pos += 8 + size + (size & 1);
+    }
+    Ok(None)
+}
+
+/// `raw`, an AIFF or a WAV whose `ID3 ` chunk payload is `len` bytes at `at`,
+/// with that payload's extended header taken out (#648) and the chunk's and the
+/// container's sizes kept in step.
+fn without_iff_id3_extended_header(raw: &[u8], at: usize, len: usize) -> Option<Vec<u8>> {
+    let fixed = without_id3v2_extended_header(raw.get(at..at + len)?)?;
+    let big_endian = &raw[0..4] == b"FORM";
+    let size = |value: usize| {
+        if big_endian {
+            (value as u32).to_be_bytes()
+        } else {
+            (value as u32).to_le_bytes()
+        }
+    };
+    let mut out = raw[..at - 4].to_vec();
+    out.extend_from_slice(&size(fixed.len()));
+    out.extend_from_slice(&fixed);
+    if fixed.len() % 2 == 1 {
+        out.push(0);
+    }
+    out.extend_from_slice(raw.get(at + len + (len & 1)..).unwrap_or_default());
+    let container = size(out.len() - 8);
+    out[4..8].copy_from_slice(&container);
+    Some(out)
+}
+
+/// What [`buffered`] hands the backend: the file itself, or the copy of it that
+/// lost its ID3v2 extended header (#648).
+enum TagSource {
+    File(std::io::BufReader<std::fs::File>),
+    Memory(Cursor<Vec<u8>>),
+}
+
+impl std::io::Read for TagSource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            TagSource::File(file) => file.read(buf),
+            TagSource::Memory(bytes) => bytes.read(buf),
+        }
+    }
+}
+
+impl std::io::Seek for TagSource {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        match self {
+            TagSource::File(file) => file.seek(pos),
+            TagSource::Memory(bytes) => bytes.seek(pos),
+        }
+    }
+}
+
+/// A probe over [`buffered`], with the container the extension names as its
+/// fallback, as the backend's own `Probe::open` sets it.
+fn probe_source(path: &Path) -> Result<Probe<TagSource>, TagIoError> {
+    let source = buffered(path)?;
+    Ok(match FileType::from_path(path) {
+        Some(file_type) => Probe::with_file_type(source, file_type),
+        None => Probe::new(source),
+    })
+}
+
+/// Whether these first ten bytes open an ID3v2.3 or 2.4 tag with an extended
+/// header (#648).
+fn starts_with_id3v2_extended_header(head: &[u8]) -> bool {
+    head.len() >= 10 && &head[..3] == b"ID3" && matches!(head[3], 3 | 4) && head[5] & 0x40 != 0
+}
+
+/// `bytes`, a file or an ID3v2 block that starts with the tag, without the
+/// tag's extended header (#648); `None` when there is none, or none this can
+/// take out safely.
+///
+/// The header flag is cleared and the tag size shrunk by the extended header's
+/// length, and a 2.4 footer is kept in step; every byte after the extended
+/// header, the frames and the audio alike, is kept as it is. All an extended
+/// header holds is a CRC, tag restrictions or a padding size, none of which the
+/// app shows or writes, and the backend miscounts the tag's end around one.
+fn without_id3v2_extended_header(bytes: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 14 || !starts_with_id3v2_extended_header(bytes) {
+        return None;
+    }
+    let version = bytes[3];
+    let flags = bytes[5];
+    let size = syncsafe_u32(&bytes[6..10]) as usize;
+    let end = 10 + size;
+    if end > bytes.len() {
+        return None;
+    }
+    // 2.4 counts the size field in the extended header's size, 2.3 does not;
+    // a 2.3 tag that is unsynchronised has its extended header unsynchronised
+    // too, so its length on disk has to be walked.
+    let extended_len = match (version, flags & 0x80 != 0) {
+        (4, _) => syncsafe_u32(&bytes[10..14]) as usize,
+        (_, false) => 4 + u32::from_be_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]) as usize,
+        (_, true) => unsynchronised_extended_header_len(&bytes[10..end])?,
+    };
+    if extended_len < 6 || 10 + extended_len > end {
+        return None;
+    }
+
+    let new_size = syncsafe_bytes((size - extended_len) as u32);
+    let mut out = Vec::with_capacity(bytes.len() - extended_len);
+    out.extend_from_slice(&bytes[..5]);
+    out.push(flags & !0x40);
+    out.extend_from_slice(&new_size);
+    out.extend_from_slice(&bytes[10 + extended_len..end]);
+    let mut rest = &bytes[end..];
+    if version == 4 && flags & 0x10 != 0 && rest.len() >= 10 && &rest[..3] == b"3DI" {
+        out.extend_from_slice(&rest[..5]);
+        out.push(flags & !0x40);
+        out.extend_from_slice(&new_size);
+        rest = &rest[10..];
+    }
+    out.extend_from_slice(rest);
+    Some(out)
+}
+
+/// The length on disk of an unsynchronised ID3v2.3 extended header that starts
+/// `raw` (#648): its size field, then as many bytes as that field counts, with
+/// each `00` that unsynchronisation put after an `FF` counted in.
+fn unsynchronised_extended_header_len(raw: &[u8]) -> Option<usize> {
+    let mut decoded = Vec::new();
+    let mut want = 4;
+    let mut pos = 0;
+    while decoded.len() < want {
+        let byte = *raw.get(pos)?;
+        pos += 1;
+        if byte == 0xFF && raw.get(pos) == Some(&0) {
+            pos += 1;
+        }
+        decoded.push(byte);
+        if decoded.len() == 4 {
+            want =
+                4 + u32::from_be_bytes([decoded[0], decoded[1], decoded[2], decoded[3]]) as usize;
+        }
+    }
+    Some(pos)
+}
+
+/// Take the extended header out of the file's leading ID3v2 block before a
+/// write (#648). The backend finds the end of the tag it replaces by skipping
+/// the tag's size from the end of the extended header, so with one in place the
+/// write also replaces as many bytes of the audio. Only the header bytes change;
+/// a file without an extended header is not touched.
+fn drop_id3v2_extended_header(path: &Path) -> Result<(), TagIoError> {
+    use std::io::Read;
+    let mut head = [0u8; 10];
+    if std::fs::File::open(path)?.read_exact(&mut head).is_err()
+        || !starts_with_id3v2_extended_header(&head)
+    {
+        return Ok(());
+    }
+    let raw = std::fs::read(path)?;
+    if let Some(fixed) = without_id3v2_extended_header(&raw) {
+        rewrite_in_place(path, &raw, &fixed)?;
+    }
+    Ok(())
 }
 
 /// The file's concrete Vorbis Comments block, if it has one. Dispatches on the
@@ -1672,6 +1893,7 @@ impl TagEngine {
     pub fn write(file: &TrackFile) -> Result<(), TagIoError> {
         ensure_audio_after_tags(&file.path)?;
         ensure_no_misread_id3v1(&file.path)?;
+        drop_id3v2_extended_header(&file.path)?;
         // Guard the year before touching the file. It is written as a timestamp
         // (ID3v2.4 TDRC / Vorbis DATE / MP4 ©day) whose year MUST be exactly 4
         // digits; lofty accepts a shorter one like "222" on write but then
@@ -1777,7 +1999,9 @@ impl TagEngine {
     ) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
         ensure_no_misread_id3v1(path)?;
-        let mut synthetic = bytes.to_vec();
+        drop_id3v2_extended_header(path)?;
+        // A block journaled before #648 can still carry its extended header.
+        let mut synthetic = without_id3v2_extended_header(bytes).unwrap_or_else(|| bytes.to_vec());
         let mut silence = vec![0xFF, 0xFB, 0x90, 0x00];
         silence.resize(SILENT_MPEG_FRAME_LEN, 0);
         for _ in 0..SILENT_MPEG_FRAMES {
@@ -1820,6 +2044,7 @@ impl TagEngine {
     pub fn set_id3v2_revision(path: &Path, revision: Id3v2Revision) -> Result<bool, TagIoError> {
         ensure_audio_after_tags(path)?;
         ensure_no_misread_id3v1(path)?;
+        drop_id3v2_extended_header(path)?;
         let Some(container) = container_of(path)? else {
             return Ok(false);
         };
@@ -1880,6 +2105,7 @@ impl TagEngine {
     pub fn remove_block(path: &Path, kind: TagBlockKind) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
         ensure_no_misread_id3v1(path)?;
+        drop_id3v2_extended_header(path)?;
         // An AIFF's or a WAV's ID3v2 is a chunk this module writes itself
         // (#358, #505); taking it out goes the same way.
         if kind == TagBlockKind::Id3v2
@@ -1928,6 +2154,7 @@ impl TagEngine {
     ) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
         ensure_no_misread_id3v1(path)?;
+        drop_id3v2_extended_header(path)?;
         let options = match (kind, revision) {
             (TagBlockKind::Id3v2, Some(revision)) => {
                 write_options().use_id3v23(revision == Id3v2Revision::V3)
@@ -2053,6 +2280,7 @@ impl TagEngine {
     pub fn write_covers(path: &Path, covers: &[CoverArt]) -> Result<(), TagIoError> {
         ensure_audio_after_tags(path)?;
         ensure_no_misread_id3v1(path)?;
+        drop_id3v2_extended_header(path)?;
         // Same reason as `write`: going through the generic tag would drop an
         // MP3's non-representable frames, so edit the concrete tag instead.
         if is_id3v2_container(path) {
@@ -3261,6 +3489,15 @@ fn syncsafe_u32(bytes: &[u8]) -> u32 {
         .fold(0, |acc, byte| (acc << 7) | u32::from(byte & 0x7F))
 }
 
+fn syncsafe_bytes(value: u32) -> [u8; 4] {
+    [
+        ((value >> 21) & 0x7F) as u8,
+        ((value >> 14) & 0x7F) as u8,
+        ((value >> 7) & 0x7F) as u8,
+        (value & 0x7F) as u8,
+    ]
+}
+
 /// The timestamp frames of a raw ID3v2 block whose text lofty would not write
 /// back as it found it (#504). lofty parses `TDEN`/`TDRC`/… into a date, and a
 /// timestamp written with a space where ID3v2.4 wants a `T` —
@@ -3430,7 +3667,6 @@ fn write_generic(file: &TrackFile) -> Result<(), TagIoError> {
         .or_else(|| tagged.first_tag())
         .cloned()
         .unwrap_or_else(|| Tag::new(file.format.primary_tag_type()));
-
     let tag_type = tag.tag_type();
     let desired: HashSet<ItemKey> = file
         .tags

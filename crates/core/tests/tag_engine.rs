@@ -1839,6 +1839,232 @@ fn a_file_that_is_not_audio_at_all_still_fails() {
     assert!(read.is_err(), "a text file must not read as audio");
 }
 
+/// #648: an MP3 whose ID3v2 tag opens with an extended header, built by hand
+/// because the backend never writes one unprompted. `extended` is the extended
+/// header as it sits on disk, `frames` the frame block, `footer` adds a 2.4
+/// footer.
+fn mp3_with_extended_header(
+    name: &str,
+    version: u8,
+    unsynchronised: bool,
+    extended: &[u8],
+    frames: &[u8],
+    footer: bool,
+) -> PathBuf {
+    let mut flags = 0x40;
+    if unsynchronised {
+        flags |= 0x80;
+    }
+    if footer {
+        flags |= 0x10;
+    }
+    let size = (extended.len() + frames.len()) as u32;
+    let size = [
+        ((size >> 21) & 0x7f) as u8,
+        ((size >> 14) & 0x7f) as u8,
+        ((size >> 7) & 0x7f) as u8,
+        (size & 0x7f) as u8,
+    ];
+    let mut data = vec![b'I', b'D', b'3', version, 0, flags];
+    data.extend_from_slice(&size);
+    data.extend_from_slice(extended);
+    data.extend_from_slice(frames);
+    if footer {
+        data.extend_from_slice(&[b'3', b'D', b'I', version, 0, flags]);
+        data.extend_from_slice(&size);
+    }
+    data.extend_from_slice(&minimal_mp3());
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-exthdr-{name}-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, data).expect("write fixture");
+    path
+}
+
+/// The bytes after the file's leading ID3v2 tag (and its footer, if any).
+fn after_id3v2(path: &PathBuf) -> Vec<u8> {
+    let data = std::fs::read(path).unwrap();
+    if &data[..3] != b"ID3" {
+        return data;
+    }
+    let size = data[6..10]
+        .iter()
+        .fold(0usize, |acc, byte| (acc << 7) | usize::from(byte & 0x7f));
+    let footer = if data[5] & 0x10 != 0 { 10 } else { 0 };
+    data[10 + size + footer..].to_vec()
+}
+
+/// Read the file, retitle it, write it, and return what it reads as after.
+fn retitle(path: &std::path::Path, title: &str) -> TrackFile {
+    let mut file = TagEngine::read(path).expect("read");
+    file.tags.insert(TagField::Title, title.to_string());
+    TagEngine::write(&file).expect("write");
+    TagEngine::read(path).expect("read back")
+}
+
+/// #648: a 2.4 tag with an extended header read fine, but every save cut as
+/// many bytes off the start of the audio as the extended header was long.
+#[test]
+fn an_id3v24_extended_header_costs_the_audio_nothing() {
+    // Size 6 (synchsafe, counting itself), one flag byte, no flags set.
+    let extended = [0, 0, 0, 6, 1, 0];
+    let mut frames = b"TIT2".to_vec();
+    frames.extend_from_slice(&[0, 0, 0, 6, 0, 0, 0]);
+    frames.extend_from_slice(b"Hello");
+    frames.extend_from_slice(&[0; 32]); // padding
+    let path = mp3_with_extended_header("v24", 4, false, &extended, &frames, false);
+
+    let before = TagEngine::read(&path).expect("read");
+    assert_eq!(
+        before.tags.get(&TagField::Title).map(String::as_str),
+        Some("Hello")
+    );
+    let after = retitle(&path, "Changed");
+    let audio = after_id3v2(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        after.tags.get(&TagField::Title).map(String::as_str),
+        Some("Changed")
+    );
+    assert_eq!(audio, minimal_mp3(), "the save changed the audio");
+}
+
+/// #648: the same with a 2.4 footer, which repeats the header and so has to
+/// lose the extended-header flag and the bytes along with it.
+#[test]
+fn an_id3v24_extended_header_with_a_footer_costs_the_audio_nothing() {
+    // Restrictions set: size 8, one flag byte, the restrictions flag, its
+    // length and the restrictions byte.
+    let extended = [0, 0, 0, 8, 1, 0x10, 1, 0];
+    let mut frames = b"TIT2".to_vec();
+    frames.extend_from_slice(&[0, 0, 0, 6, 0, 0, 0]);
+    frames.extend_from_slice(b"Hello");
+    let path = mp3_with_extended_header("v24footer", 4, false, &extended, &frames, true);
+
+    let before = TagEngine::read(&path).expect("read");
+    assert_eq!(
+        before.tags.get(&TagField::Title).map(String::as_str),
+        Some("Hello")
+    );
+    let after = retitle(&path, "Changed");
+    let audio = after_id3v2(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        after.tags.get(&TagField::Title).map(String::as_str),
+        Some("Changed")
+    );
+    assert_eq!(audio, minimal_mp3(), "the save changed the audio");
+}
+
+/// #648: a 2.3 extended header was read with the 2.4 layout, so the frames
+/// were taken for padding: the file read as untagged, and the save that
+/// followed dropped every frame and cut the audio too.
+#[test]
+fn an_id3v23_extended_header_hides_no_frames() {
+    // Size 6 (not counting itself), two flag bytes, a four-byte padding size.
+    let extended = [0, 0, 0, 6, 0, 0, 0, 0, 0, 16];
+    let mut frames = Vec::new();
+    frames.extend_from_slice(&id3v23_frame(b"TIT2", b"\x00Hello"));
+    frames.extend_from_slice(&id3v23_frame(b"TPE1", b"\x00Someone"));
+    frames.extend_from_slice(&[0; 16]); // the padding the extended header counts
+    let path = mp3_with_extended_header("v23", 3, false, &extended, &frames, false);
+
+    let before = TagEngine::read(&path).expect("read");
+    assert_eq!(
+        before.tags.get(&TagField::Title).map(String::as_str),
+        Some("Hello")
+    );
+    assert_eq!(
+        before.tags.get(&TagField::Artist).map(String::as_str),
+        Some("Someone")
+    );
+    let after = retitle(&path, "Changed");
+    let audio = after_id3v2(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        after.tags.get(&TagField::Title).map(String::as_str),
+        Some("Changed")
+    );
+    assert_eq!(
+        after.tags.get(&TagField::Artist).map(String::as_str),
+        Some("Someone")
+    );
+    assert_eq!(audio, minimal_mp3(), "the save changed the audio");
+}
+
+/// #648: a WAV's `ID3 ` chunk can hold a 2.3 tag with an extended header too,
+/// and read as untagged the same way; the save that followed dropped the chunk.
+#[test]
+fn an_id3v23_extended_header_in_a_wav_chunk_hides_no_frames() {
+    let mut tag = vec![b'I', b'D', b'3', 3, 0, 0x40];
+    let mut body = vec![0, 0, 0, 6, 0, 0, 0, 0, 0, 0];
+    body.extend_from_slice(&id3v23_frame(b"TIT2", b"\x00Hello"));
+    body.extend_from_slice(&id3v23_frame(b"TPE1", b"\x00Someone"));
+    tag.extend_from_slice(&[0, 0, 0, body.len() as u8]);
+    tag.extend_from_slice(&body);
+    if tag.len() % 2 == 1 {
+        tag.push(0);
+    }
+    let mut data = minimal_wav();
+    data.extend_from_slice(b"ID3 ");
+    data.extend_from_slice(&(tag.len() as u32).to_le_bytes());
+    data.extend_from_slice(&tag);
+    let riff_size = (data.len() - 8) as u32;
+    data[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-exthdr-wav-{}.wav",
+        std::process::id()
+    ));
+    std::fs::write(&path, data).expect("write fixture");
+
+    let before = TagEngine::read(&path).expect("read");
+    let after = retitle(&path, "Changed");
+    let audio_kept = std::fs::read(&path)
+        .unwrap()
+        .windows(minimal_wav().len() - 12)
+        .any(|window| window == &minimal_wav()[12..]);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        before.tags.get(&TagField::Title).map(String::as_str),
+        Some("Hello")
+    );
+    assert_eq!(
+        after.tags.get(&TagField::Title).map(String::as_str),
+        Some("Changed")
+    );
+    assert_eq!(
+        after.tags.get(&TagField::Artist).map(String::as_str),
+        Some("Someone")
+    );
+    assert!(audio_kept, "the save changed the audio");
+}
+
+/// #648: an unsynchronised 2.3 tag has its extended header unsynchronised as
+/// well, so a CRC holding an `FF` is one byte longer on disk than its size says.
+#[test]
+fn an_unsynchronised_id3v23_extended_header_is_measured_on_disk() {
+    // Size 10, the CRC flag, no padding, then a CRC whose first byte is FF and
+    // so is followed by the 00 unsynchronisation inserts.
+    let extended = [0, 0, 0, 10, 0x80, 0, 0, 0, 0, 0, 0xFF, 0x00, 1, 2, 3];
+    let frames = id3v23_frame(b"TIT2", b"\x00Hello");
+    let path = mp3_with_extended_header("v23unsync", 3, true, &extended, &frames, false);
+
+    let before = TagEngine::read(&path).expect("read");
+    assert_eq!(
+        before.tags.get(&TagField::Title).map(String::as_str),
+        Some("Hello")
+    );
+    let after = retitle(&path, "Changed");
+    let audio = after_id3v2(&path);
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        after.tags.get(&TagField::Title).map(String::as_str),
+        Some("Changed")
+    );
+    assert_eq!(audio, minimal_mp3(), "the save changed the audio");
+}
+
 /// #205: the ID3v2 revision a conversion asks for is the one that lands on
 /// disk, whichever way the app-wide preference happens to be set.
 #[test]
