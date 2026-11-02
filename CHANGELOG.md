@@ -105,6 +105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Settings: the Media glyphs row (its label, its hint and the two descriptive
   choices in its menu) was English in every language
   ([#626](https://github.com/tagrex/tagrex/issues/626)).
+- Shortcuts named the Space key, and off macOS the arrow keys, in English in
+  every language ([#627](https://github.com/tagrex/tagrex/issues/627)).
 
 ## [1.1.1] - 2026-11-02
 

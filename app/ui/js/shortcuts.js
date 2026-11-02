@@ -184,8 +184,21 @@ const KEY_NAMES = {
   BracketRight: ["]", "]"],
 };
 
+// The names above that are words rather than what a key cap says, shown in
+// the interface language (#627).
+const KEY_WORDS = {
+  Space: "shortcuts.key.space",
+  Up: "shortcuts.key.up",
+  Down: "shortcuts.key.down",
+  Left: "shortcuts.key.left",
+  Right: "shortcuts.key.right",
+};
+
 function keyName(code) {
-  if (KEY_NAMES[code]) return KEY_NAMES[code][IS_MAC ? 0 : 1];
+  if (KEY_NAMES[code]) {
+    const name = KEY_NAMES[code][IS_MAC ? 0 : 1];
+    return KEY_WORDS[name] ? t(KEY_WORDS[name]) : name;
+  }
   if (/^Key[A-Z]$/.test(code)) return code.slice(3);
   if (/^Digit\d$/.test(code)) return code.slice(5);
   if (/^Numpad\d$/.test(code)) return code.slice(6);
