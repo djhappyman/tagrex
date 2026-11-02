@@ -234,7 +234,7 @@ export const en = {
   "blocks.carryingEach": "Carrying one tag block each",
   "blocks.readingOne": "Reading {read} — this file also carries {rest}",
   "blocks.readingAll": "Reading {read} — also {rest}, on all {files} of them",
-  "blocks.several": "{files} of the selected files carry more than one tag block",
+  "blocks.several": "More than one tag block in {files} of the selection",
   "blocks.remove": "Remove {block}",
   "blocks.removeTitleOne": "Strip the {block} block, leaving the rest of the file alone",
   "blocks.removeTitleMany": "Strip the {block} block from {files}, leaving the rest alone",

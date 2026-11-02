@@ -18,7 +18,7 @@ export const de = {
   // ---- shared, and the panels other than EXPORTER ----
   "unit.rule": { one: "{n} Regel", other: "{n} Regeln" },
   "unit.preset": { one: "{n} Vorlage", other: "{n} Vorlagen" },
-  "generator.chainBtn.some": "{rules} laufen über das Ergebnis dieses Bereichs — zum Ändern klicken",
+  "generator.chainBtn.some": "{rules} für das Ergebnis dieses Bereichs, zum Ändern klicken",
   "generator.chainBtn.none": "Regeln für das Ergebnis dieses Bereichs — keine festgelegt",
   "unit.vinylPosition": { one: "{n} Vinyl-Position", other: "{n} Vinyl-Positionen" },
   "subject.theseGroups": "Diese Gruppen",
@@ -230,7 +230,7 @@ export const de = {
   "blocks.carryingEach": "Jede enthält einen Tag-Block",
   "blocks.readingOne": "Gelesen wird {read} — diese Datei enthält außerdem {rest}",
   "blocks.readingAll": "Gelesen wird {read} — außerdem {rest}, bei allen {files}",
-  "blocks.several": "{files} der ausgewählten Dateien enthalten mehr als einen Tag-Block",
+  "blocks.several": "Mehr als ein Tag-Block in {files} der Auswahl",
   "blocks.remove": "{block} entfernen",
   "blocks.removeTitleOne": "Den {block}-Block entfernen, der Rest der Datei bleibt unberührt",
   "blocks.removeTitleMany": "Den {block}-Block aus {files} entfernen, der Rest bleibt unberührt",

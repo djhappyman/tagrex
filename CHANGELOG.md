@@ -116,6 +116,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Six interface strings that nothing displays any more were still carried in
   all seven translations; they are removed
   ([#630](https://github.com/tagrex/tagrex/issues/630)).
+- Spanish, French, Italian and German: about fifty messages put a plural
+  participle or verb next to a count, so they read wrong for a single file
+  or track ("1 pista numeradas"). They are reworded to read right at any
+  count ([#631](https://github.com/tagrex/tagrex/issues/631)).
 
 ## [1.1.1] - 2026-11-02
 
