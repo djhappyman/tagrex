@@ -263,6 +263,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The CSV export writes a tag value that starts like a formula (`=`, `+`,
   `-`, `@`) as text, with a leading `'`, so a spreadsheet opening the file
   no longer runs it ([#661](https://github.com/tagrex/tagrex/issues/661)).
+- The XML export leaves out control characters XML cannot hold, so a tag
+  with one no longer makes the whole export unreadable to an XML parser
+  ([#662](https://github.com/tagrex/tagrex/issues/662)).
 
 ## [1.1.1] - 2026-11-02
 

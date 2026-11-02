@@ -313,8 +313,19 @@ fn html_escape(value: &str) -> String {
 }
 
 /// Escape XML text content (`&`, `<`, `>` are the ones that matter there).
+///
+/// A character XML 1.0 cannot hold at all, escaped or not (most control
+/// characters, U+FFFE, U+FFFF), is left out (#662): one of them made the whole
+/// export a document no parser accepts.
 fn xml_escape(value: &str) -> String {
     value
+        .chars()
+        .filter(|c| match *c {
+            '\t' | '\n' | '\r' => true,
+            '\u{FFFE}' | '\u{FFFF}' => false,
+            c => c >= ' ',
+        })
+        .collect::<String>()
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
@@ -628,5 +639,18 @@ mod tests {
         assert!(out.contains("<artist>Tom &amp; Jerry</artist>"));
         // An empty tag column (e.g. Title here) is omitted entirely.
         assert!(!out.contains("<title>"));
+    }
+
+    #[test]
+    fn xml_leaves_out_what_xml_cannot_hold() {
+        let out = xml(&[track(
+            "/music/x.mp3",
+            &[
+                (TagField::Artist, "Nul\0led\u{1b}[0m"),
+                (TagField::Comment, "two\nlines\tand\u{FFFF} \u{85}"),
+            ],
+        )]);
+        assert!(out.contains("<artist>Nulled[0m</artist>"));
+        assert!(out.contains("<comment>two\nlines\tand \u{85}</comment>"));
     }
 }
