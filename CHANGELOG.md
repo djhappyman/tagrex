@@ -257,6 +257,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   start lists it in History as interrupted and it can be undone, instead of
   leaving changed files with nothing to undo
   ([#659](https://github.com/tagrex/tagrex/issues/659)).
+- A genre an ID3v2.3 tag states as a number with its own name, such as
+  `(17)Rock`, now reads once (`Rock`) instead of twice (`Rock; Rock`)
+  ([#660](https://github.com/tagrex/tagrex/issues/660)).
 
 ## [1.1.1] - 2026-11-02
 

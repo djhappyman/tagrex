@@ -4721,3 +4721,54 @@ fn a_cleared_comment_does_not_come_back_from_a_described_frame() {
         "the machine frame stays"
     );
 }
+
+/// #660: ID3v2.3 states a genre as a numeric reference refined by its name,
+/// `(17)Rock`, and the backend reads the two halves as two genres.
+#[test]
+fn a_numeric_genre_with_its_name_reads_once() {
+    use lofty::config::WriteOptions;
+    use lofty::id3::v2::{Frame, FrameId, Id3v2Tag, TextInformationFrame};
+    use lofty::prelude::TagExt;
+    use lofty::TextEncoding;
+    use std::borrow::Cow;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-numeric-genre-{}.mp3",
+        std::process::id()
+    ));
+    for (raw, expected) in [
+        ("(17)Rock", "Rock"),
+        ("(17)rock", "Rock"),
+        ("(4)(17)", "Disco; Rock"),
+        ("(17)(4)Eurodisco", "Rock; Disco; Eurodisco"),
+    ] {
+        std::fs::write(&path, minimal_mp3()).unwrap();
+        let mut tag = Id3v2Tag::new();
+        for (id, value) in [("TIT2", "Title"), ("TCON", raw)] {
+            tag.insert(Frame::Text(TextInformationFrame::new(
+                FrameId::Valid(Cow::Borrowed(id)),
+                TextEncoding::Latin1,
+                value.to_string(),
+            )));
+        }
+        tag.save_to_path(&path, WriteOptions::default().use_id3v23(true))
+            .unwrap();
+        let file = TagEngine::read(&path).unwrap();
+        assert_eq!(
+            file.tags.get(&TagField::Genre).map(String::as_str),
+            Some(expected),
+            "{raw}"
+        );
+        TagEngine::write(&file).unwrap();
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Genre)
+                .map(String::as_str),
+            Some(expected),
+            "{raw}, after a save"
+        );
+    }
+    std::fs::remove_file(&path).ok();
+}

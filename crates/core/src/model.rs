@@ -4387,6 +4387,17 @@ fn insert_read_value(tags: &mut TagMap, field: TagField, from_alias: bool, value
             slot.insert(value);
         }
         std::collections::btree_map::Entry::Occupied(mut slot) => {
+            // ID3v2.3 states a genre as a numeric reference refined by its
+            // name, `(17)Rock`, and the backend reads that as the genre twice
+            // (#660). One already read is not read again.
+            let repeated = *slot.key() == TagField::Genre
+                && slot
+                    .get()
+                    .split(multi_value_separator().as_str())
+                    .any(|genre| genre.eq_ignore_ascii_case(&value));
+            if repeated {
+                return;
+            }
             if slot.key().is_multi_value() {
                 let joined = format!("{}{}{}", slot.get(), multi_value_separator(), value);
                 slot.insert(joined);
