@@ -2628,3 +2628,105 @@ fn an_m4a_save_with_a_bpm_keeps_multi_values_in_order() {
         Some("Artist One; Artist Two")
     );
 }
+
+/// #616: a block's content was only what the generic tag holds, so a
+/// conversion wrote the new block without the custom fields and removed the
+/// old one, while the preview called them kept.
+#[test]
+fn a_conversion_carries_custom_fields_or_names_them_as_lost() {
+    let custom = TagField::Custom("TAGREX_CUSTOM_TEST".to_string());
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Title, "Title".to_string());
+    tags.insert(TagField::Artist, "Artist One; Artist Two".to_string());
+    tags.insert(custom.clone(), "custom value".to_string());
+
+    // Into APE, which holds items by name: carried, every value kept.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-convert-ape-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Mp3,
+        tags: tags.clone(),
+    })
+    .expect("write tags");
+    let content = TagEngine::read_block(&path, TagBlockKind::Id3v2)
+        .unwrap()
+        .expect("an ID3v2 block");
+    assert_eq!(
+        content.tags.get(&custom).map(String::as_str),
+        Some("custom value"),
+        "the block's content leaves the custom field out"
+    );
+    assert_eq!(content.conversion_loss(TagBlockKind::Ape).fields, vec![]);
+    TagEngine::write_block(&path, TagBlockKind::Ape, None, &content).unwrap();
+    TagEngine::remove_block(&path, TagBlockKind::Id3v2).unwrap();
+    let ape = TagEngine::read_block(&path, TagBlockKind::Ape)
+        .unwrap()
+        .expect("an APE block");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        ape.tags.get(&custom).map(String::as_str),
+        Some("custom value")
+    );
+    assert_eq!(
+        ape.tags.get(&TagField::Artist).map(String::as_str),
+        Some("Artist One; Artist Two")
+    );
+
+    // Into RIFF INFO, which has no names to hold it under: named as lost.
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-convert-riff-{}.wav",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_wav()).expect("write fixture");
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Wav,
+        tags,
+    })
+    .expect("write tags");
+    let content = TagEngine::read_block(&path, TagBlockKind::Id3v2)
+        .unwrap()
+        .expect("an ID3v2 block");
+    std::fs::remove_file(&path).ok();
+    assert!(
+        content
+            .conversion_loss(TagBlockKind::RiffInfo)
+            .fields
+            .contains(&custom),
+        "the preview does not name the custom field"
+    );
+}
+
+/// #616: putting a Vorbis block back (undo of its removal) keeps its custom
+/// fields and the order of a multi-value field.
+#[test]
+fn a_vorbis_block_written_back_keeps_custom_fields_and_order() {
+    let path = temp_flac_path("vorbis-block-back");
+    std::fs::write(&path, MINIMAL_FLAC).expect("write fixture");
+    let custom = TagField::Custom("TAGREX_CUSTOM_TEST".to_string());
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Artist, "Artist One; Artist Two".to_string());
+    tags.insert(custom.clone(), "custom value".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::Flac,
+        tags,
+    })
+    .expect("write tags");
+    let content = TagEngine::read_block(&path, TagBlockKind::VorbisComments)
+        .unwrap()
+        .expect("a Vorbis block");
+    TagEngine::remove_block(&path, TagBlockKind::VorbisComments).unwrap();
+    TagEngine::write_block(&path, TagBlockKind::VorbisComments, None, &content).unwrap();
+    let back = TagEngine::read(&path).expect("read tags").tags;
+    std::fs::remove_file(&path).ok();
+    assert_eq!(
+        back.get(&TagField::Artist).map(String::as_str),
+        Some("Artist One; Artist Two")
+    );
+    assert_eq!(back.get(&custom).map(String::as_str), Some("custom value"));
+}

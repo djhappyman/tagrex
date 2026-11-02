@@ -59,6 +59,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Saving an M4A with a BPM no longer swaps the first values of a multi-value
   field such as the artist
   ([#618](https://github.com/tagrex/tagrex/issues/618)).
+- Converting a tag block into another, or undoing a block's removal, now keeps
+  its custom fields (ReplayGain values among them), its URL and an M4A's
+  tempo, where the new block can hold them; where it cannot, the preview lists
+  them as lost. Before, they were dropped while the preview called them kept.
+  A conversion into APE also keeps every value of a multi-value field now
+  ([#616](https://github.com/tagrex/tagrex/issues/616)).
 
 ## [1.1.1] - 2026-11-02
 

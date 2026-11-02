@@ -761,7 +761,27 @@ impl TagBlockContent {
     /// written and no file is touched — so the preview can state the cost of a
     /// conversion before it is staged.
     pub fn conversion_loss(&self, kind: TagBlockKind) -> ConversionLoss {
-        let survived = tag_to_map(&round_trip_through(kind, tag_for_block(kind, self)));
+        let mut survived = tag_to_map(&round_trip_through(kind, tag_for_block(kind, self)));
+        // What the generic tag cannot carry is written by name (#616), onto the
+        // block kinds that have names to write it under.
+        let tag_type = kind.to_tag_type();
+        if matches!(
+            kind,
+            TagBlockKind::Id3v2
+                | TagBlockKind::VorbisComments
+                | TagBlockKind::Ape
+                | TagBlockKind::Mp4Ilst
+        ) {
+            for (field, value) in &self.tags {
+                let by_name = match field {
+                    TagField::Custom(name) => item_key_for_custom_name(tag_type, name).is_none(),
+                    other => field_name_on_tag(other, tag_type).is_some(),
+                };
+                if by_name {
+                    survived.insert(field.clone(), value.clone());
+                }
+            }
+        }
         ConversionLoss {
             fields: self
                 .tags
@@ -802,12 +822,28 @@ fn round_trip_through(kind: TagBlockKind, tag: Tag) -> Tag {
     match kind {
         TagBlockKind::Id3v1 => Tag::from(Id3v1Tag::from(tag)),
         TagBlockKind::Id3v2 => Tag::from(Id3v2Tag::from(tag)),
-        TagBlockKind::VorbisComments => Tag::from(VorbisComments::from(tag)),
+        TagBlockKind::VorbisComments => Tag::from(vorbis_comments_from(tag)),
         TagBlockKind::Ape => Tag::from(ApeTag::from(tag)),
         TagBlockKind::Mp4Ilst => Tag::from(Ilst::from(tag)),
         TagBlockKind::RiffInfo => Tag::from(RiffInfoList::from(tag)),
         TagBlockKind::AiffText => Tag::from(AiffTextChunks::from(tag)),
     }
+}
+
+/// A generic tag as Vorbis Comments, with its items in their order (#616).
+///
+/// The backend's conversion moves the encoder into the vendor string by taking
+/// it out with a swap, which puts the tag's first item where the encoder was —
+/// reversing the first two values of a multi-value field. It is taken out here
+/// instead, in order, and set as the vendor the same way.
+fn vorbis_comments_from(mut tag: Tag) -> VorbisComments {
+    let vendor = tag.get_string(ItemKey::EncoderSoftware).map(str::to_string);
+    tag.retain(|item| item.key() != ItemKey::EncoderSoftware);
+    let mut vorbis = VorbisComments::from(tag);
+    if let Some(vendor) = vendor {
+        vorbis.set_vendor(vendor);
+    }
+    vorbis
 }
 
 /// A generic tag's text items in the model's field vocabulary. Shared by
@@ -1280,6 +1316,53 @@ fn raw_custom_fields(tags: &TagMap, tag_type: TagType) -> impl Iterator<Item = (
     })
 }
 
+/// Put into `tags` the fields only the concrete form of `tag` holds.
+///
+/// The rest of the fields are the format-specific items the generic tag has no
+/// key for, which it therefore cannot hand over at all (#201) — they come off
+/// the concrete tag, under their own names. Shared by the read of a file and
+/// the read of one block, so a block's content is everything the file shows
+/// from it (#616).
+fn insert_concrete_items(
+    path: &Path,
+    container: FileType,
+    tag: Tag,
+    tags: &mut TagMap,
+) -> Result<(), TagIoError> {
+    let tag_type = tag.tag_type();
+    let custom = if tag_type == TagType::Mp4Ilst {
+        // One conversion serves both the custom fields and the integer
+        // tempo the generic tag left behind (#610).
+        let ilst = Ilst::from(tag);
+        if let Some(bpm) = ilst_integer_tempo(&ilst) {
+            tags.entry(TagField::Bpm).or_insert(bpm);
+        }
+        ilst_custom_items(&ilst)
+    } else {
+        custom_items(path, container, tag)?
+    };
+    // A name the block repeats — a comment stated twice, an atom with
+    // several values — is the file stating several values, and they
+    // are joined the way a multi-value field is (#609). Keeping only
+    // the last showed one of them and let any edit drop the rest.
+    let mut repeated = std::collections::BTreeSet::new();
+    for (name, value) in custom {
+        let (field, from_alias) = match field_for_name_on_tag(&name, tag_type) {
+            Some(field) => (field, false),
+            None => field_for_custom_name(&name),
+        };
+        if !from_alias && !repeated.insert(field.clone()) {
+            if let Some(joined) = tags.get_mut(&field) {
+                joined.push_str(&multi_value_separator());
+                joined.push_str(&value);
+                continue;
+            }
+        }
+        insert_read_value(tags, field, from_alias, value);
+    }
+    Ok(())
+}
+
 /// Whether a block's values say what the track is: a title, an artist or an
 /// album that is not blank. What decides whether a block the read would not
 /// have chosen is read instead of an empty one (#615). Any field at all is not
@@ -1426,39 +1509,7 @@ impl TagEngine {
                     insert_read_value(&mut tags, field, false, value);
                 }
             }
-            // The rest of the fields are the format-specific items the generic
-            // tag has no key for, which it therefore cannot hand over at all
-            // (#201) — they come off the concrete tag, under their own names.
-            let custom = if tag_type == TagType::Mp4Ilst {
-                // One conversion serves both the custom fields and the integer
-                // tempo the generic tag left behind (#610).
-                let ilst = Ilst::from(tag);
-                if let Some(bpm) = ilst_integer_tempo(&ilst) {
-                    tags.entry(TagField::Bpm).or_insert(bpm);
-                }
-                ilst_custom_items(&ilst)
-            } else {
-                custom_items(path, container, tag)?
-            };
-            // A name the block repeats — a comment stated twice, an atom with
-            // several values — is the file stating several values, and they
-            // are joined the way a multi-value field is (#609). Keeping only
-            // the last showed one of them and let any edit drop the rest.
-            let mut repeated = std::collections::BTreeSet::new();
-            for (name, value) in custom {
-                let (field, from_alias) = match field_for_name_on_tag(&name, tag_type) {
-                    Some(field) => (field, false),
-                    None => field_for_custom_name(&name),
-                };
-                if !from_alias && !repeated.insert(field.clone()) {
-                    if let Some(joined) = tags.get_mut(&field) {
-                        joined.push_str(&multi_value_separator());
-                        joined.push_str(&value);
-                        continue;
-                    }
-                }
-                insert_read_value(&mut tags, field, from_alias, value);
-            }
+            insert_concrete_items(path, container, tag, &mut tags)?;
             if Some(candidate) == first_choice {
                 if !tags.is_empty() {
                     break;
@@ -1702,10 +1753,11 @@ impl TagEngine {
         } else {
             tag.pictures().iter().map(cover_from_picture).collect()
         };
-        Ok(Some(TagBlockContent {
-            tags: tag_to_map(tag),
-            covers,
-        }))
+        // The custom fields too (#616): without them a conversion wrote a
+        // block without them and removed the one that had them.
+        let mut tags = tag_to_map(tag);
+        insert_concrete_items(path, tagged.file_type(), tag.clone(), &mut tags)?;
+        Ok(Some(TagBlockContent { tags, covers }))
     }
 
     /// Remove one tag block, leaving every other block in the file alone (#47).
@@ -1774,18 +1826,78 @@ impl TagEngine {
             (TagBlockKind::Id3v2, None) => id3_write_options(),
             _ => write_options(),
         };
-        let tag = tag_for_block(kind, content);
-        if kind == TagBlockKind::Id3v2 {
-            if let Some(container @ (FileType::Aiff | FileType::Wav)) = container_of(path)? {
-                return save_id3v2_tag_with(path, container, &Id3v2Tag::from(tag), options);
+        let mut tag = tag_for_block(kind, content);
+        // The fields the generic tag cannot carry go onto the concrete one by
+        // name (#616), the way an ordinary write puts them there.
+        let named: Vec<(String, String)> = raw_custom_fields(&content.tags, kind.to_tag_type())
+            .map(|(name, value)| (name.to_string(), value.to_string()))
+            .collect();
+        match kind {
+            TagBlockKind::Id3v2 => {
+                let mut id3 = Id3v2Tag::from(tag);
+                for (name, value) in named {
+                    id3.insert(Frame::UserText(ExtendedTextFrame::new(
+                        TextEncoding::UTF8,
+                        name,
+                        value,
+                    )));
+                }
+                match container_of(path)? {
+                    Some(container) => save_id3v2_tag_with(path, container, &id3, options)?,
+                    None => id3.save_to_path(path, options)?,
+                }
             }
-        }
-        tag.save_to_path(path, options)?;
-        // The generic save above writes an APE tag without its pictures (#608).
-        if kind == TagBlockKind::Ape {
-            if let Some(container) = container_of(path)? {
-                write_ape_pictures(path, container, &content.covers)?;
+            TagBlockKind::VorbisComments => {
+                // Carried by hand, as in [`save_with_custom_items`]: the
+                // conversion drops an image it cannot measure.
+                let pictures: Vec<Picture> = tag.pictures().to_vec();
+                while !tag.pictures().is_empty() {
+                    tag.remove_picture(0);
+                }
+                let mut vorbis = vorbis_comments_from(tag);
+                for picture in pictures {
+                    let information =
+                        PictureInformation::from_picture(&picture).unwrap_or_default();
+                    vorbis.insert_picture(picture, Some(information)).ok();
+                }
+                for (name, value) in named {
+                    vorbis.push(name, value);
+                }
+                vorbis.save_to_path(path, options)?;
             }
+            TagBlockKind::Ape => {
+                let mut ape = ApeTag::from(tag);
+                for (name, value) in named {
+                    if let Ok(item) = ApeItem::new(name, ItemValue::Text(value)) {
+                        ape.insert(item);
+                    }
+                }
+                ape.save_to_path(path, options)?;
+                // The APE tag carries its pictures as items of its own (#608).
+                if let Some(container) = container_of(path)? {
+                    write_ape_pictures(path, container, &content.covers)?;
+                }
+            }
+            TagBlockKind::Mp4Ilst => {
+                let mut ilst = Ilst::from(tag);
+                for (name, value) in named {
+                    ilst.insert(Atom::new(
+                        AtomIdent::Freeform {
+                            mean: FREEFORM_MEAN.into(),
+                            name: name.into(),
+                        },
+                        AtomData::UTF8(value),
+                    ));
+                }
+                // One integer tempo, as an ordinary write leaves it (#610),
+                // taken out in order (#618).
+                ilst.retain(|atom| atom.ident() != &MP4_TEMPO);
+                if let Some(bpm) = content.tags.get(&TagField::Bpm) {
+                    ilst.insert(mp4_tempo_atom(bpm));
+                }
+                ilst.save_to_path(path, options)?;
+            }
+            _ => tag.save_to_path(path, options)?,
         }
         Ok(())
     }
