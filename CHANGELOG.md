@@ -94,6 +94,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   come out in a different order on every save. Frames a file already has keep
   their place, and new ones follow in a fixed order
   ([#623](https://github.com/tagrex/tagrex/issues/623)).
+- Russian and Ukrainian: 19 messages put a count such as "3 files" after a
+  preposition in the wrong grammatical case. They are reworded so the count
+  stands where its form is correct
+  ([#624](https://github.com/tagrex/tagrex/issues/624)).
 
 ## [1.1.1] - 2026-11-02
 
