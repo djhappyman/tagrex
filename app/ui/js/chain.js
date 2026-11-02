@@ -11,7 +11,7 @@
 // gets back is an object it renders and reads. Nothing here knows about a
 // preview, a plan or a panel.
 import { el, ico, toast } from "./dom.js";
-import { t, tn } from "./i18n.js";
+import { t, tn, tOr } from "./i18n.js";
 import { invoke } from "./invoke.js";
 import { enablePointerReorder } from "./reorder.js";
 import { EXTENDED_FIELDS, fieldLabel } from "./fields.js";
@@ -210,6 +210,21 @@ function groupSummary(group) {
       ? fieldLabel(group.scope)
       : t("chain.scope.tags");
   return `${on}/${tn("unit.step", total)} · ${scope}`;
+}
+
+// A built-in preset's name and note in the current language (#625). The
+// English name the backend sends stays the preset's identity, since the
+// ticked sets are keyed by it; only what is shown is translated.
+function builtinKey(group, part) {
+  return `preset.${group.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.${part}`;
+}
+
+export function presetLabel(group) {
+  return group.builtin ? tOr(builtinKey(group, "name"), group.name) : group.name;
+}
+
+function presetNote(group) {
+  return group.builtin ? tOr(builtinKey(group, "note"), group.note) : group.note;
 }
 
 // ---- the rule chain (#34) ----
@@ -602,7 +617,7 @@ function createPresetChecklist({ menu, context, isActive, setActive, appliesTo, 
     // (#556): what runs is the set of bold names, and › opens the preset.
     const name = document.createElement("span");
     name.className = "preset-apply";
-    name.textContent = group.name;
+    name.textContent = presetLabel(group);
     const scope = document.createElement("span");
     scope.className = "group-scope";
     scope.textContent = targetLabel(group);
@@ -620,7 +635,8 @@ function createPresetChecklist({ menu, context, isActive, setActive, appliesTo, 
       onOpen(group);
     });
 
-    const summary = group.note ? `${group.note}\n${groupSummary(group)}` : groupSummary(group);
+    const note = presetNote(group);
+    const summary = note ? `${note}\n${groupSummary(group)}` : groupSummary(group);
     label.title = applies ? summary : `${summary}\n${t("presets.notHere")}`;
     label.append(tick, name, scope, count, open);
     return label;

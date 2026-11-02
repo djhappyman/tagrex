@@ -98,6 +98,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   preposition in the wrong grammatical case. They are reworded so the count
   stands where its form is correct
   ([#624](https://github.com/tagrex/tagrex/issues/624)).
+- The built-in presets showed their English names and notes in every
+  language: in the preset list, each job's presets menu, the preset editor and
+  a copy made with Duplicate. They are translated in all seven languages now
+  ([#625](https://github.com/tagrex/tagrex/issues/625)).
 
 ## [1.1.1] - 2026-11-02
 

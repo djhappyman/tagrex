@@ -16,6 +16,7 @@ import { invoke } from "./invoke.js";
 import {
   createRuleChain,
   persistActionGroups,
+  presetLabel,
   renderAllGroupsMenus,
   ruleForGroup,
   uniquePresetName,
@@ -103,7 +104,7 @@ function select(name, builtin) {
   const group = findPreset(name, builtin);
   current = group ? { name, builtin } : null;
   const input = el("pe-name");
-  input.value = group ? group.name : "";
+  input.value = group ? presetLabel(group) : "";
   input.readOnly = !group || builtin;
   el("pe-builtin-note").hidden = !builtin;
   // A fieldset is the native way to make every control in the chain inert at
@@ -202,7 +203,7 @@ function presetRow(group) {
   row.classList.toggle("active", !!open);
   const name = document.createElement("span");
   name.className = "pe-list-name";
-  name.textContent = group.name;
+  name.textContent = presetLabel(group);
   const meta = document.createElement("span");
   meta.className = "pe-list-meta muted";
   meta.textContent = tn("unit.rule", (group.rules || []).length);
@@ -257,7 +258,7 @@ function duplicatePreset() {
   commit();
   const source = findPreset(current.name, current.builtin);
   if (!source) return;
-  const name = uniquePresetName(t("presets.copyName", { name: source.name }));
+  const name = uniquePresetName(t("presets.copyName", { name: presetLabel(source) }));
   addPreset({
     name,
     scope: source.scope || "tags",
