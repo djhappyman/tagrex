@@ -347,6 +347,9 @@ impl Executor {
                 if let Some(parent) = target.parent() {
                     written.created_dirs.extend(create_dirs_recording(parent)?);
                 }
+                // Checked before the transfer is recorded: a file found there is
+                // not this batch's, and rolling back must not move it (#605).
+                ensure_target_free(&change.path, target, change.copy)?;
                 written.transferred.push(index);
                 transfer(&change.path, target, change.copy)?;
                 steps.done();
@@ -359,6 +362,7 @@ impl Executor {
                 if let Some(parent) = to.parent() {
                     written.created_dirs.extend(create_dirs_recording(parent)?);
                 }
+                ensure_target_free(from, to, change.copy)?;
                 written
                     .sidecars
                     .push((from.clone(), to.clone(), change.copy));
@@ -744,6 +748,22 @@ fn canonical_roots(allowed_roots: &[PathBuf]) -> Result<Vec<PathBuf>, PlanError>
     match first_error {
         Some(error) if roots.is_empty() => Err(PlanError::Io(error)),
         _ => Ok(roots),
+    }
+}
+
+/// A transfer never replaces a file (#605). The pre-flight already refused
+/// targets that exist, but it compares paths as strings: on a case-insensitive
+/// file system `Track.mp3` and `track.mp3` (or the NFC and NFD spelling of one
+/// name) are the same file, so the second of two such moves would land on the
+/// first. Checked again right before each transfer, where the file system has
+/// the last word. The one file allowed to be there already is the one being
+/// moved: a case-only rename of a single file.
+fn ensure_target_free(from: &Path, to: &Path, copy: bool) -> Result<(), PlanError> {
+    match std::fs::symlink_metadata(to) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(PlanError::Io(error)),
+        Ok(_) if !copy && same_file::is_same_file(from, to).unwrap_or(false) => Ok(()),
+        Ok(_) => Err(PlanError::RenameCollision(to.to_path_buf())),
     }
 }
 
@@ -1192,6 +1212,36 @@ mod tests {
         let error = written.roll_back_after(&plan, &[], PlanError::Io(std::io::Error::other("x")));
 
         assert!(matches!(error, PlanError::Io(_)));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A transfer onto an existing file is refused, unless that file is the one
+    /// being moved (#605).
+    #[test]
+    fn a_transfer_target_must_be_free_or_the_file_itself() {
+        let dir = temp_dir("target-free");
+        let from = dir.join("a.flac");
+        let other = dir.join("b.flac");
+        std::fs::write(&from, b"a").unwrap();
+        std::fs::write(&other, b"b").unwrap();
+
+        assert!(ensure_target_free(&from, &dir.join("free.flac"), false).is_ok());
+        assert!(ensure_target_free(&from, &dir.join("free.flac"), true).is_ok());
+        assert!(matches!(
+            ensure_target_free(&from, &other, false),
+            Err(PlanError::RenameCollision(_))
+        ));
+        assert!(matches!(
+            ensure_target_free(&from, &other, true),
+            Err(PlanError::RenameCollision(_))
+        ));
+        // A move onto itself is a rename in place; a copy onto itself would
+        // truncate the source.
+        assert!(ensure_target_free(&from, &from, false).is_ok());
+        assert!(matches!(
+            ensure_target_free(&from, &from, true),
+            Err(PlanError::RenameCollision(_))
+        ));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

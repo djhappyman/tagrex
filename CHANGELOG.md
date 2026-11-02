@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A rename no longer overwrites a file when two targets differ only in letter
+  case or Unicode form, which a case-insensitive file system treats as one
+  name: the batch is refused and rolled back instead
+  ([#605](https://github.com/tagrex/tagrex/issues/605)).
+
 ## [1.1.1] - 2026-11-02
 
 A security fix, and the first release that installed copies of 1.1.0 receive

@@ -1142,3 +1142,54 @@ fn undo_reports_each_step_with_a_running_total() {
     assert_eq!(seen, vec![(0, 3), (1, 3), (2, 3)]);
     assert!(journal.batches().unwrap().is_empty());
 }
+
+/// Whether `dir` sits on a file system that folds letter case, the default on
+/// macOS and Windows.
+fn folds_case(dir: &Path) -> bool {
+    let probe = dir.join("case-probe");
+    std::fs::write(&probe, b"").unwrap();
+    let folds = dir.join("CASE-PROBE").exists();
+    std::fs::remove_file(&probe).unwrap();
+    folds
+}
+
+#[test]
+fn two_targets_the_file_system_folds_together_are_refused() {
+    let dir = TempDir::new("case-fold");
+    if !folds_case(dir.path()) {
+        // `Track.flac` and `track.flac` are two files here; nothing to refuse.
+        return;
+    }
+    let a = dir.flac("a.flac");
+    let b = dir.flac("b.flac");
+    std::fs::write(&b, [MINIMAL_FLAC.as_slice(), b"b"].concat()).unwrap();
+    let mut journal = VecJournal::new();
+    let plan = ChangePlan {
+        description: "fold".to_string(),
+        changes: vec![
+            FileChange {
+                path: a.clone(),
+                rename_to: Some(dir.path().join("Track.flac")),
+                ..FileChange::default()
+            },
+            FileChange {
+                path: b.clone(),
+                rename_to: Some(dir.path().join("track.flac")),
+                ..FileChange::default()
+            },
+        ],
+        ..ChangePlan::default()
+    };
+
+    let err = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap_err();
+
+    assert!(matches!(err, PlanError::RenameCollision(_)));
+    // Both files are back where they were, each with its own content.
+    assert_eq!(std::fs::read(&a).unwrap(), MINIMAL_FLAC);
+    assert_eq!(
+        std::fs::read(&b).unwrap(),
+        [MINIMAL_FLAC.as_slice(), b"b"].concat()
+    );
+    assert!(!dir.path().join("track.flac").exists());
+    assert!(journal.batches().unwrap().is_empty());
+}

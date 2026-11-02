@@ -4711,6 +4711,7 @@ dependencies = [
  "lofty",
  "regex",
  "rusqlite",
+ "same-file",
  "thiserror 2.0.21",
  "walkdir",
 ]

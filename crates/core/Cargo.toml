@@ -19,5 +19,8 @@ image = { version = "0.25.5", default-features = false, features = ["jpeg", "png
 lofty = "0.25.5"
 regex = "1.13.1"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
+# Tells a case-only rename of one file from a move onto another file on a
+# case-insensitive file system (#604, #605). Already in the tree via walkdir.
+same-file = "1.0.6"
 thiserror.workspace = true
 walkdir = "2.5.0"
