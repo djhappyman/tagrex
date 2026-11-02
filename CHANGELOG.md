@@ -110,6 +110,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Editor: a screen reader heard the track and disc number inputs as the
   field's name followed by the English "number" and "total" in every language
   ([#628](https://github.com/tagrex/tagrex/issues/628)).
+- Italian: four labels (the editor's Core group, a column's Pattern, the Mood
+  field and the player's Stop) were still English
+  ([#629](https://github.com/tagrex/tagrex/issues/629)).
 
 ## [1.1.1] - 2026-11-02
 
