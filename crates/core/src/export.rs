@@ -217,7 +217,14 @@ fn column_value(track: &TrackFile, name: &str, field: &Option<TagField>) -> Stri
 
 /// Quote a CSV field when it contains a separator, quote or newline, doubling
 /// any embedded quotes.
+///
+/// A value a spreadsheet would run as a formula (#661) gets a leading `'`,
+/// which makes it read the cell as text, and is quoted: tags come from files
+/// anyone can make.
 fn csv_field(value: &str) -> String {
+    if value.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+        return format!("\"'{}\"", value.replace('"', "\"\""));
+    }
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
@@ -528,6 +535,25 @@ mod tests {
         assert_eq!(
             lines.next().unwrap(),
             "x.mp3,\"Tom, Dick\",\"He said \"\"hi\"\"\",,,,,1996,,,/music/x.mp3"
+        );
+    }
+
+    #[test]
+    fn csv_writes_a_formula_as_text() {
+        let out = csv(&[track(
+            "/music/x.mp3",
+            &[
+                (TagField::Artist, "=HYPERLINK(\"http://x\",\"y\")"),
+                (TagField::Title, "@SUM(A1)"),
+                (TagField::Album, "+1"),
+                (TagField::Genre, "-2"),
+                (TagField::Comment, "\t=1"),
+                (TagField::Year, "1996"),
+            ],
+        )]);
+        assert_eq!(
+            out.split("\r\n").nth(1).unwrap(),
+            "x.mp3,\"'=HYPERLINK(\"\"http://x\"\",\"\"y\"\")\",\"'@SUM(A1)\",\"'+1\",,,,1996,\"'-2\",\"'\t=1\",/music/x.mp3"
         );
     }
 

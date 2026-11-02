@@ -260,6 +260,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A genre an ID3v2.3 tag states as a number with its own name, such as
   `(17)Rock`, now reads once (`Rock`) instead of twice (`Rock; Rock`)
   ([#660](https://github.com/tagrex/tagrex/issues/660)).
+- The CSV export writes a tag value that starts like a formula (`=`, `+`,
+  `-`, `@`) as text, with a leading `'`, so a spreadsheet opening the file
+  no longer runs it ([#661](https://github.com/tagrex/tagrex/issues/661)).
 
 ## [1.1.1] - 2026-11-02
 
