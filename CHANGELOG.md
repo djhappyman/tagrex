@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   A rating nobody touched is kept exactly as the file stored it, and other
   raters' frames are kept too
   ([#619](https://github.com/tagrex/tagrex/issues/619)).
+- Saving tags to a WAV or an AIFF changes the file itself again instead of
+  putting a new copy in its place: the file keeps its permissions, hard links
+  and extended attributes, a read-only file is refused as it is for every other
+  format, and the audio is no longer rewritten
+  ([#620](https://github.com/tagrex/tagrex/issues/620)).
 
 ## [1.1.1] - 2026-11-02
 

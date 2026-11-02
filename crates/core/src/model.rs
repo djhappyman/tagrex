@@ -2376,8 +2376,7 @@ fn save_id3v2_tag_with(
 ///
 /// Returns `false`, touching nothing, for a file that is not a FORM/AIFF or a
 /// RIFF/WAVE — or one whose audio this walk cannot reach, so that a rebuild
-/// could never lose it. Atomic: written to a sibling temp file and renamed over
-/// the original.
+/// could never lose it. Written in place, by [`rewrite_in_place`].
 fn write_iff_id3(path: &Path, id3_bytes: Option<&[u8]>) -> Result<bool, TagIoError> {
     let raw = std::fs::read(path)?;
     if raw.len() < 12 {
@@ -2447,10 +2446,35 @@ fn write_iff_id3(path: &Path, id3_bytes: Option<&[u8]>) -> Result<bool, TagIoErr
     out.extend_from_slice(&raw[8..12]);
     out.extend_from_slice(&body);
 
-    let tmp = path.with_extension("tagrex-iff-tmp");
-    std::fs::write(&tmp, &out)?;
-    std::fs::rename(&tmp, path)?;
+    rewrite_in_place(path, &raw, &out)?;
     Ok(true)
+}
+
+/// Turn the file at `path`, whose bytes are `old`, into `new` (#620): through a
+/// handle on the file itself, so it keeps its mode, owner, hard links and
+/// extended attributes, and a read-only file is refused as every other format's
+/// write refuses it. A temp file renamed over the original lost all of that.
+/// Only the 12-byte container header and what follows the first changed byte
+/// are written; the `ID3 ` chunk sits after the audio, which then stays put.
+fn rewrite_in_place(path: &Path, old: &[u8], new: &[u8]) -> Result<(), TagIoError> {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut file = std::fs::OpenOptions::new().write(true).open(path)?;
+    let header = new.len().min(12);
+    let from = header
+        + old
+            .get(header..)
+            .unwrap_or_default()
+            .iter()
+            .zip(&new[header..])
+            .take_while(|(was, now)| was == now)
+            .count();
+    file.seek(SeekFrom::Start(from as u64))?;
+    file.write_all(&new[from..])?;
+    file.set_len(new.len() as u64)?;
+    file.seek(SeekFrom::Start(0))?;
+    file.write_all(&new[..header])?;
+    file.flush()?;
+    Ok(())
 }
 
 /// Rebuild a malformed AIFF whose chunk chain is severed after the audio.
@@ -2468,8 +2492,7 @@ fn write_iff_id3(path: &Path, id3_bytes: Option<&[u8]>) -> Result<bool, TagIoErr
 /// Returns `true` when it rebuilt the file, `false` when there was nothing to
 /// repair (a well-formed AIFF, or one this can't safely rewrite). Never touches
 /// a file whose chunks all parse to its end, so a healthy AIFF is left alone.
-/// Atomic: the rebuild is written to a sibling temp file and renamed over the
-/// original only after it is complete.
+/// Written in place, by [`rewrite_in_place`].
 fn repair_aiff_container(path: &Path) -> Result<bool, TagIoError> {
     let bytes = std::fs::read(path)?;
     // A FORM/AIFF (or AIFF-C) header, or there is nothing here to repair.
@@ -2523,9 +2546,7 @@ fn repair_aiff_container(path: &Path) -> Result<bool, TagIoError> {
     rebuilt.extend_from_slice(form_type);
     rebuilt.extend_from_slice(body);
 
-    let tmp = path.with_extension("tagrex-repair-tmp");
-    std::fs::write(&tmp, &rebuilt)?;
-    std::fs::rename(&tmp, path)?;
+    rewrite_in_place(path, &bytes, &rebuilt)?;
     Ok(true)
 }
 
@@ -4395,5 +4416,56 @@ mod tests {
         assert!(!out.windows(13).any(|w| w == b"old-tag-bytes"));
         assert!(!out.windows(4).any(|w| w == b"SBRE"));
         std::fs::remove_file(&path).ok();
+    }
+
+    /// #620: the WAV/AIFF writers and the AIFF repair change the file itself,
+    /// not a temp file renamed over it: the mode and a second hard link stay,
+    /// and a read-only file is refused and left as it was.
+    #[cfg(unix)]
+    #[test]
+    fn iff_rewrites_keep_the_file_itself() {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+        let mut broken_aiff = aiff_bytes(&[(b"COMM", &[1, 2, 3, 4]), (b"SSND", &[5, 6, 7, 8])]);
+        broken_aiff.extend_from_slice(b"SBRE");
+        broken_aiff.extend_from_slice(&u32::MAX.to_be_bytes());
+        let wav = wav_bytes(
+            &[(b"fmt ", &PCM_FMT), (b"data", &[0; 8]), (b"id3 ", b"old")],
+            None,
+        );
+        type Rewrite<'a> = &'a dyn Fn(&Path) -> Result<bool, TagIoError>;
+        let tag_write = |path: &Path| write_iff_id3(path, Some(b"NEW-ID3-BYTES"));
+        let cases: [(&str, &[u8], Rewrite); 3] = [
+            ("wav", &wav, &tag_write),
+            ("aiff", &broken_aiff, &tag_write),
+            ("aiff", &broken_aiff, &repair_aiff_container),
+        ];
+        for (index, (extension, bytes, rewrite)) in cases.into_iter().enumerate() {
+            let dir = std::env::temp_dir();
+            let name = format!("tagrex-in-place-{}-{index}", std::process::id());
+            let path = dir.join(format!("{name}.{extension}"));
+            let link = dir.join(format!("{name}-link.{extension}"));
+            std::fs::remove_file(&link).ok();
+            std::fs::write(&path, bytes).unwrap();
+            std::fs::hard_link(&path, &link).unwrap();
+
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+            assert!(
+                rewrite(&path).is_err(),
+                "case {index}: read-only file written"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "case {index}");
+
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+            assert!(rewrite(&path).unwrap(), "case {index}: nothing rewritten");
+            let out = std::fs::read(&path).unwrap();
+            assert_ne!(out, bytes, "case {index}");
+            let meta = std::fs::metadata(&path).unwrap();
+            assert_eq!(meta.mode() & 0o777, 0o640, "case {index}");
+            assert_eq!(meta.nlink(), 2, "case {index}");
+            assert_eq!(std::fs::read(&link).unwrap(), out, "case {index}");
+            std::fs::remove_file(&path).ok();
+            std::fs::remove_file(&link).ok();
+        }
     }
 }
