@@ -4443,3 +4443,67 @@ fn an_unedited_vorbis_field_keeps_the_names_the_file_gave_it() {
     expected.sort();
     assert_eq!(edited, expected);
 }
+
+/// #654: a rating the backend cannot parse was dropped on write, so typing `5`
+/// into the field deleted the file's rating. Such a value is refused now, with
+/// the file untouched; the full form and a clear still work.
+#[test]
+fn a_rating_the_backend_cannot_parse_is_refused_not_deleted() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::{Frame, Id3v2Tag, PopularimeterFrame};
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::{Accessor, TagExt};
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-bare-rating-{}.mp3",
+        std::process::id()
+    ));
+    let ratings = || -> Vec<(String, u8, u64)> {
+        let mut handle = std::fs::File::open(&path).unwrap();
+        MpegFile::read_from(&mut handle, ParseOptions::new())
+            .unwrap()
+            .id3v2()
+            .map(|tag| {
+                tag.into_iter()
+                    .filter_map(|frame| match frame {
+                        Frame::Popularimeter(p) => Some((p.email.to_string(), p.rating, p.counter)),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let field = TagField::Custom("POPM".to_string());
+    let seeded = || {
+        std::fs::write(&path, minimal_mp3()).unwrap();
+        let mut tag = Id3v2Tag::new();
+        tag.set_title("Title".to_string());
+        tag.insert(Frame::Popularimeter(PopularimeterFrame::new(
+            "rater@x", 196, 3,
+        )));
+        tag.save_to_path(&path, WriteOptions::default()).unwrap();
+        TagEngine::read(&path).expect("read")
+    };
+
+    for bad in ["5", "64", "rater@x|5", "rater@x|9|3"] {
+        let mut file = seeded();
+        file.tags.insert(field.clone(), bad.to_string());
+        let error = TagEngine::write(&file).expect_err(bad).to_string();
+        assert!(error.contains("invalid rating"), "{bad}: {error}");
+        assert_eq!(ratings(), [("rater@x".to_string(), 196, 3)], "{bad}");
+    }
+
+    let mut file = seeded();
+    file.tags
+        .insert(field.clone(), "rater@example.com|5|0".to_string());
+    TagEngine::write(&file).expect("the full form");
+    assert_eq!(ratings(), [("rater@example.com".to_string(), 255, 0)]);
+
+    let mut file = seeded();
+    file.tags.insert(field.clone(), String::new());
+    TagEngine::write(&file).expect("a clear");
+    let cleared = ratings();
+    std::fs::remove_file(&path).ok();
+    assert!(cleared.is_empty(), "{cleared:?}");
+}

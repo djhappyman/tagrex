@@ -1893,7 +1893,6 @@ impl TagEngine {
     pub fn write(file: &TrackFile) -> Result<(), TagIoError> {
         ensure_audio_after_tags(&file.path)?;
         ensure_no_misread_id3v1(&file.path)?;
-        drop_id3v2_extended_header(&file.path)?;
         // Guard the year before touching the file. It is written as a timestamp
         // (ID3v2.4 TDRC / Vorbis DATE / MP4 ©day) whose year MUST be exactly 4
         // digits; lofty accepts a shorter one like "222" on write but then
@@ -1907,6 +1906,20 @@ impl TagEngine {
                 )));
             }
         }
+        // The rating the same way (#654): the backend drops a rating it cannot
+        // parse instead of reporting it, so a `5` typed into the field deleted
+        // the file's rating.
+        let tag_type = file.format.primary_tag_type();
+        for (field, value) in &file.tags {
+            if item_key_for(field, tag_type) == Some(ItemKey::Popularimeter)
+                && !is_writable_rating(value)
+            {
+                return Err(TagIoError::Malformed(format!(
+                    "invalid rating {value:?}: a rating is written as email|stars|plays, with 1 to 5 stars (e.g. rater@example.com|4|0)"
+                )));
+            }
+        }
+        drop_id3v2_extended_header(&file.path)?;
         if file.format.uses_id3v2() {
             write_id3v2(&file.path, file.format.to_lofty(), &file.tags)
         } else {
@@ -4403,6 +4416,21 @@ fn item_key_to_tag_field(key: ItemKey, tag_type: TagType) -> TagField {
                 .unwrap_or_else(|| format!("{other:?}")),
         ),
     }
+}
+
+/// Whether a rating value is one the backend can write (#654): empty, which
+/// clears it, or `email|stars|plays` with 1 to 5 stars. Asked of the backend
+/// itself, by converting the value into an ID3v2 frame, so the answer is its
+/// own rules and not a copy of them.
+fn is_writable_rating(value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    let mut generic = Tag::new(TagType::Id3v2);
+    generic.insert_text(ItemKey::Popularimeter, value.to_string());
+    Id3v2Tag::from(generic)
+        .into_iter()
+        .any(|frame| matches!(frame, Frame::Popularimeter(_)))
 }
 
 /// Whether a `year` value is safe to write. Empty clears the field (allowed).

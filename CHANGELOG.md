@@ -230,6 +230,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The same for an MP3's ID3v1 tag: a year, album, track number or genre only
   the ID3v1 tag states is no longer deleted on a save; only a field you clear
   is taken out ([#653](https://github.com/tagrex/tagrex/issues/653)).
+- Typing a value the rating field cannot hold, such as a bare `5`, no longer
+  deletes the file's rating: the save is refused with a message showing the
+  expected `email|stars|plays` form, and the file is left as it was
+  ([#654](https://github.com/tagrex/tagrex/issues/654)).
 
 ## [1.1.1] - 2026-11-02
 
