@@ -323,6 +323,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   journal is moved aside next to itself, a fresh one is started, and the app
   says once that earlier changes can no longer be undone and where the old
   file went ([#676](https://github.com/tagrex/tagrex/issues/676)).
+- A custom field under a name the file's tag cannot hold (a non-ASCII name or
+  one with `=` in Vorbis Comments, a reserved or one-letter name in APE) is
+  flagged in the preview and refused before anything is written, where before
+  it was saved without an error and gone on the next read
+  ([#677](https://github.com/tagrex/tagrex/issues/677)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -19,7 +19,8 @@ use crate::journal::{
     AppliedBatch, AppliedValue, BatchId, CopyStamp, FileRevision, JournalError, UndoJournal,
 };
 use crate::model::{
-    CoverArt, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine, TagField, TrackFile,
+    is_storable_custom_name_at, CoverArt, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine,
+    TagField, TagIoError, TrackFile,
 };
 
 /// A change to a single tag field: `old` is what preview shows as "current",
@@ -257,6 +258,7 @@ impl Executor {
             }
             ensure_within_roots(&change.path, &roots)?;
             ensure_not_stale(change)?;
+            ensure_storable_custom_names(change)?;
             if let Some(target) = effective_rename(change) {
                 let canonical_target = resolve_target_within_roots(target, &roots)?;
                 if canonical_target.exists() {
@@ -1190,6 +1192,27 @@ fn ensure_not_stale(change: &FileChange) -> Result<(), PlanError> {
     for block_change in &change.block_changes {
         if TagEngine::read_block(&change.path, block_change.kind)? != block_change.old {
             return Err(PlanError::Stale(change.path.clone()));
+        }
+    }
+    Ok(())
+}
+
+/// Refuse a change that sets a custom field under a name the file's tag type
+/// cannot store. The backend skips such a name without an error, so the write
+/// would report success and the value be gone on the next read. Clearing one
+/// (`new` empty or `None`) is always fine. The preview already flags these
+/// ([`is_writable_value_at`](crate::model::is_writable_value_at)); this keeps
+/// any other plan source from getting one past it.
+fn ensure_storable_custom_names(change: &FileChange) -> Result<(), PlanError> {
+    for field_change in &change.tag_changes {
+        let (TagField::Custom(name), Some(new)) = (&field_change.field, &field_change.new) else {
+            continue;
+        };
+        if !new.is_empty() && !is_storable_custom_name_at(&change.path, name) {
+            return Err(PlanError::TagIo(TagIoError::Malformed(format!(
+                "the field name {name:?} cannot be stored in {}",
+                change.path.display()
+            ))));
         }
     }
     Ok(())

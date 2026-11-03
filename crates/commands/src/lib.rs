@@ -11477,4 +11477,32 @@ mod tests {
         assert_eq!(app.take_journal_notice(), None, "reported once");
         assert!(app.history().unwrap().is_empty());
     }
+
+    /// A custom field name Vorbis Comments cannot hold was staged, written with
+    /// no error and gone on the next read; the preview flags it instead, and it
+    /// is left unwritten like any other value a field cannot hold.
+    #[test]
+    fn a_custom_name_the_file_cannot_store_is_flagged() {
+        let dir = TempDir::new("custom-name-invalid");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        let edit = |field: &str| TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: field.to_string(),
+            value: Some("value".to_string()),
+        };
+
+        let plan = app
+            .preview_tag_edits(&[edit("custom:ÜNI"), edit("custom:MOOD")])
+            .unwrap();
+        let flagged = |key: &str| {
+            plan.changes[0]
+                .tag_changes
+                .iter()
+                .find(|c| c.field == key)
+                .map(|c| c.invalid)
+        };
+        assert_eq!(flagged("custom:ÜNI"), Some(true));
+        assert_eq!(flagged("custom:MOOD"), Some(false));
+    }
 }

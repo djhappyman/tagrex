@@ -4990,7 +4990,41 @@ pub fn is_writable_value(field: &TagField, value: &str) -> bool {
 pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool {
     let integers_only = matches!(field, TagField::TrackNumber | TagField::DiscNumber)
         && FileType::from_path(path) == Some(FileType::Mp4);
-    is_writable_value(field, value) && !(integers_only && is_vinyl_position(value))
+    let unstorable_name = match field {
+        TagField::Custom(name) => !value.is_empty() && !is_storable_custom_name_at(path, name),
+        _ => false,
+    };
+    is_writable_value(field, value)
+        && !(integers_only && is_vinyl_position(value))
+        && !unstorable_name
+}
+
+/// Whether a custom field called `name` can be stored in the tag the file at
+/// `path` is written to. The backend skips a name the tag type forbids without
+/// an error, so the value would look applied and then be gone on the next read:
+/// - every tag needs a name at all;
+/// - Vorbis Comments (FLAC, Ogg, Opus, Speex) allow ASCII 0x20..=0x7D, `=` excluded;
+/// - APE (Monkey's Audio, Musepack, WavPack) allows 2..=255 bytes of ASCII
+///   0x20..=0x7E and reserves `ID3`, `TAG`, `OggS` and `MP+`.
+///
+/// ID3v2 (`TXXX`) and MP4 freeform atoms take any non-empty name. A file whose
+/// type the extension does not tell is given the benefit of the doubt.
+pub fn is_storable_custom_name_at(path: &Path, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    match FileType::from_path(path) {
+        Some(FileType::Flac | FileType::Vorbis | FileType::Opus | FileType::Speex) => name
+            .bytes()
+            .all(|byte| (0x20..=0x7D).contains(&byte) && byte != b'='),
+        Some(FileType::Ape | FileType::Mpc | FileType::WavPack) => {
+            const RESERVED: [&str; 4] = ["ID3", "TAG", "OggS", "MP+"];
+            (2..=255).contains(&name.len())
+                && name.bytes().all(|byte| (0x20..=0x7E).contains(&byte))
+                && !RESERVED.iter().any(|key| key.eq_ignore_ascii_case(name))
+        }
+        _ => true,
+    }
 }
 
 /// A vinyl (or cassette) position as a track or disc number (#641): one or two
@@ -6104,5 +6138,75 @@ mod tests {
             std::fs::remove_file(&path).ok();
             std::fs::remove_file(&link).ok();
         }
+    }
+
+    /// A custom field name the file's tag cannot store was written with `Ok` and
+    /// then gone on the next read: the preview has to flag it, on exactly the
+    /// tag types that forbid it.
+    #[test]
+    fn a_custom_name_the_tag_cannot_store_is_not_writable() {
+        let custom = |name: &str| TagField::Custom(name.to_string());
+        for name in ["ÜNI", "a=b", "\u{1F3B5}", ""] {
+            assert!(
+                !is_storable_custom_name_at(Path::new("a.flac"), name),
+                "{name:?}"
+            );
+            assert!(
+                !is_storable_custom_name_at(Path::new("a.ogg"), name),
+                "{name:?}"
+            );
+            assert!(
+                !is_storable_custom_name_at(Path::new("a.opus"), name),
+                "{name:?}"
+            );
+            assert!(!is_writable_value_at(
+                Path::new("a.flac"),
+                &custom(name),
+                "value"
+            ));
+        }
+        for name in ["X", "TAG", "oggs", "Ü", &"A".repeat(256)] {
+            assert!(
+                !is_storable_custom_name_at(Path::new("a.ape"), name),
+                "{name:?}"
+            );
+            assert!(
+                !is_storable_custom_name_at(Path::new("a.wv"), name),
+                "{name:?}"
+            );
+        }
+        // Allowed where the tag allows it.
+        for name in ["MOOD", "Spaces In Name", "DISCOGS_RELEASE_ID", "a-b_c.d"] {
+            assert!(
+                is_storable_custom_name_at(Path::new("a.flac"), name),
+                "{name:?}"
+            );
+            assert!(
+                is_storable_custom_name_at(Path::new("a.ape"), name),
+                "{name:?}"
+            );
+        }
+        // `~` is 0x7E: past what Vorbis allows, within what APE allows.
+        assert!(!is_storable_custom_name_at(Path::new("a.flac"), "a~b"));
+        assert!(is_storable_custom_name_at(Path::new("a.ape"), "a~b"));
+        // ID3v2 TXXX and MP4 freeform atoms take any name but an empty one.
+        for path in ["a.mp3", "a.m4a", "a.wav", "a.aiff"] {
+            assert!(is_storable_custom_name_at(
+                Path::new(path),
+                "ÜNI a=b \u{1F3B5}"
+            ));
+            assert!(!is_storable_custom_name_at(Path::new(path), ""));
+        }
+        // Clearing a field is always fine, whatever it is called.
+        assert!(is_writable_value_at(
+            Path::new("a.flac"),
+            &custom("ÜNI"),
+            ""
+        ));
+        assert!(is_writable_value_at(
+            Path::new("a.flac"),
+            &custom("MOOD"),
+            "Calm"
+        ));
     }
 }
