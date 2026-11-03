@@ -3405,6 +3405,7 @@ fn save_id3v2(
         for frame in edited_rating {
             updated.insert(frame);
         }
+        keep_unedited_encodings(&mut updated, &original);
         order_frames(&mut updated, Some(&original));
     } else {
         order_frames(&mut updated, None);
@@ -3416,6 +3417,79 @@ fn save_id3v2(
     // And so does an APE block beside it (#655).
     sync_ape(path, container, tags, before)?;
     Ok(())
+}
+
+/// Give every text, user-text, comment and timestamp frame of `updated` whose
+/// value is the one `original` holds the encoding `original` wrote it in.
+///
+/// Every frame is rebuilt from the model on a save, in the backend's own
+/// encoding. A Latin-1 frame holding cp1251 bytes (what Russian and Ukrainian
+/// files from older rippers carry, read here as `Êèíî` for `Кино`) came back as
+/// that mojibake spelled in UTF-16, so an edit of the genre alone destroyed the
+/// title for every player and tagger that read those bytes as cp1251. Written
+/// again in Latin-1, the same value is the same bytes. An edited value has no
+/// such frame to match and is written as before.
+fn keep_unedited_encodings(updated: &mut Id3v2Tag, original: &Id3v2Tag) {
+    updated.retain_mut(|frame| {
+        let id = frame.id().as_str().to_string();
+        match frame {
+            Frame::Text(text) => {
+                if let Some(encoding) = original.into_iter().find_map(|own| match own {
+                    Frame::Text(own_text)
+                        if own.id().as_str() == id && own_text.value == text.value =>
+                    {
+                        Some(own_text.encoding)
+                    }
+                    _ => None,
+                }) {
+                    text.encoding = encoding;
+                }
+            }
+            Frame::UserText(text) => {
+                if let Some(encoding) = original.into_iter().find_map(|own| match own {
+                    Frame::UserText(own_text)
+                        if own_text.description == text.description
+                            && own_text.content == text.content =>
+                    {
+                        Some(own_text.encoding)
+                    }
+                    _ => None,
+                }) {
+                    text.encoding = encoding;
+                }
+            }
+            Frame::Comment(comment) => {
+                if let Some(encoding) = original.into_iter().find_map(|own| match own {
+                    Frame::Comment(own_comment)
+                        if own_comment.language == comment.language
+                            && own_comment.description == comment.description
+                            && own_comment.content == comment.content =>
+                    {
+                        Some(own_comment.encoding)
+                    }
+                    _ => None,
+                }) {
+                    comment.encoding = encoding;
+                }
+            }
+            // A date (TDRC and the like) too: in another encoding it no longer
+            // equals the file's own frame, so it also lost its place.
+            Frame::Timestamp(stamp) => {
+                if let Some(encoding) = original.into_iter().find_map(|own| match own {
+                    Frame::Timestamp(own_stamp)
+                        if own.id().as_str() == id && own_stamp.timestamp == stamp.timestamp =>
+                    {
+                        Some(own_stamp.encoding)
+                    }
+                    _ => None,
+                }) {
+                    stamp.encoding = encoding;
+                }
+            }
+            _ => {}
+        }
+        true
+    });
 }
 
 /// Put a tag's frames in a stable order before it is written (#623).

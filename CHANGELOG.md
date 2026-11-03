@@ -356,6 +356,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   explanation is one sentence. The report of the fields it kept stays until
   closed, no longer in the error red
   ([#683](https://github.com/tagrex/tagrex/issues/683)).
+- An edit of one field no longer rewrites every other ID3v2 text frame in
+  another encoding: an unedited frame keeps the file's own, so a cp1251 title
+  in a Latin-1 frame keeps its bytes for the players that read it that way,
+  and a UTF-16 date keeps its encoding and its place in the tag
+  ([#684](https://github.com/tagrex/tagrex/issues/684)).
 
 ## [1.1.1] - 2026-11-02
 
