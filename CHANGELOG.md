@@ -293,6 +293,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and spelling of the names come back with the values, where before undo
   rebuilt the block from the fields the app knows
   ([#669](https://github.com/tagrex/tagrex/issues/669)).
+- A save that leaves the genre as it was keeps the file's ID3v1 genre when
+  the genre has no place in ID3v1's list, where before every save wrote
+  "no genre" over it; an edit to such a genre still clears it
+  ([#670](https://github.com/tagrex/tagrex/issues/670)).
 
 ## [1.1.1] - 2026-11-02
 

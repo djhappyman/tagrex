@@ -5089,3 +5089,60 @@ fn a_v23_year_holding_a_full_date_is_read_and_kept() {
     }
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// #670: a genre ID3v1's list has no index for left the ID3v1 genre byte as
+/// "none" on every save, even one that never touched the genre. The byte stays
+/// while the genre does; an edit writes the new genre's index, or "none".
+#[test]
+fn an_unedited_genre_outside_the_id3v1_list_keeps_its_byte() {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::id3::v1::Id3v1Tag;
+    use lofty::id3::v2::Id3v2Tag;
+    use lofty::mpeg::MpegFile;
+    use lofty::prelude::{Accessor, TagExt};
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-id3v1-genre-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::write(&path, minimal_mp3()).expect("write fixture");
+    let mut id3v2 = Id3v2Tag::new();
+    id3v2.set_title("Title".to_string());
+    id3v2.set_genre("Speed Garage".to_string());
+    id3v2
+        .save_to_path(&path, WriteOptions::default())
+        .expect("seed id3v2");
+    Id3v1Tag {
+        title: Some("Title".to_string()),
+        genre: Some(12),
+        ..Default::default()
+    }
+    .save_to_path(&path, WriteOptions::default())
+    .expect("seed id3v1");
+    let id3v1_genre = || {
+        let mut handle = std::fs::File::open(&path).unwrap();
+        MpegFile::read_from(&mut handle, ParseOptions::new())
+            .unwrap()
+            .id3v1()
+            .cloned()
+            .expect("ID3v1 kept")
+            .genre
+    };
+    let save = |field: TagField, value: &str| {
+        let mut file = TagEngine::read(&path).expect("read");
+        file.tags.insert(field, value.to_string());
+        TagEngine::write(&file).expect("write");
+    };
+
+    save(TagField::Title, "New title");
+    assert_eq!(id3v1_genre(), Some(12), "the genre was not edited");
+
+    save(TagField::Genre, "Rock");
+    assert_eq!(id3v1_genre(), Some(17), "a listed genre is kept in step");
+
+    save(TagField::Genre, "UK Garage");
+    assert_eq!(id3v1_genre(), None, "an edit to an unlisted genre");
+
+    std::fs::remove_file(&path).ok();
+}

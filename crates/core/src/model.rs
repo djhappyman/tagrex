@@ -2580,6 +2580,13 @@ fn sync_id3v1(
     if untouched(&TagField::Genre) {
         legacy.genre = old.genre;
     }
+    // A genre the save left as it was, with no index in ID3v1's list, keeps
+    // the file's own byte (#670): "none" over it would lose what the tag said
+    // although nobody changed the genre. An edit to such a genre still writes
+    // "none", since the old byte no longer describes the track.
+    if legacy.genre.is_none() && tags.get(&TagField::Genre) == before.get(&TagField::Genre) {
+        legacy.genre = old.genre;
+    }
     // A value the save leaves as it was keeps the file's own spelling of it,
     // padding and all (#664): the read drops an ID3v1 field's trailing spaces
     // and the backend writes NULs in their place. What the field has room for
