@@ -274,6 +274,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   followed by a run of spaces in the table, in file names and in the ID3v2
   tag a save creates), and a save that changes nothing in it leaves its
   bytes as they were ([#664](https://github.com/tagrex/tagrex/issues/664)).
+- Saving an M4A file no longer reorders its atoms each time: the ones the
+  file had keep its order, so saving the same tags again writes the same
+  file ([#665](https://github.com/tagrex/tagrex/issues/665)).
 
 ## [1.1.1] - 2026-11-02
 

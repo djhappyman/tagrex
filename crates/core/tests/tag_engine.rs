@@ -4861,3 +4861,90 @@ fn a_space_padded_id3v1_tag_survives_a_save_byte_for_byte() {
         "the other fields keep their padding"
     );
 }
+
+/// #665: the backend hands an `ilst`'s atoms over in no fixed order, so every
+/// save of an M4A moved them around, even one that changed nothing.
+#[test]
+fn an_m4a_save_keeps_its_atoms_in_order() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-m4a-order-{}.m4a",
+        std::process::id()
+    ));
+    std::fs::write(&path, MINIMAL_M4A).unwrap();
+    let mut tags = BTreeMap::new();
+    for (field, value) in [
+        (TagField::Title, "Title"),
+        (TagField::Artist, "Artist"),
+        (TagField::Album, "Album"),
+        (TagField::AlbumArtist, "Album Artist"),
+        (TagField::Genre, "House"),
+        (TagField::Year, "2001"),
+        (TagField::Composer, "Composer"),
+        (TagField::Comment, "Comment"),
+        (TagField::Bpm, "124"),
+        (TagField::Custom("CATALOG".to_string()), "CAT-1"),
+        (TagField::Custom("LABEL_URL".to_string()), "x"),
+    ] {
+        tags.insert(field, value.to_string());
+    }
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::M4a,
+        tags,
+    })
+    .unwrap();
+    // The atoms a store purchase carries, none of which the model holds: it is
+    // these that came back in a different order on every save.
+    {
+        use lofty::config::{ParseOptions, WriteOptions};
+        use lofty::file::AudioFile;
+        use lofty::mp4::{Atom, AtomData, AtomIdent, Mp4File};
+        use lofty::prelude::TagExt;
+
+        let mut ilst = Mp4File::read_from(
+            &mut std::fs::File::open(&path).unwrap(),
+            ParseOptions::new(),
+        )
+        .unwrap()
+        .ilst()
+        .cloned()
+        .unwrap();
+        for (ident, value) in [
+            (*b"apID", "someone@example.com"),
+            (*b"purd", "2020-01-01 00:00:00"),
+            (*b"xid ", "label:isrc:XX0000000000"),
+        ] {
+            ilst.insert(Atom::new(
+                AtomIdent::Fourcc(ident),
+                AtomData::UTF8(value.to_string()),
+            ));
+        }
+        for (index, ident) in [*b"cnID", *b"plID", *b"atID", *b"cmID", *b"geID", *b"sfID"]
+            .into_iter()
+            .enumerate()
+        {
+            ilst.insert(Atom::new(
+                AtomIdent::Fourcc(ident),
+                AtomData::SignedInteger(i32::try_from(index).unwrap() + 1),
+            ));
+        }
+        for ident in [*b"pgap", *b"cpil"] {
+            ilst.insert(Atom::new(AtomIdent::Fourcc(ident), AtomData::Bool(true)));
+        }
+        for ident in [*b"stik", *b"rtng"] {
+            ilst.insert(Atom::new(
+                AtomIdent::Fourcc(ident),
+                AtomData::SignedInteger(1),
+            ));
+        }
+        ilst.save_to_path(&path, WriteOptions::default()).unwrap();
+    }
+    let mut saves = Vec::new();
+    for _ in 0..4 {
+        let file = TagEngine::read(&path).unwrap();
+        TagEngine::write(&file).unwrap();
+        saves.push(std::fs::read(&path).unwrap());
+    }
+    std::fs::remove_file(&path).ok();
+    assert!(saves.windows(2).all(|pair| pair[0] == pair[1]));
+}

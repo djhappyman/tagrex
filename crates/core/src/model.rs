@@ -19,7 +19,7 @@ use lofty::id3::v2::{
 };
 use lofty::iff::aiff::{AiffFile, AiffTextChunks};
 use lofty::iff::wav::{RiffInfoList, WavFile};
-use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst};
+use lofty::mp4::{Atom, AtomData, AtomIdent, DataType, Ilst, Mp4File};
 use lofty::mpeg::MpegFile;
 use lofty::musepack::MpcFile;
 use lofty::ogg::tag::VorbisComments;
@@ -3353,6 +3353,28 @@ fn order_frames(tag: &mut Id3v2Tag, original: Option<&Id3v2Tag>) {
     }
 }
 
+/// Put an `ilst`'s atoms in a stable order before it is written (#665), the
+/// way [`order_frames`] does for ID3v2: the backend's conversion hands them
+/// over in no fixed order, so every save moved them around and one that
+/// changed nothing still rewrote the tag. An atom the file already had keeps
+/// the file's place for it; a new one follows, ordered by its identifier.
+fn order_atoms(ilst: &mut Ilst, original: Option<&Ilst>) {
+    let place = |atom: &Atom<'static>| {
+        let known = original.and_then(|original| {
+            original
+                .into_iter()
+                .position(|old| old.ident() == atom.ident())
+        });
+        (known.unwrap_or(usize::MAX), format!("{:?}", atom.ident()))
+    };
+    let mut atoms: Vec<Atom<'static>> = (&*ilst).into_iter().cloned().collect();
+    atoms.sort_by_cached_key(place);
+    ilst.retain(|_| false);
+    for atom in atoms {
+        ilst.insert(atom);
+    }
+}
+
 /// What tells two frames with one id apart, for [`order_frames`].
 fn frame_description(frame: &Frame<'_>) -> String {
     match frame {
@@ -4235,6 +4257,10 @@ fn save_with_custom_items(
                     atom.ident() != &MP4_TEMPO || atom_integer_tempo(atom).is_none()
                 }),
             }
+            let original = Mp4File::read_from(&mut buffered(path)?, tag_only_options())?
+                .ilst()
+                .cloned();
+            order_atoms(&mut merged, original.as_ref());
             merged.save_to_path(path, write_options())?;
         }
         _ => tag.save_to_path(path, write_options())?,
