@@ -21,8 +21,9 @@ use tagrex_commands::{
     CoverArtDto, CoverExportDto, CoverSummaryDto, DropResultDto, DuplicateGroupDto, ErrorDto,
     ImportFieldDto, ImportSelectionDto, ImportTrackDto, NameProbeDto, NameProbesDto,
     PlaceholderDto, PlanDto, ProviderHub, ReleaseDto, SaveImagesDto, SearchQueryDto, SettingsDto,
-    TagEditDto, TextLinesDto, TextProbeDto, TrackDto, TransformRuleDto,
+    TagEditDto, TextLinesDto, TextProbeDto, TrackDto, TransformRuleDto, UndoReportDto,
 };
+use tagrex_core::plan::UndoMode;
 use tagrex_player::{Player, PlayerStatus};
 
 /// No library is open until the user opens one, hence `Option`. `Mutex` makes
@@ -876,10 +877,17 @@ async fn undo(
     app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
     batch_id: i64,
-) -> Result<(), ErrorDto> {
+    mode: Option<String>,
+) -> Result<UndoReportDto, ErrorDto> {
+    let mode = match mode.as_deref() {
+        Some("keep_changed") => UndoMode::KeepChanged,
+        Some("overwrite") => UndoMode::Overwrite,
+        _ => UndoMode::Strict,
+    };
     let mut report = progress_reporter(app_handle);
     with_app_mut(&state, |app| {
-        app.undo_with(batch_id, &mut report).map_err(ErrorDto::from)
+        app.undo_with_mode(batch_id, mode, &mut report)
+            .map_err(ErrorDto::from)
     })
 }
 

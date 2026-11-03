@@ -33,6 +33,7 @@ use tagrex_core::model::{
 };
 use tagrex_core::plan::{
     ApplyProgress, BlockChange, ChangePlan, CoverChange, Executor, FieldChange, FileChange,
+    UndoMode, UndoReport,
 };
 use tagrex_core::provider::{FetchedImage, MetadataProvider, ReleaseId, SearchQuery};
 use tagrex_core::scanner::{self, ScanOptions};
@@ -1202,6 +1203,33 @@ fn effective_cover_quality(quality: u8) -> u8 {
         85
     } else {
         quality
+    }
+}
+
+/// What an undo kept as it found it, for the report that follows it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UndoReportDto {
+    pub kept: Vec<KeptFieldDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct KeptFieldDto {
+    pub path: String,
+    pub field: String,
+}
+
+impl From<&UndoReport> for UndoReportDto {
+    fn from(report: &UndoReport) -> Self {
+        Self {
+            kept: report
+                .kept
+                .iter()
+                .map(|kept| KeptFieldDto {
+                    path: kept.path.to_string_lossy().into_owned(),
+                    field: kept.field.to_storage_key(),
+                })
+                .collect(),
+        }
     }
 }
 
@@ -4622,7 +4650,7 @@ impl App {
     }
 
     /// Roll back a previously applied batch.
-    pub fn undo(&mut self, batch_id: i64) -> Result<(), AppError> {
+    pub fn undo(&mut self, batch_id: i64) -> Result<UndoReportDto, AppError> {
         self.undo_with(batch_id, &mut |_| {})
     }
 
@@ -4631,10 +4659,22 @@ impl App {
         &mut self,
         batch_id: i64,
         progress: &mut dyn FnMut(&ApplyProgress),
-    ) -> Result<(), AppError> {
+    ) -> Result<UndoReportDto, AppError> {
+        self.undo_with_mode(batch_id, UndoMode::Strict, progress)
+    }
+
+    /// [`App::undo_with`] told what to do about fields changed after the batch:
+    /// what the person picked once the strict undo was refused.
+    pub fn undo_with_mode(
+        &mut self,
+        batch_id: i64,
+        mode: UndoMode,
+        progress: &mut dyn FnMut(&ApplyProgress),
+    ) -> Result<UndoReportDto, AppError> {
         let roots = self.allowed_roots();
-        Executor::undo_with(&mut self.journal, BatchId(batch_id), &roots, progress)?;
-        Ok(())
+        let report =
+            Executor::undo_with_mode(&mut self.journal, BatchId(batch_id), &roots, mode, progress)?;
+        Ok(UndoReportDto::from(&report))
     }
 
     /// Recorded batches for the currently open library, newest first. The undo
@@ -11668,5 +11708,41 @@ mod tests {
                     .as_ref()
             )
         );
+    }
+
+    /// A refused undo is the first answer; asked again with "keep changed", the
+    /// app undoes the rest and names the field it kept by its storage key.
+    #[test]
+    fn an_undo_refused_over_an_edit_elsewhere_can_keep_it() {
+        let dir = TempDir::new("undo-keep-changed");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        let mut app = open_app(&dir);
+        let plan = app
+            .preview_tag_edits(&[TagEditDto {
+                path: track.to_string_lossy().into_owned(),
+                field: "genre".into(),
+                value: Some("Techno".into()),
+            }])
+            .unwrap();
+        let batch = app.apply(&plan).unwrap();
+        let mut file = TagEngine::read(&track).unwrap();
+        file.tags.insert(TagField::Genre, "Elsewhere".to_string());
+        TagEngine::write(&file).unwrap();
+
+        assert!(app.undo(batch.id).is_err(), "refused first");
+        let report = app
+            .undo_with_mode(batch.id, UndoMode::KeepChanged, &mut |_| {})
+            .unwrap();
+        assert_eq!(report.kept.len(), 1);
+        assert_eq!(report.kept[0].field, "genre");
+        assert_eq!(
+            TagEngine::read(&track)
+                .unwrap()
+                .tags
+                .get(&TagField::Genre)
+                .map(String::as_str),
+            Some("Elsewhere")
+        );
+        assert!(app.history().unwrap().is_empty());
     }
 }

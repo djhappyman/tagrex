@@ -336,6 +336,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   separator or `..` from a filename transform no longer moves the file, and a
   name is cut to 255 bytes keeping its extension
   ([#679](https://github.com/tagrex/tagrex/issues/679)).
+- An undo refused because a file was edited since, by another program for
+  instance, is no longer stuck for good: the refusal asks instead. **Undo the
+  untouched**, the default, undoes every field that still reads as the batch
+  left it and names each one it kept; **Undo all, overwrite later edits** puts
+  every old value back; **Don't undo** writes nothing
+  ([#680](https://github.com/tagrex/tagrex/issues/680)).
 
 ## [1.1.1] - 2026-11-02
 

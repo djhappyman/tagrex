@@ -871,7 +871,7 @@ function mockInvoke(cmd, args) {
       return Promise.resolve(null);
     case "undo":
       s.history.shift();
-      return Promise.resolve();
+      return Promise.resolve({ kept: [] });
     case "preview_cover_embed": {
       const changes = args.paths.map((p) => ({
         path: p,
