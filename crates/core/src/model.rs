@@ -936,10 +936,22 @@ fn tag_to_map(tag: &Tag) -> TagMap {
             &mut tags,
             item_key_to_tag_field(item.key(), tag_type),
             false,
-            value,
+            unpadded(tag_type, value),
         );
     }
     tags
+}
+
+/// A value as read, without the padding an ID3v1 field carries (#664). Its
+/// fields are fixed-width, and many encoders fill them with spaces where the
+/// standard has NULs; the backend keeps the spaces, which then showed in the
+/// table, rendered into file names and were copied into ID3v2.
+fn unpadded(tag_type: TagType, value: String) -> String {
+    if tag_type == TagType::Id3v1 {
+        value.trim_end_matches(' ').to_string()
+    } else {
+        value
+    }
 }
 
 /// One read of a file: its tags, its technical properties, and the tag blocks it
@@ -1843,7 +1855,7 @@ impl TagEngine {
                 };
                 if let Some(value) = value {
                     let field = item_key_to_tag_field(item.key(), tag_type);
-                    insert_read_value(&mut tags, field, false, value);
+                    insert_read_value(&mut tags, field, false, unpadded(tag_type, value));
                 }
             }
             insert_concrete_items(path, container, tag, &mut tags)?;
@@ -2464,25 +2476,55 @@ fn sync_id3v1(
         legacy.set_genre(genre.clone());
     }
     if untouched(&TagField::Title) {
-        legacy.title = old.title;
+        legacy.title.clone_from(&old.title);
     }
     if untouched(&TagField::Artist) {
-        legacy.artist = old.artist;
+        legacy.artist.clone_from(&old.artist);
     }
     if untouched(&TagField::Album) {
-        legacy.album = old.album;
+        legacy.album.clone_from(&old.album);
     }
     if untouched(&TagField::Year) {
         legacy.year = old.year;
     }
     if untouched(&TagField::Comment) {
-        legacy.comment = old.comment;
+        legacy.comment.clone_from(&old.comment);
     }
     if untouched(&TagField::TrackNumber) {
         legacy.track_number = old.track_number;
     }
     if untouched(&TagField::Genre) {
         legacy.genre = old.genre;
+    }
+    // A value the save leaves as it was keeps the file's own spelling of it,
+    // padding and all (#664): the read drops an ID3v1 field's trailing spaces
+    // and the backend writes NULs in their place. What the field has room for
+    // is all it can hold, so a longer value cut to the same text is the same.
+    // A tag nothing changed in is then not written at all.
+    let comment_width = if legacy.track_number.is_some() {
+        28
+    } else {
+        30
+    };
+    for (new, own, width) in [
+        (&mut legacy.title, &old.title, 30),
+        (&mut legacy.artist, &old.artist, 30),
+        (&mut legacy.album, &old.album, 30),
+        (&mut legacy.comment, &old.comment, comment_width),
+    ] {
+        let same = match (new.as_deref(), own.as_deref()) {
+            (Some(value), Some(own)) => {
+                let held: String = value.chars().take(width).collect();
+                held.trim_end_matches(' ') == own.trim_end_matches(' ')
+            }
+            _ => false,
+        };
+        if same {
+            new.clone_from(own);
+        }
+    }
+    if legacy == old {
+        return Ok(());
     }
     if legacy.is_empty() {
         // Not `remove_from_path`: on the 0.25 backend that opens the file for

@@ -4811,3 +4811,53 @@ fn an_ape_tag_keeps_the_bpm_and_the_key() {
     assert_eq!(cleared.tags.get(&TagField::InitialKey), None);
     assert_eq!(cleared.tags.len(), 1, "{:?}", cleared.tags);
 }
+
+/// #664: an ID3v1 tag padded with spaces, as many encoders write it, came back
+/// padded with NULs from a save that changed nothing in it.
+#[test]
+fn a_space_padded_id3v1_tag_survives_a_save_byte_for_byte() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-id3v1-spaces-{}.mp3",
+        std::process::id()
+    ));
+    let field = |text: &str, width: usize| {
+        let mut bytes = text.as_bytes().to_vec();
+        bytes.resize(width, b' ');
+        bytes
+    };
+    let mut legacy = b"TAG".to_vec();
+    legacy.extend(field("Title", 30));
+    legacy.extend(field("Artist", 30));
+    legacy.extend(field("Album", 30));
+    legacy.extend(b"1999");
+    legacy.extend(field("Comment", 28));
+    legacy.extend([0, 3, 17]);
+    assert_eq!(legacy.len(), 128);
+    let mut bytes = minimal_mp3();
+    bytes.extend(&legacy);
+    std::fs::write(&path, &bytes).unwrap();
+
+    let file = TagEngine::read(&path).unwrap();
+    TagEngine::write(&file).unwrap();
+    let after = std::fs::read(&path).unwrap();
+    let edited = retitle(&path, "New");
+    let retitled = std::fs::read(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(
+        file.tags.get(&TagField::Title).map(String::as_str),
+        Some("Title")
+    );
+    assert_eq!(&after[after.len() - 128..], &legacy[..]);
+    // An edit rewrites the field it changed, and only that one.
+    assert_eq!(
+        edited.tags.get(&TagField::Title).map(String::as_str),
+        Some("New")
+    );
+    let tail = &retitled[retitled.len() - 128..];
+    assert_eq!(
+        &tail[33..],
+        &legacy[33..],
+        "the other fields keep their padding"
+    );
+}

@@ -270,6 +270,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   key: both are written to and read from the APE tag as `BPM` and
   `INITIALKEY`, where before they were dropped on save without a word
   ([#663](https://github.com/tagrex/tagrex/issues/663)).
+- An ID3v1 tag padded with spaces no longer reads with its padding (a title
+  followed by a run of spaces in the table, in file names and in the ID3v2
+  tag a save creates), and a save that changes nothing in it leaves its
+  bytes as they were ([#664](https://github.com/tagrex/tagrex/issues/664)).
 
 ## [1.1.1] - 2026-11-02
 
