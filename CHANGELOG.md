@@ -31,6 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   build with the workaround to revisit, rather than writing frames twice
   ([#671](https://github.com/tagrex/tagrex/issues/671)).
 
+### Security
+
+- The personal Discogs token goes only to Discogs, over HTTPS. A cover
+  download sent it to whatever host the image address named, and in the
+  clear over plain HTTP
+  ([#674](https://github.com/tagrex/tagrex/issues/674)).
+
 ### Fixed
 
 - A rename no longer overwrites a file when two targets differ only in letter
