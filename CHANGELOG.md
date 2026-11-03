@@ -304,6 +304,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the genre has no place in ID3v1's list, where before every save wrote
   "no genre" over it; an edit to such a genre still clears it
   ([#670](https://github.com/tagrex/tagrex/issues/670)).
+- A provider server that stops answering no longer blocks every search,
+  release and cover request until the app is restarted: each request gives
+  up after 15 s to connect, 30 s for the answer to start and 120 s in all
+  ([#673](https://github.com/tagrex/tagrex/issues/673)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -55,7 +55,11 @@ impl DiscogsProvider {
         // Status-as-error off: we want the response object for every status so
         // a 429 can be read for its Retry-After header rather than collapsing
         // into an opaque error.
-        let mut builder = ureq::Agent::config_builder().http_status_as_error(false);
+        let mut builder = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .timeout_connect(Some(tagrex_core::provider::HTTP_CONNECT_TIMEOUT))
+            .timeout_recv_response(Some(tagrex_core::provider::HTTP_RESPONSE_TIMEOUT))
+            .timeout_global(Some(tagrex_core::provider::HTTP_TOTAL_TIMEOUT));
         if let Some(proxy) = proxy {
             let proxy = ureq::Proxy::new(proxy.trim())
                 .map_err(|err| ProviderError::Network(format!("invalid proxy: {err}")))?;
@@ -670,6 +674,25 @@ fn positional_score(index: usize, count: usize) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The client waits forever by default, and a server that stopped answering
+    /// held every provider call in the app behind the one lock they share.
+    #[test]
+    fn a_request_gives_up_on_a_server_that_stops_answering() {
+        let timeouts = super::DiscogsProvider::new("t").agent.config().timeouts();
+        assert_eq!(
+            timeouts.connect,
+            Some(tagrex_core::provider::HTTP_CONNECT_TIMEOUT)
+        );
+        assert_eq!(
+            timeouts.recv_response,
+            Some(tagrex_core::provider::HTTP_RESPONSE_TIMEOUT)
+        );
+        assert_eq!(
+            timeouts.global,
+            Some(tagrex_core::provider::HTTP_TOTAL_TIMEOUT)
+        );
+    }
 
     #[test]
     fn strips_numeric_disambiguation_suffix() {
