@@ -350,6 +350,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   left it and names each one it kept; **Undo all, overwrite later edits** puts
   every old value back; **Don't undo** writes nothing
   ([#680](https://github.com/tagrex/tagrex/issues/680)).
+- The undo choice dialog stacks its three answers full width, so no label
+  wraps in any language: the default on top, the one that overwrites outlined
+  in red, "Don't undo" last. The file sits on its own line and the
+  explanation is one sentence. The report of the fields it kept stays until
+  closed, no longer in the error red
+  ([#683](https://github.com/tagrex/tagrex/issues/683)).
 
 ## [1.1.1] - 2026-11-02
 

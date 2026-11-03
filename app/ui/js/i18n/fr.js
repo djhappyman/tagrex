@@ -1016,7 +1016,7 @@ export const fr = {
   "app.undidKept": { one: "{n} champ a été modifié depuis par une autre édition et a été laissé tel quel", other: "{n} champs ont été modifiés depuis par une autre édition et ont été laissés tels quels" },
   "app.undidKeptMore": { one: "et {n} autre fichier", other: "et {n} autres fichiers" },
   "undo.changed.title": "Des fichiers ont été modifiés après l’application de ce changement",
-  "undo.changed.detail": "L’annuler écraserait cette modification ({file}). Annuler seulement ce qui n’a pas été touché depuis, en gardant les valeurs récentes, ou tout remettre comme avant ?",
+  "undo.changed.detail": "Les valeurs récentes peuvent être gardées et le reste annulé, ou toutes les anciennes valeurs remises par-dessus.",
   "undo.changed.keep": "Annuler le reste",
   "undo.changed.overwrite": "Tout annuler, écraser la modification récente",
   "undo.changed.cancel": "Ne pas annuler",

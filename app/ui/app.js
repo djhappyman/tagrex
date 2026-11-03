@@ -2028,7 +2028,8 @@ async function apply() {
 
 // After "undo what was not touched", each field another edit changed is named,
 // a line per file, so the user knows which files still hold a newer value. Kept
-// on screen until dismissed (the first line is a problem).
+// on screen until dismissed, but not in the problem colour: keeping them is
+// what the user asked for (#683).
 const UNDO_KEPT_FILES_SHOWN = 5;
 function undoKeptParts(kept) {
   const byFile = new Map();
@@ -2037,7 +2038,7 @@ function undoKeptParts(kept) {
     const label = field.startsWith("custom:") ? field.slice("custom:".length) : fieldLabel(field);
     byFile.get(path).push(label);
   }
-  const parts = [{ text: tn("app.undidKept", kept.length), problem: true }];
+  const parts = [{ text: tn("app.undidKept", kept.length), keep: true }];
   for (const [path, labels] of [...byFile].slice(0, UNDO_KEPT_FILES_SHOWN)) {
     parts.push({ text: `${fileName(path)}: ${joinList(labels)}`, problem: false });
   }
@@ -2063,7 +2064,8 @@ async function undo() {
       endUndoProgress();
       const path = (failure.args && failure.args.path) || "";
       const choice = await choiceDialog(msg("undo.changed.title"), {
-        detail: msg("undo.changed.detail", { file: fileName(path) }),
+        subject: fileName(path),
+        detail: msg("undo.changed.detail"),
         primary: msg("undo.changed.keep"),
         secondary: msg("undo.changed.overwrite"),
         cancel: msg("undo.changed.cancel"),

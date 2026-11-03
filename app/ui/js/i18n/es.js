@@ -1014,7 +1014,7 @@ export const es = {
   "app.undidKept": { one: "{n} campo se cambió después en otra edición y se dejó como está", other: "{n} campos se cambiaron después en otra edición y se dejaron como están" },
   "app.undidKeptMore": { one: "y {n} archivo más", other: "y {n} archivos más" },
   "undo.changed.title": "Algunos archivos se editaron después de aplicar este cambio",
-  "undo.changed.detail": "Deshacerlo sobrescribiría esa edición ({file}). ¿Deshacer solo lo que no se tocó desde entonces, conservando los valores nuevos, o devolverlo todo como estaba?",
+  "undo.changed.detail": "Se pueden conservar los valores nuevos y deshacer el resto, o devolver todos los valores antiguos encima.",
   "undo.changed.keep": "Deshacer lo no tocado",
   "undo.changed.overwrite": "Deshacer todo y sobrescribir la edición posterior",
   "undo.changed.cancel": "No deshacer",

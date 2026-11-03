@@ -80,7 +80,9 @@ function showToast(title, parts, isError) {
   list.hidden = parts.length === 0;
   // A report with a problem waits to be read. An error is often only "select
   // something first", so it times out too, given longer and a × to close it.
-  const stays = parts.some((part) => part.problem);
+  // A `keep` part waits as well without reading as a problem: an outcome the
+  // user chose that is still worth reading in full (#683).
+  const stays = parts.some((part) => part.problem || part.keep);
   el("toast-close").hidden = !stays && !isError;
   box.classList.toggle("error", isError);
   box.hidden = false;
@@ -214,27 +216,44 @@ export function confirmDialog(message, okLabel = "OK", { detail = "", danger = f
 // the safe default and holds the focus, so Return takes it (#680); the
 // secondary one gets the danger style, since it is the one that overwrites
 // something, and its button is made here and taken away after.
-export function choiceDialog(message, { detail = "", primary, secondary, cancel }) {
+//
+// The answers stack full width (#683), top to bottom in the order they are
+// meant to be read: primary, secondary, cancel. The buttons are moved into
+// that order rather than reordered by CSS, so Tab walks them as they are seen,
+// and put back afterwards. `subject` names what the question is about (a file)
+// on a line of its own, in the value font.
+export function choiceDialog(message, { subject = "", detail = "", primary, secondary, cancel }) {
   return new Promise((resolve) => {
     const modal = el("confirm-modal");
+    const box = modal.querySelector(".modal");
     el("confirm-message").textContent = message;
     el("confirm-detail").textContent = detail;
     el("confirm-detail").hidden = !detail;
+    const subjectLine = document.createElement("p");
+    subjectLine.className = "modal-subject mono";
+    subjectLine.textContent = subject;
+    if (subject) el("confirm-message").after(subjectLine);
     const okBtn = el("confirm-ok");
     const cancelBtn = el("confirm-cancel");
+    const actions = okBtn.parentElement;
     const okText = okBtn.textContent;
     const cancelText = cancelBtn.textContent;
     const altBtn = document.createElement("button");
     altBtn.className = "danger";
     altBtn.textContent = secondary;
-    okBtn.before(altBtn);
+    actions.prepend(okBtn);
+    okBtn.after(altBtn);
     okBtn.textContent = primary;
     okBtn.classList.remove("danger");
     if (cancel) cancelBtn.textContent = cancel;
+    box.classList.add("choice");
     modal.hidden = false;
     const done = (result) => {
       modal.hidden = true;
+      box.classList.remove("choice");
+      subjectLine.remove();
       altBtn.remove();
+      actions.append(okBtn);
       okBtn.textContent = okText;
       cancelBtn.textContent = cancelText;
       okBtn.removeEventListener("click", onOk);

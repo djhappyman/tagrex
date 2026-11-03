@@ -1016,7 +1016,7 @@ export const it = {
   "app.undidKept": { one: "{n} campo è stato modificato nel frattempo da un’altra modifica ed è rimasto com’è", other: "{n} campi sono stati modificati nel frattempo da un’altra modifica e sono rimasti come sono" },
   "app.undidKeptMore": { one: "e {n} altro file", other: "e altri {n} file" },
   "undo.changed.title": "Alcuni file sono stati modificati dopo aver applicato questa modifica",
-  "undo.changed.detail": "Annullarla sovrascriverebbe quella modifica ({file}). Annullare solo ciò che non è stato toccato da allora, tenendo i valori più recenti, o ripristinare tutto com’era?",
+  "undo.changed.detail": "Si possono tenere i valori più recenti e annullare il resto, oppure rimettere sopra tutti i vecchi valori.",
   "undo.changed.keep": "Annulla il non toccato",
   "undo.changed.overwrite": "Annulla tutto, sovrascrivi la modifica successiva",
   "undo.changed.cancel": "Non annullare",

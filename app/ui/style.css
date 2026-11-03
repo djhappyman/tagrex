@@ -2200,6 +2200,41 @@ body.diffing {
 .modal-detail[hidden] {
   display: none;
 }
+/* A choice of two acts and a cancel (#683): the answers stack full width, the
+   safe default on top, so no label wraps whatever the language. The file the
+   question is about sits on its own line under it, in the value font. The
+   destructive answer is outlined in the danger colour rather than filled, so
+   the filled default stays the one the eye lands on. */
+.modal.confirm.choice {
+  max-width: 380px;
+  gap: var(--space-4);
+}
+.modal.choice .modal-msg {
+  font-weight: var(--fw-medium);
+}
+.modal-subject {
+  margin: calc(-1 * var(--space-2)) 0 0;
+  font-size: var(--text-xs);
+  line-height: var(--lh-snug);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.modal.choice .modal-actions {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+.modal.choice .modal-actions button {
+  padding: 8px 12px;
+}
+.modal-actions button.danger:not(.primary) {
+  color: var(--del);
+  border-color: color-mix(in srgb, var(--del) 45%, var(--border));
+}
+.modal-actions button.danger:not(.primary):hover:not(:disabled) {
+  background: color-mix(in srgb, var(--del) 10%, var(--bg));
+}
 /* The fill is --del darkened: the dark theme's --del is a light red that white
    text fails AA on (2.8:1); darkened, white reads at 5:1 or better in both. */
 button.primary.danger,

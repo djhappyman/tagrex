@@ -1018,7 +1018,7 @@ export const en = {
   "app.undidKept": { one: "{n} field was changed by another edit since, and was kept as it is", other: "{n} fields were changed by another edit since, and were kept as they are" },
   "app.undidKeptMore": { one: "and {n} more file", other: "and {n} more files" },
   "undo.changed.title": "Some files were edited after this change was applied",
-  "undo.changed.detail": "Undoing it would overwrite that edit ({file}). Undo only what was not touched since, keeping the newer values, or put everything back as it was?",
+  "undo.changed.detail": "Its newer values can be kept and the rest undone, or every old value put back over them.",
   "undo.changed.keep": "Undo the untouched",
   "undo.changed.overwrite": "Undo all, overwrite later edits",
   "undo.changed.cancel": "Don't undo",
