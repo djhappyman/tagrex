@@ -277,6 +277,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Saving an M4A file no longer reorders its atoms each time: the ones the
   file had keep its order, so saving the same tags again writes the same
   file ([#665](https://github.com/tagrex/tagrex/issues/665)).
+- Writing a tag in ID3v2.3 keeps the album, artist and title sort orders,
+  the release time and the other frames the backend calls 2.4-only, where
+  before every 2.3 save, by preference or by conversion, dropped them
+  ([#667](https://github.com/tagrex/tagrex/issues/667)).
 
 ## [1.1.1] - 2026-11-02
 

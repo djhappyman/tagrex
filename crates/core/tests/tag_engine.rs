@@ -4948,3 +4948,93 @@ fn an_m4a_save_keeps_its_atoms_in_order() {
     std::fs::remove_file(&path).ok();
     assert!(saves.windows(2).all(|pair| pair[0] == pair[1]));
 }
+
+/// The frames of `path`'s ID3v2 block as (id, text) pairs, the text empty for a
+/// frame that holds none.
+fn id3v2_frames(path: &std::path::Path) -> Vec<(String, String)> {
+    use lofty::config::ParseOptions;
+    use lofty::file::AudioFile;
+    use lofty::id3::v2::Frame;
+
+    let mut file = std::fs::File::open(path).unwrap();
+    let tag = if path.extension().is_some_and(|ext| ext == "aiff") {
+        lofty::iff::aiff::AiffFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .id3v2()
+            .cloned()
+    } else {
+        lofty::mpeg::MpegFile::read_from(&mut file, ParseOptions::new())
+            .unwrap()
+            .id3v2()
+            .cloned()
+    }
+    .unwrap();
+    (&tag)
+        .into_iter()
+        .map(|frame| {
+            let text = match frame {
+                Frame::Text(text) => text.value.to_string(),
+                Frame::Timestamp(timestamp) => timestamp.timestamp.to_string(),
+                _ => String::new(),
+            };
+            (frame.id().as_str().to_string(), text)
+        })
+        .collect()
+}
+
+/// #667: a 2.3 write keeps the frames the backend would drop as 2.4-only, the
+/// sort orders and the release time among them, on an MP3 and in an AIFF.
+#[test]
+fn a_v23_write_keeps_the_sort_order_and_release_time_frames() {
+    let frames = [
+        id3v23_frame(b"TIT2", b"\0Title"),
+        id3v23_frame(b"TSOA", b"\0Sort Album"),
+        id3v23_frame(b"TSOP", b"\0Sort Artist"),
+        id3v23_frame(b"TDRL", b"\x002022-03-25"),
+    ]
+    .concat();
+    let tag = id3v23_tag(&frames);
+
+    let dir = std::env::temp_dir().join(format!("tagrex-v23-drop-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mp3 = dir.join("track.mp3");
+    std::fs::write(&mp3, [tag.clone(), minimal_mp3()].concat()).unwrap();
+    let aiff = dir.join("track.aiff");
+    let mut aiff_bytes = minimal_aiff();
+    aiff_bytes.extend_from_slice(b"ID3 ");
+    aiff_bytes.extend_from_slice(&(tag.len() as u32).to_be_bytes());
+    aiff_bytes.extend_from_slice(&tag);
+    if tag.len() % 2 == 1 {
+        aiff_bytes.push(0);
+    }
+    let form_size = (aiff_bytes.len() - 8) as u32;
+    aiff_bytes[4..8].copy_from_slice(&form_size.to_be_bytes());
+    std::fs::write(&aiff, aiff_bytes).unwrap();
+
+    for path in [&mp3, &aiff] {
+        assert!(TagEngine::set_id3v2_revision(path, Id3v2Revision::V3).unwrap());
+        assert_eq!(
+            TagEngine::id3v2_revision(path).unwrap(),
+            Some(Id3v2Revision::V3),
+            "{path:?}"
+        );
+        let frames = id3v2_frames(path);
+        for expected in [
+            ("TIT2", "Title"),
+            ("TSOA", "Sort Album"),
+            ("TSOP", "Sort Artist"),
+            ("TDRL", "2022-03-25"),
+        ] {
+            assert!(
+                frames
+                    .iter()
+                    .any(|(id, text)| id == expected.0 && text == expected.1),
+                "{path:?} lost {expected:?}: {frames:?}"
+            );
+        }
+        // And a second write finds them where the first put them.
+        assert!(TagEngine::set_id3v2_revision(path, Id3v2Revision::V3).unwrap());
+        assert_eq!(id3v2_frames(path).len(), frames.len(), "{path:?}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}

@@ -3419,15 +3419,108 @@ fn save_id3v2_tag_with(
     tag: &Id3v2Tag,
     options: WriteOptions,
 ) -> Result<(), TagIoError> {
+    // What a 2.3 write would drop, put back into the block it produces (#667).
+    // The options say which revision only through equality: no getter.
+    let dropped = if options == { options }.use_id3v23(true) {
+        frames_dropped_from_v23(tag, options)
+    } else {
+        Vec::new()
+    };
     if matches!(container, FileType::Aiff | FileType::Wav) {
         let mut bytes = Vec::new();
         tag.dump_to(&mut bytes, options)?;
+        if let Some(spliced) = splice_v23_frames(&bytes, &dropped) {
+            bytes = spliced;
+        }
         if write_iff_id3(path, Some(&bytes))? {
             return Ok(());
         }
     }
     tag.save_to_path(path, options)?;
+    if !dropped.is_empty() && matches!(container, FileType::Mpeg | FileType::Aac) {
+        let raw = std::fs::read(path)?;
+        if raw.len() >= 10 && &raw[..3] == b"ID3" {
+            let block_len = 10 + syncsafe_u32(&raw[6..10]) as usize;
+            if let Some(mut spliced) = raw
+                .get(..block_len)
+                .and_then(|block| splice_v23_frames(block, &dropped))
+            {
+                spliced.extend_from_slice(&raw[block_len..]);
+                rewrite_in_place(path, &raw, &spliced)?;
+            }
+        }
+    }
     Ok(())
+}
+
+/// The frames the backend discards from an ID3v2.3 write as 2.4-only (#667).
+/// The sort-order ones among them are a de-facto standard in 2.3 tags, and the
+/// rest are worth keeping as much as any frame a file carries.
+const FRAMES_A_V23_WRITE_DROPS: [&str; 14] = [
+    "ASPI", "EQU2", "RVA2", "SEEK", "SIGN", "TDEN", "TDRL", "TDTG", "TMOO", "TPRO", "TSOA", "TSOP",
+    "TSOT", "TSST",
+];
+
+/// Each frame of `tag` a 2.3 write would drop, as its id and its body encoded
+/// for 2.3 by the backend's own frame encoders (#667). A frame of a kind none of
+/// them covers is left to the drop, as before.
+fn frames_dropped_from_v23(tag: &Id3v2Tag, options: WriteOptions) -> Vec<([u8; 4], Vec<u8>)> {
+    tag.into_iter()
+        .filter(|frame| FRAMES_A_V23_WRITE_DROPS.contains(&frame.id().as_str()))
+        .filter_map(|frame| {
+            let body = match frame {
+                Frame::Text(text) => text.as_bytes(options).ok()?,
+                Frame::Timestamp(timestamp) => timestamp.as_bytes(options).ok()?,
+                Frame::RelativeVolumeAdjustment(volume) => volume.as_bytes(options).ok()?,
+                Frame::Binary(binary) => binary.data.to_vec(),
+                _ => return None,
+            };
+            let id = <[u8; 4]>::try_from(frame.id().as_str().as_bytes()).ok()?;
+            Some((id, body))
+        })
+        .collect()
+}
+
+/// `block`, an ID3v2.3 block, with `frames` added after its last frame (#667).
+/// `None`, leaving the block as it is, when there is nothing to add or the block
+/// is not a plain 2.3 one this can walk: unsynchronised, with an extended
+/// header, or with a frame running past its end.
+fn splice_v23_frames(block: &[u8], frames: &[([u8; 4], Vec<u8>)]) -> Option<Vec<u8>> {
+    if frames.is_empty()
+        || block.len() < 10
+        || &block[..3] != b"ID3"
+        || block[3] != 3
+        || block[5] & 0xC0 != 0
+    {
+        return None;
+    }
+    let size = syncsafe_u32(&block[6..10]) as usize;
+    let end = (10 + size).min(block.len());
+    let mut pos = 10;
+    while pos + 10 <= end && block[pos] != 0 {
+        let frame_size = u32::from_be_bytes(block[pos + 4..pos + 8].try_into().ok()?) as usize;
+        pos += 10 + frame_size;
+    }
+    if pos > end {
+        return None;
+    }
+    let mut added = Vec::new();
+    for (id, body) in frames {
+        added.extend_from_slice(id);
+        added.extend_from_slice(&u32::try_from(body.len()).ok()?.to_be_bytes());
+        added.extend_from_slice(&[0, 0]);
+        added.extend_from_slice(body);
+    }
+    let new_size = u32::try_from(size + added.len())
+        .ok()
+        .filter(|size| *size < 1 << 28)?;
+    let mut spliced = Vec::with_capacity(block.len() + added.len());
+    spliced.extend_from_slice(&block[..6]);
+    spliced.extend_from_slice(&syncsafe_bytes(new_size));
+    spliced.extend_from_slice(&block[10..pos]);
+    spliced.extend_from_slice(&added);
+    spliced.extend_from_slice(&block[pos..]);
+    Some(spliced)
 }
 
 /// Put `id3_bytes` into an AIFF or a WAV as its `ID3 ` chunk — or, given
