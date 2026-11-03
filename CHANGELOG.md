@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   fixes work around, so a dependency upgrade that changes either fails the
   build with the workaround to revisit, rather than writing frames twice
   ([#671](https://github.com/tagrex/tagrex/issues/671)).
+- Regression tests pin the order of a multi-value Vorbis field (two artists,
+  three genres) through repeated saves that edit another field, with a custom
+  or an encoder comment in the block
+  ([#681](https://github.com/tagrex/tagrex/issues/681)).
 
 ### Security
 
