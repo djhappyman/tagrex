@@ -366,6 +366,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   UTF-8) opens again, with that text read the way it was meant instead of the
   whole file refused; the next save writes it in a valid encoding
   ([#686](https://github.com/tagrex/tagrex/issues/686)).
+- A damaged file on which the tag library itself fails (an Opus header with no
+  channels, a Speex stream too short to time) is listed as unreadable instead
+  of breaking every later command until a restart
+  ([#687](https://github.com/tagrex/tagrex/issues/687)).
 
 ## [1.1.1] - 2026-11-02
 
