@@ -370,6 +370,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   channels, a Speex stream too short to time) is listed as unreadable instead
   of breaking every later command until a restart
   ([#687](https://github.com/tagrex/tagrex/issues/687)).
+- A save to an Ogg file (Vorbis, Opus, Speex) whose stream holds junk between
+  two pages is refused and the file left as it was, where the write used to
+  report success with part of the audio gone
+  ([#688](https://github.com/tagrex/tagrex/issues/688)).
 
 ## [1.1.1] - 2026-11-02
 

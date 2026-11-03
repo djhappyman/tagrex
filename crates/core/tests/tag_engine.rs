@@ -5607,3 +5607,28 @@ fn a_damaged_ogg_file_is_an_error_not_a_panic() {
         }
     }
 }
+
+/// The tag library's Ogg writer drops pages when the stream holds bytes between
+/// two pages: this Speex file (from the fuzzer: junk after its comment page)
+/// reads and plays, and a write that reported success left it 7 KB shorter with
+/// its audio gone. The write is refused now and the file left as it was.
+#[test]
+fn an_ogg_write_that_would_cut_the_audio_is_refused() {
+    let fixture: &[u8] = include_bytes!("fixtures/damaged-page-gap.spx");
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-page-gap-{}.spx",
+        std::process::id()
+    ));
+    std::fs::write(&path, fixture).unwrap();
+
+    let mut file = TagEngine::read(&path).expect("fixture precondition: it reads");
+    file.tags.insert(TagField::Artist, "Edited".to_string());
+    let result = TagEngine::write(&file);
+    let after = std::fs::read(&path).unwrap();
+    let still_reads = TagEngine::read(&path).is_ok();
+    std::fs::remove_file(&path).ok();
+
+    assert!(result.is_err(), "the write must be refused: {result:?}");
+    assert_eq!(after, fixture, "the file must be left as it was");
+    assert!(still_reads);
+}
