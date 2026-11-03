@@ -284,6 +284,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Undoing an edit, or a batch that fails part-way, puts each file back in
   the ID3v2 revision it was in: a 2.3 file no longer comes out of the undo
   as 2.4 ([#666](https://github.com/tagrex/tagrex/issues/666)).
+- An ID3v2.3 year stated as a full date, `2021-09-08`, shows as the year
+  and is kept on save. It used to be lost while the file was read, so it
+  never showed and the next save removed it
+  ([#668](https://github.com/tagrex/tagrex/issues/668)).
 
 ## [1.1.1] - 2026-11-02
 

@@ -15,7 +15,7 @@ use lofty::flac::FlacFile;
 use lofty::id3::v1::Id3v1Tag;
 use lofty::id3::v2::{
     BinaryFrame, CommentFrame, ExtendedTextFrame, Frame, FrameId, Id3v2Tag, Id3v2Version,
-    TextInformationFrame,
+    TextInformationFrame, TimestampFrame,
 };
 use lofty::iff::aiff::{AiffFile, AiffTextChunks};
 use lofty::iff::wav::{RiffInfoList, WavFile};
@@ -1859,6 +1859,11 @@ impl TagEngine {
                 }
             }
             insert_concrete_items(path, container, tag, &mut tags)?;
+            if tag_type == TagType::Id3v2 && !tags.contains_key(&TagField::Year) {
+                if let Some(year) = lost_v23_year(path, container) {
+                    tags.insert(TagField::Year, year);
+                }
+            }
             if Some(candidate) == first_choice {
                 if !tags.is_empty() {
                     break;
@@ -3794,8 +3799,87 @@ fn read_id3v2(
                 keep_timestamp_text(tag, &block);
             }
         }
+        // And the year a 2.3 tag states as a full date, which the parse loses
+        // (#668), so a revision switch or a restore writes it back too.
+        let tdrc = FrameId::Valid("TDRC".into());
+        if tag.get(&tdrc).is_none() {
+            if let Some(stamp) =
+                lost_v23_year(path, container).and_then(|year| year.parse::<Timestamp>().ok())
+            {
+                tag.insert(Frame::Timestamp(TimestampFrame::new(
+                    tdrc,
+                    TextEncoding::Latin1,
+                    stamp,
+                )));
+            }
+        }
     }
     Ok(tag)
+}
+
+/// The year of an ID3v2.3 `TYER` frame that holds a full date, `2021-09-08`,
+/// which the backend's parse drops (#668): it folds `TDAT`/`TIME` into the
+/// year, and a year that already has a month is removed rather than kept. A
+/// `TYER` that is no date at all is not recovered; written back as the year it
+/// would be refused on every save, as a malformed year is.
+///
+/// Walks the frame headers and seeks past the bodies, so a tag with a large
+/// cover costs a few reads; only a 2.3 tag without a year gets here.
+fn lost_v23_year(path: &Path, container: FileType) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let start = match container {
+        FileType::Mpeg | FileType::Aac => 0,
+        FileType::Aiff | FileType::Wav => {
+            let big_endian = container == FileType::Aiff;
+            let mut pos = 12u64;
+            let mut chunk = [0u8; 8];
+            loop {
+                file.seek(SeekFrom::Start(pos)).ok()?;
+                file.read_exact(&mut chunk).ok()?;
+                let size_bytes = [chunk[4], chunk[5], chunk[6], chunk[7]];
+                let size = u64::from(if big_endian {
+                    u32::from_be_bytes(size_bytes)
+                } else {
+                    u32::from_le_bytes(size_bytes)
+                });
+                if chunk[..4].eq_ignore_ascii_case(b"ID3 ") {
+                    break pos + 8;
+                }
+                pos += 8 + size + (size & 1);
+            }
+        }
+        _ => return None,
+    };
+    let mut header = [0u8; 10];
+    file.seek(SeekFrom::Start(start)).ok()?;
+    file.read_exact(&mut header).ok()?;
+    if &header[..3] != b"ID3" || header[3] != 3 || header[5] & 0xC0 != 0 {
+        return None;
+    }
+    let end = start + 10 + u64::from(syncsafe_u32(&header[6..10]));
+    let mut pos = start + 10;
+    let mut frame = [0u8; 10];
+    while pos + 10 <= end {
+        file.seek(SeekFrom::Start(pos)).ok()?;
+        file.read_exact(&mut frame).ok()?;
+        if frame[0] == 0 {
+            return None;
+        }
+        let size = u64::from(u32::from_be_bytes([frame[4], frame[5], frame[6], frame[7]]));
+        if &frame[..4] == b"TYER" {
+            if frame[9] & 0xE0 != 0 || size > 64 {
+                return None;
+            }
+            let mut body = vec![0u8; size as usize];
+            file.read_exact(&mut body).ok()?;
+            let text = timestamp_text(&body)?;
+            let stamp = text.parse::<Timestamp>().ok()?;
+            return (stamp.month.is_some() && is_writable_year(&text)).then_some(text);
+        }
+        pos += 10 + size;
+    }
+    None
 }
 
 /// The ID3v2 frames lofty reads as dates (#504).

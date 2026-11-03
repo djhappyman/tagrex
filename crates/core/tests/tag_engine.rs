@@ -5038,3 +5038,54 @@ fn a_v23_write_keeps_the_sort_order_and_release_time_frames() {
     }
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// #668: a 2.3 `TYER` holding a full date was dropped by the parse, so the year
+/// never showed and the next save removed it. It reads as the year now, and an
+/// edit or a revision switch writes it back.
+#[test]
+fn a_v23_year_holding_a_full_date_is_read_and_kept() {
+    let tag = id3v23_tag(
+        &[
+            id3v23_frame(b"TIT2", b"\0Title"),
+            id3v23_frame(b"TYER", b"\x002021-09-08"),
+        ]
+        .concat(),
+    );
+    let dir = std::env::temp_dir().join(format!("tagrex-v23-tyer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mp3 = dir.join("track.mp3");
+    std::fs::write(&mp3, [tag.clone(), minimal_mp3()].concat()).unwrap();
+    let aiff = dir.join("track.aiff");
+    let mut aiff_bytes = minimal_aiff();
+    aiff_bytes.extend_from_slice(b"ID3 ");
+    aiff_bytes.extend_from_slice(&(tag.len() as u32).to_be_bytes());
+    aiff_bytes.extend_from_slice(&tag);
+    if tag.len() % 2 == 1 {
+        aiff_bytes.push(0);
+    }
+    let form_size = (aiff_bytes.len() - 8) as u32;
+    aiff_bytes[4..8].copy_from_slice(&form_size.to_be_bytes());
+    std::fs::write(&aiff, aiff_bytes).unwrap();
+
+    let year = |path: &std::path::Path| {
+        TagEngine::read(path)
+            .unwrap()
+            .tags
+            .get(&TagField::Year)
+            .cloned()
+    };
+    for path in [&mp3, &aiff] {
+        assert_eq!(year(path).as_deref(), Some("2021-09-08"), "{path:?}");
+
+        // A revision switch rewrites the block from the concrete read.
+        assert!(TagEngine::set_id3v2_revision(path, Id3v2Revision::V3).unwrap());
+        assert_eq!(year(path).as_deref(), Some("2021-09-08"), "{path:?}");
+
+        // An edit of another field.
+        let mut file = TagEngine::read(path).unwrap();
+        file.tags.insert(TagField::Title, "Edited".to_string());
+        TagEngine::write(&file).unwrap();
+        assert_eq!(year(path).as_deref(), Some("2021-09-08"), "{path:?}");
+    }
+    std::fs::remove_dir_all(&dir).ok();
+}
