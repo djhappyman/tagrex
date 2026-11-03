@@ -887,6 +887,11 @@ async fn undo(
 // history before and after every apply and undo, and a synchronous command
 // would hold the window for as long as the journal takes to read.
 #[tauri::command]
+fn take_journal_notice(state: State<AppState>) -> Result<Option<String>, ErrorDto> {
+    with_app(&state, |app| Ok(app.take_journal_notice()))
+}
+
+#[tauri::command]
 async fn history(state: State<'_, AppState>) -> Result<Vec<BatchDto>, ErrorDto> {
     with_app(&state, |app| app.history().map_err(ErrorDto::from))
 }
@@ -1612,6 +1617,7 @@ fn main() {
             cancel_detect_bpm,
             undo,
             history,
+            take_journal_notice,
             provider_search,
             provider_fetch_release,
             provider_fetch_image,

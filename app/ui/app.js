@@ -12,6 +12,7 @@ import {
   placeFloating,
   closePlanReport,
   dismissStickyToast,
+  report,
 } from "./js/dom.js";
 import { enablePointerReorder } from "./js/reorder.js";
 import { refreshExporter, setExportKind } from "./js/exporters.js";
@@ -1906,7 +1907,22 @@ async function afterOpen(label) {
   // The folder's own name, not the path to it: the path field above the table
   // is already showing that, and spelling it out again is most of the toast
   // (#267).
-  toast(msg("toast.opened", { folder: folderName(label), tracks: tn("unit.track", tracks.length) }));
+  const opened = msg("toast.opened", { folder: folderName(label), tracks: tn("unit.track", tracks.length) });
+  // A damaged undo journal was set aside on open (#676): say so, and where it went.
+  let setAside = null;
+  try {
+    setAside = await invoke("take_journal_notice", {});
+  } catch (e) {
+    setAside = null; // an older backend without the command: nothing to report
+  }
+  if (setAside) {
+    report(opened, [
+      { text: msg("app.journalReset"), problem: true },
+      { text: msg("app.journalSetAside", { path: setAside }), problem: false },
+    ]);
+  } else {
+    toast(opened);
+  }
 }
 
 // Open a drag-and-drop of `paths` (#127). The backend resolves a lone folder to

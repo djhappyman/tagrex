@@ -319,6 +319,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   release and cover request until the app is restarted: each request gives
   up after 15 s to connect, 30 s for the answer to start and 120 s in all
   ([#673](https://github.com/tagrex/tagrex/issues/673)).
+- A damaged undo journal no longer makes every library refuse to open: the
+  journal is moved aside next to itself, a fresh one is started, and the app
+  says once that earlier changes can no longer be undone and where the old
+  file went ([#676](https://github.com/tagrex/tagrex/issues/676)).
 
 ## [1.1.1] - 2026-11-02
 

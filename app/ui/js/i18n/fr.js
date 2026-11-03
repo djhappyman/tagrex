@@ -1011,6 +1011,8 @@ export const fr = {
   "app.noPendingEdits": "Aucune modification en attente à prévisualiser",
   "app.tickOneRow": "Cochez au moins une ligne à appliquer",
   "app.undid": "Dernier lot annulé",
+  "app.journalReset": "L’historique d’annulation était illisible et a été recommencé : les modifications précédentes ne peuvent plus être annulées ici.",
+  "app.journalSetAside": "Le fichier d’historique endommagé a été conservé ici : {path}",
   "app.typePath": "Saisissez un chemin de bibliothèque, puis appuyez sur Ouvrir",
   "app.dblClickEdit": "Double-clic pour modifier",
   "app.lockedCell": "Verrouillé — déverrouillez-le dans le panneau EDITOR",

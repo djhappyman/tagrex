@@ -867,6 +867,8 @@ function mockInvoke(cmd, args) {
       return Promise.resolve();
     case "history":
       return Promise.resolve(s.history);
+    case "take_journal_notice":
+      return Promise.resolve(null);
     case "undo":
       s.history.shift();
       return Promise.resolve();
