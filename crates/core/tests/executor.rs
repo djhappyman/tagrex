@@ -1391,3 +1391,97 @@ fn undo_checks_only_what_the_batch_recorded() {
         .tags
         .contains_key(&TagField::Artist));
 }
+
+/// An MP3 whose ID3v2 block is in 2.3, carrying `artist`.
+fn id3v23_mp3(dir: &TempDir, name: &str, artist: &str) -> PathBuf {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::{Accessor, TagExt};
+
+    let track = dir.path().join(name);
+    let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+    frame.resize(417, 0);
+    std::fs::write(&track, frame.repeat(5)).unwrap();
+    let mut tag = lofty::id3::v2::Id3v2Tag::new();
+    tag.set_artist(artist.to_string());
+    tag.save_to_path(&track, WriteOptions::default().use_id3v23(true))
+        .unwrap();
+    track
+}
+
+fn artist_change(path: &Path, old: &str, new: &str) -> FileChange {
+    FileChange {
+        path: path.to_path_buf(),
+        tag_changes: vec![FieldChange {
+            field: TagField::Artist,
+            old: Some(old.to_string()),
+            new: Some(new.to_string()),
+        }],
+        ..FileChange::default()
+    }
+}
+
+/// #666: an edit saves in the revision the app is set to, so a 2.3 file comes
+/// out as 2.4. Undo puts it back in 2.3, the way it was.
+#[test]
+fn undo_puts_back_the_id3v2_revision_the_file_was_in() {
+    use tagrex_core::model::Id3v2Revision;
+
+    let dir = TempDir::new("undo-revision");
+    let track = id3v23_mp3(&dir, "track.mp3", "Old");
+    let plan = ChangePlan {
+        description: "edit".to_string(),
+        changes: vec![artist_change(&track, "Old", "New")],
+        ..ChangePlan::default()
+    };
+    let mut journal = VecJournal::new();
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+    assert_eq!(
+        TagEngine::id3v2_revision(&track).unwrap(),
+        Some(Id3v2Revision::V4)
+    );
+
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+
+    assert_eq!(
+        TagEngine::id3v2_revision(&track).unwrap(),
+        Some(Id3v2Revision::V3)
+    );
+    let tags = TagEngine::read(&track).unwrap().tags;
+    assert_eq!(tags.get(&TagField::Artist).map(String::as_str), Some("Old"));
+}
+
+/// #666: a batch that fails part-way puts the revision back too.
+#[test]
+fn a_rollback_puts_back_the_id3v2_revision_the_file_was_in() {
+    use tagrex_core::model::Id3v2Revision;
+
+    let dir = TempDir::new("rollback-revision");
+    let track = id3v23_mp3(&dir, "track.mp3", "Old");
+    let other = dir.flac("other.flac");
+    // The second file's year is rejected after the first is written.
+    let plan = ChangePlan {
+        description: "edit".to_string(),
+        changes: vec![
+            artist_change(&track, "Old", "New"),
+            FileChange {
+                path: other,
+                tag_changes: vec![FieldChange {
+                    field: TagField::Year,
+                    old: None,
+                    new: Some("222".to_string()),
+                }],
+                ..FileChange::default()
+            },
+        ],
+        ..ChangePlan::default()
+    };
+    let mut journal = VecJournal::new();
+    assert!(Executor::apply(&plan, &mut journal, &roots(dir.path())).is_err());
+
+    assert_eq!(
+        TagEngine::id3v2_revision(&track).unwrap(),
+        Some(Id3v2Revision::V3)
+    );
+    let tags = TagEngine::read(&track).unwrap().tags;
+    assert_eq!(tags.get(&TagField::Artist).map(String::as_str), Some("Old"));
+}

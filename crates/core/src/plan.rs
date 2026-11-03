@@ -15,7 +15,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
-use crate::journal::{AppliedBatch, AppliedValue, BatchId, CopyStamp, JournalError, UndoJournal};
+use crate::journal::{
+    AppliedBatch, AppliedValue, BatchId, CopyStamp, FileRevision, JournalError, UndoJournal,
+};
 use crate::model::{
     CoverArt, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine, TagField, TrackFile,
 };
@@ -301,10 +303,12 @@ impl Executor {
             copy_stamps: Vec::new(),
             applied_values: Vec::new(),
             interrupted: true,
+            id3v2_revisions: id3v2_revisions(plan),
         };
         batch.id = journal.record(&batch)?;
 
         let mut written = Written::new(plan.changes.len());
+        written.revisions.clone_from(&batch.id3v2_revisions);
         let mut steps = Steps::new(count_steps(plan), progress, cancel);
         let removed_dirs = match Self::write_phase(plan, &roots, &mut written, &mut steps) {
             Ok(removed_dirs) => removed_dirs,
@@ -533,6 +537,7 @@ impl Executor {
             write_blocks(&change.path, change, Direction::Undo)?;
             write_tag_changes(&change.path, change, Direction::Undo)?;
             apply_cover_change(&change.path, change, Direction::Undo)?;
+            restore_revision(&change.path, &batch.id3v2_revisions)?;
             steps.done();
         }
 
@@ -653,6 +658,8 @@ struct Written {
     /// Sidecar (from, to, copy) transfers that were attempted.
     sidecars: Vec<(PathBuf, PathBuf, bool)>,
     created_dirs: Vec<PathBuf>,
+    /// The ID3v2 revision of each file before the batch, as journaled (#666).
+    revisions: Vec<FileRevision>,
 }
 
 impl Written {
@@ -662,6 +669,7 @@ impl Written {
             transferred: Vec::new(),
             sidecars: Vec::new(),
             created_dirs: Vec::new(),
+            revisions: Vec::new(),
         }
     }
 
@@ -728,6 +736,7 @@ impl Written {
             if steps >= 2 {
                 let _ = apply_cover_change(&change.path, change, Direction::Undo);
             }
+            let _ = restore_revision(&change.path, &self.revisions);
             // The file holds the values the plan recorded as `old` again, or it
             // does not.
             if ensure_not_stale(change).is_err() {
@@ -825,6 +834,44 @@ fn ensure_untransfer_safe(
     } else {
         ensure_target_free(target, original, false)
     }
+}
+
+/// The ID3v2 revision of every file `plan` writes in place, read before it is
+/// written (#666). A file with no ID3v2 block, or one that cannot be read, gets
+/// nothing, and keeps whatever revision undo writes.
+fn id3v2_revisions(plan: &ChangePlan) -> Vec<FileRevision> {
+    plan.changes
+        .iter()
+        .filter(|change| !change.copy && writes_in_place(change))
+        .filter_map(|change| {
+            let revision = TagEngine::id3v2_revision(&change.path).ok()??;
+            Some(FileRevision {
+                path: change.path.clone(),
+                revision,
+            })
+        })
+        .collect()
+}
+
+/// Put `path` back in the ID3v2 revision journaled for it (#666). The writes
+/// that restore its values save in the revision the app is set to, which need
+/// not be the one the file was in. A 2.2 file stays as they left it: the backend
+/// does not write 2.2.
+fn restore_revision(path: &Path, revisions: &[FileRevision]) -> Result<(), PlanError> {
+    let Some(recorded) = revisions
+        .iter()
+        .find(|file| file.path == path)
+        .map(|file| file.revision)
+    else {
+        return Ok(());
+    };
+    if !Id3v2Revision::WRITABLE.contains(&recorded) {
+        return Ok(());
+    }
+    if TagEngine::id3v2_revision(path)?.is_some_and(|current| current != recorded) {
+        TagEngine::set_id3v2_revision(path, recorded)?;
+    }
+    Ok(())
 }
 
 /// What each changed field of every file `plan` wrote in place reads as, once

@@ -281,6 +281,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the release time and the other frames the backend calls 2.4-only, where
   before every 2.3 save, by preference or by conversion, dropped them
   ([#667](https://github.com/tagrex/tagrex/issues/667)).
+- Undoing an edit, or a batch that fails part-way, puts each file back in
+  the ID3v2 revision it was in: a 2.3 file no longer comes out of the undo
+  as 2.4 ([#666](https://github.com/tagrex/tagrex/issues/666)).
 
 ## [1.1.1] - 2026-11-02
 

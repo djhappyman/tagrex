@@ -64,6 +64,18 @@ pub struct AppliedBatch {
     /// Recorded before its first write and never finished (#659): the process
     /// stopped part-way through the apply. Undoing it puts back what it reached.
     pub interrupted: bool,
+    /// The ID3v2 revision each file it writes in place was in before the
+    /// write (#666). An ordinary write saves in the revision the app is set
+    /// to, so a 2.3 file comes out as 2.4; undo puts the recorded revision
+    /// back. Empty for a batch recorded before this existed.
+    pub id3v2_revisions: Vec<FileRevision>,
+}
+
+/// The ID3v2 revision one file was in before a batch wrote it (#666).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRevision {
+    pub path: PathBuf,
+    pub revision: Id3v2Revision,
 }
 
 /// One field of one file as a batch left it (#658).
@@ -347,6 +359,12 @@ impl SqliteJournal {
                  path     TEXT NOT NULL,
                  field    TEXT NOT NULL,
                  value    TEXT
+             );
+             CREATE TABLE IF NOT EXISTS id3v2_revisions (
+                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                 batch_id INTEGER NOT NULL REFERENCES batches(id) ON DELETE CASCADE,
+                 path     TEXT NOT NULL,
+                 revision TEXT NOT NULL
              );",
         )?;
         // `copied` (#153) arrived after the table did, and a journal from an
@@ -394,7 +412,8 @@ impl SqliteJournal {
              CREATE INDEX IF NOT EXISTS idx_removed_dirs_batch ON removed_dirs(batch_id);
              CREATE INDEX IF NOT EXISTS idx_allowed_roots_batch ON allowed_roots(batch_id);
              CREATE INDEX IF NOT EXISTS idx_copy_stamps_batch ON copy_stamps(batch_id);
-             CREATE INDEX IF NOT EXISTS idx_applied_values_batch ON applied_values(batch_id);",
+             CREATE INDEX IF NOT EXISTS idx_applied_values_batch ON applied_values(batch_id);
+             CREATE INDEX IF NOT EXISTS idx_id3v2_revisions_batch ON id3v2_revisions(batch_id);",
         )?;
         Ok(Self { conn })
     }
@@ -527,6 +546,19 @@ impl UndoJournal for SqliteJournal {
                     }
                 }
             }
+        }
+
+        // Known before the first write, unlike the outcome below, so recorded
+        // here and never again on `finish`.
+        for file in &batch.id3v2_revisions {
+            tx.execute(
+                "INSERT INTO id3v2_revisions (batch_id, path, revision) VALUES (?1, ?2, ?3)",
+                rusqlite::params![
+                    batch_id,
+                    file.path.to_string_lossy(),
+                    file.revision.to_storage_key(),
+                ],
+            )?;
         }
 
         insert_outcome(&tx, batch_id, batch)?;
@@ -706,6 +738,7 @@ impl SqliteJournal {
             allowed_roots: self.load_paths("allowed_roots", id)?,
             copy_stamps: self.load_copy_stamps(id)?,
             applied_values: self.load_applied_values(id)?,
+            id3v2_revisions: self.load_id3v2_revisions(id)?,
             // Set by the caller, which read the batch row.
             interrupted: false,
         })
@@ -737,6 +770,27 @@ impl SqliteJournal {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// A revision this build does not know is left out: undo cannot write it.
+    fn load_id3v2_revisions(&self, batch_id: i64) -> Result<Vec<FileRevision>, JournalError> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, revision FROM id3v2_revisions WHERE batch_id = ?1 ORDER BY id",
+        )?;
+        let rows = stmt.query_map(rusqlite::params![batch_id], |row| {
+            Ok((
+                PathBuf::from(row.get::<_, String>(0)?),
+                row.get::<_, String>(1)?,
+            ))
+        })?;
+        let mut revisions = Vec::new();
+        for row in rows {
+            let (path, key) = row?;
+            if let Some(revision) = Id3v2Revision::from_storage_key(&key) {
+                revisions.push(FileRevision { path, revision });
+            }
+        }
+        Ok(revisions)
     }
 
     fn load_file_changes(&self, batch_id: i64) -> Result<Vec<FileChange>, JournalError> {

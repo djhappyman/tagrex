@@ -5,9 +5,9 @@
 use std::path::{Path, PathBuf};
 
 use tagrex_core::journal::{
-    AppliedBatch, AppliedValue, BatchId, CopyStamp, SqliteJournal, UndoJournal,
+    AppliedBatch, AppliedValue, BatchId, CopyStamp, FileRevision, SqliteJournal, UndoJournal,
 };
-use tagrex_core::model::{TagEngine, TagField};
+use tagrex_core::model::{Id3v2Revision, TagEngine, TagField};
 use tagrex_core::plan::{ChangePlan, Executor, FieldChange, FileChange};
 
 const MINIMAL_FLAC: [u8; 76] = [
@@ -557,6 +557,7 @@ fn an_interrupted_batch_can_be_undone_after_a_restart() {
             copy_stamps: Vec::new(),
             applied_values: Vec::new(),
             interrupted: true,
+            id3v2_revisions: Vec::new(),
         })
         .unwrap();
 
@@ -575,4 +576,44 @@ fn an_interrupted_batch_can_be_undone_after_a_restart() {
             .contains_key(&TagField::Artist));
     }
     assert!(journal.batches().unwrap().is_empty());
+}
+
+/// #666: the revision each file was in survives a restart, recorded once even
+/// though the batch is written to the journal twice.
+#[test]
+fn the_id3v2_revisions_survive_a_restart() {
+    let dir = TempDir::new("revisions");
+    let revisions = vec![
+        FileRevision {
+            path: dir.path().join("a.mp3"),
+            revision: Id3v2Revision::V3,
+        },
+        FileRevision {
+            path: dir.path().join("b.mp3"),
+            revision: Id3v2Revision::V4,
+        },
+    ];
+    let mut batch = AppliedBatch {
+        id: BatchId(0),
+        description: "edit".to_string(),
+        message: None,
+        applied_at: 0,
+        plan: ChangePlan::default(),
+        created_dirs: Vec::new(),
+        removed_dirs: Vec::new(),
+        allowed_roots: Vec::new(),
+        copy_stamps: Vec::new(),
+        applied_values: Vec::new(),
+        interrupted: true,
+        id3v2_revisions: revisions.clone(),
+    };
+    let mut journal = SqliteJournal::open(&dir.db()).unwrap();
+    batch.id = journal.record(&batch).unwrap();
+    batch.interrupted = false;
+    journal.finish(batch.id, &batch).unwrap();
+    drop(journal);
+
+    let reopened = SqliteJournal::open(&dir.db()).unwrap();
+    let stored = reopened.batch(batch.id).unwrap().unwrap();
+    assert_eq!(stored.id3v2_revisions, revisions);
 }
