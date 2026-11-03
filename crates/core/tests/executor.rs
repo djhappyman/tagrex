@@ -1485,3 +1485,67 @@ fn a_rollback_puts_back_the_id3v2_revision_the_file_was_in() {
     let tags = TagEngine::read(&track).unwrap().tags;
     assert_eq!(tags.get(&TagField::Artist).map(String::as_str), Some("Old"));
 }
+
+/// #669: removing a Vorbis comment block and undoing it puts back what the
+/// model does not hold: the provenance comment, the vendor string, the order
+/// and spelling of the names, the pictures beside them.
+#[test]
+fn undoing_a_vorbis_block_removal_puts_back_every_comment() {
+    use lofty::config::WriteOptions;
+    use lofty::ogg::tag::VorbisComments;
+    use lofty::prelude::TagExt;
+    use tagrex_core::model::{CoverArt, TagBlockContent, TagBlockKind};
+    use tagrex_core::plan::BlockChange;
+
+    let dir = TempDir::new("vorbis-bytes");
+    let track = dir.flac("track.flac");
+    let mut tag = VorbisComments::default();
+    tag.set_vendor("Some Encoder 1.2.3".to_string());
+    for (name, value) in [
+        ("TITLE", "Kept"),
+        ("ENCODER", "Some Encoder 1.2.3"),
+        ("Mood", "Calm"),
+        ("ARTIST", "Kept Artist"),
+    ] {
+        tag.push(name.to_string(), value.to_string());
+    }
+    tag.save_to_path(&track, WriteOptions::default()).unwrap();
+    let cover = CoverArt {
+        mime: "image/png".to_string(),
+        data: vec![0x89, 0x50, 0x4e, 0x47, 1, 2],
+        ..CoverArt::default()
+    };
+    TagEngine::write_covers(&track, std::slice::from_ref(&cover)).unwrap();
+    let before = TagEngine::dump_vorbis(&track).unwrap().expect("bytes");
+
+    let content = TagEngine::read_block(&track, TagBlockKind::VorbisComments)
+        .unwrap()
+        .unwrap();
+    let plan = ChangePlan {
+        description: "Remove Vorbis comments".to_string(),
+        changes: vec![FileChange {
+            path: track.clone(),
+            block_changes: vec![BlockChange {
+                kind: TagBlockKind::VorbisComments,
+                revision: None,
+                old_revision: None,
+                old_bytes: Some(before.clone()),
+                old: Some(content),
+                new: None,
+            }],
+            ..FileChange::default()
+        }],
+        ..ChangePlan::default()
+    };
+    let mut journal = VecJournal::new();
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+    assert!(TagEngine::read_block(&track, TagBlockKind::VorbisComments)
+        .unwrap()
+        .is_none_or(|content| content.tags.is_empty()));
+
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+
+    assert_eq!(TagEngine::dump_vorbis(&track).unwrap(), Some(before));
+    assert_eq!(TagEngine::read_covers(&track).unwrap(), vec![cover]);
+    assert!(!TagBlockContent::exact(TagBlockKind::VorbisComments));
+}

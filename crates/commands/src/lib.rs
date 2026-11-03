@@ -359,8 +359,8 @@ pub struct BlockChangeDto {
     #[serde(default)]
     pub old_revision: Option<String>,
     /// The old ID3v2 block as base64 bytes (#206), so undo puts it back frame
-    /// for frame rather than rebuilding it from `old`. Absent for every other
-    /// kind. Pictures are not in here — they are in `old.covers` — so an
+    /// for frame rather than rebuilding it from `old`; the Vorbis comment block
+    /// likewise (#669). Absent for every other kind. Pictures are not in here — they are in `old.covers` — so an
     /// artwork-heavy selection does not carry its covers twice.
     #[serde(default)]
     pub old_bytes_base64: Option<String>,
@@ -3949,8 +3949,8 @@ impl App {
                     label: block_kind.name().to_string(),
                     revision: None,
                     old_revision: id3v2_revision_key(path, block_kind)?,
-                    old_bytes_base64: id3v2_bytes_base64(path, block_kind)?,
-                    exact: TagBlockContent::exact(block_kind) || block_kind == TagBlockKind::Id3v2,
+                    old_bytes_base64: block_bytes_base64(path, block_kind)?,
+                    exact: TagBlockContent::exact(block_kind) || keeps_block_bytes(block_kind),
                     lost_fields: Vec::new(),
                     lost_pictures: 0,
                     old: Some(block_content_to_dto(&content)),
@@ -4074,8 +4074,8 @@ impl App {
                 } else {
                     None
                 },
-                old_bytes_base64: id3v2_bytes_base64(path, target)?,
-                exact: TagBlockContent::exact(target) || target == TagBlockKind::Id3v2,
+                old_bytes_base64: block_bytes_base64(path, target)?,
+                exact: TagBlockContent::exact(target) || keeps_block_bytes(target),
                 lost_fields: loss
                     .fields
                     .iter()
@@ -4097,8 +4097,8 @@ impl App {
                     } else {
                         None
                     },
-                    old_bytes_base64: id3v2_bytes_base64(path, source)?,
-                    exact: TagBlockContent::exact(source) || source == TagBlockKind::Id3v2,
+                    old_bytes_base64: block_bytes_base64(path, source)?,
+                    exact: TagBlockContent::exact(source) || keeps_block_bytes(source),
                     lost_fields: Vec::new(),
                     lost_pictures: 0,
                     old: Some(block_content_to_dto(&content)),
@@ -6220,18 +6220,25 @@ fn cover_art_to_dto(art: &CoverArt) -> CoverArtDto {
 }
 
 /// The bytes of the file's ID3v2 block, base64 for the IPC boundary, when
-/// `kind` IS the ID3v2 block (#206). `None` otherwise, including for a file
-/// that carries no such block.
+/// `kind` IS the ID3v2 block (#206), or of its Vorbis comment block when `kind`
+/// is that one (#669). `None` otherwise, including for a file that carries no
+/// such block.
 ///
 /// This is what makes undoing a destroyed ID3v2 block frame-for-frame instead
 /// of a rebuild from the fields the model happens to know — see
-/// [`TagEngine::dump_id3v2`].
-fn id3v2_bytes_base64(path: &Path, kind: TagBlockKind) -> Result<Option<String>, AppError> {
-    if kind != TagBlockKind::Id3v2 {
-        return Ok(None);
-    }
-    Ok(TagEngine::dump_id3v2(path)?
-        .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)))
+/// [`TagEngine::dump_id3v2`] and [`TagEngine::dump_vorbis`].
+fn block_bytes_base64(path: &Path, kind: TagBlockKind) -> Result<Option<String>, AppError> {
+    let bytes = match kind {
+        TagBlockKind::Id3v2 => TagEngine::dump_id3v2(path)?,
+        TagBlockKind::VorbisComments => TagEngine::dump_vorbis(path)?,
+        _ => None,
+    };
+    Ok(bytes.map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)))
+}
+
+/// Whether undo puts a block of `kind` back from its bytes (#206, #669).
+fn keeps_block_bytes(kind: TagBlockKind) -> bool {
+    matches!(kind, TagBlockKind::Id3v2 | TagBlockKind::VorbisComments)
 }
 
 /// The revision the file's ID3v2 block is in, when `kind` is that block.

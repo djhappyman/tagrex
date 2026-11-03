@@ -1345,6 +1345,44 @@ fn read_vorbis(
     })
 }
 
+/// `tag`'s vendor and comments as a Vorbis comment packet, without the framing
+/// bit (#669): lengths are little-endian `u32`, each comment is `NAME=value`.
+fn vorbis_comment_packet(tag: &VorbisComments) -> Vec<u8> {
+    fn put(packet: &mut Vec<u8>, bytes: &[u8]) {
+        packet.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        packet.extend_from_slice(bytes);
+    }
+    let mut packet = Vec::new();
+    put(&mut packet, tag.vendor().as_bytes());
+    packet.extend_from_slice(&(tag.items().len() as u32).to_le_bytes());
+    for (name, value) in tag.items() {
+        put(&mut packet, format!("{name}={value}").as_bytes());
+    }
+    packet
+}
+
+/// The inverse of [`vorbis_comment_packet`]; `None` for bytes it did not make.
+fn vorbis_comments_from_packet(bytes: &[u8]) -> Option<VorbisComments> {
+    let mut rest = bytes;
+    let mut take = |len: usize| -> Option<&[u8]> {
+        let (head, tail) = rest.split_at_checked(len)?;
+        rest = tail;
+        Some(head)
+    };
+    let vendor_len = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+    let vendor = std::str::from_utf8(take(vendor_len)?).ok()?.to_string();
+    let count = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+    let mut tag = VorbisComments::default();
+    tag.set_vendor(vendor);
+    for _ in 0..count {
+        let len = u32::from_le_bytes(take(4)?.try_into().ok()?) as usize;
+        let comment = std::str::from_utf8(take(len)?).ok()?;
+        let (name, value) = comment.split_once('=')?;
+        tag.push(name.to_string(), value.to_string());
+    }
+    Some(tag)
+}
+
 /// The file's concrete APE tag, if it has one.
 fn read_ape(
     path: &Path,
@@ -2064,6 +2102,47 @@ impl TagEngine {
             Some(container) => save_id3v2_tag_with(path, container, &tag, options)?,
             None => tag.save_to_path(path, options)?,
         }
+        Ok(())
+    }
+
+    /// The file's Vorbis comment block as bytes, so undo can put it back
+    /// comment for comment (#669): the vendor string and every comment in the
+    /// order the file holds them, provenance included, laid out as a Vorbis
+    /// comment packet. `None` for a file with no such block.
+    ///
+    /// Pictures are left out, as in [`dump_id3v2`](Self::dump_id3v2): they
+    /// travel beside this as [`TagBlockContent::covers`].
+    pub fn dump_vorbis(path: &Path) -> Result<Option<Vec<u8>>, TagIoError> {
+        let Some(container) = container_of(path)? else {
+            return Ok(None);
+        };
+        // As the file spells them: no number parsed, no name folded.
+        let options = custom_item_options().implicit_conversions(false);
+        Ok(read_vorbis(path, container, options)?.map(|tag| vorbis_comment_packet(&tag)))
+    }
+
+    /// Put back a block [`dump_vorbis`](Self::dump_vorbis) took, with `covers`
+    /// as its pictures (#669).
+    ///
+    /// Only [`Executor`](crate::plan::Executor) should call this.
+    pub fn restore_vorbis_bytes(
+        path: &Path,
+        bytes: &[u8],
+        covers: &[CoverArt],
+    ) -> Result<(), TagIoError> {
+        ensure_audio_after_tags(path)?;
+        ensure_no_misread_id3v1(path)?;
+        let mut tag = vorbis_comments_from_packet(bytes).ok_or_else(|| {
+            TagIoError::UnsupportedFormat(
+                "the journaled Vorbis comment block did not parse".to_string(),
+            )
+        })?;
+        for cover in covers {
+            let picture = picture_from_cover(cover);
+            let information = PictureInformation::from_picture(&picture).unwrap_or_default();
+            tag.insert_picture(picture, Some(information)).ok();
+        }
+        tag.save_to_path(path, write_options())?;
         Ok(())
     }
 

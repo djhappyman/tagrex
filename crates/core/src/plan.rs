@@ -69,8 +69,9 @@ pub struct BlockChange {
     /// has not undone anything the user can see.
     pub old_revision: Option<Id3v2Revision>,
     /// The ID3v2 block as it was, in bytes, so undo puts it back frame for
-    /// frame instead of rebuilding it from `old` (#206). `None` for every other
-    /// kind, and for a change that creates a block rather than replacing one.
+    /// frame instead of rebuilding it from `old` (#206); likewise the Vorbis
+    /// comment block, comment for comment (#669). `None` for every other kind,
+    /// and for a change that creates a block rather than replacing one.
     ///
     /// Pictures are not in here — they are in `old` — so restoring takes both.
     pub old_bytes: Option<Vec<u8>>,
@@ -1234,6 +1235,11 @@ fn write_blocks(path: &Path, change: &FileChange, direction: Direction) -> Resul
                         &content.covers,
                         block_change.old_revision,
                     )?;
+                }
+                (Direction::Undo, Some(bytes))
+                    if block_change.kind == TagBlockKind::VorbisComments =>
+                {
+                    TagEngine::restore_vorbis_bytes(path, bytes, &content.covers)?;
                 }
                 _ => {
                     TagEngine::write_block(

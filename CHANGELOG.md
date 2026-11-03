@@ -288,6 +288,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and is kept on save. It used to be lost while the file was read, so it
   never showed and the next save removed it
   ([#668](https://github.com/tagrex/tagrex/issues/668)).
+- Undoing the removal or conversion of a FLAC/OGG Vorbis comment block puts
+  it back as it was: the encoder comment, the vendor string and the order
+  and spelling of the names come back with the values, where before undo
+  rebuilt the block from the fields the app knows
+  ([#669](https://github.com/tagrex/tagrex/issues/669)).
 
 ## [1.1.1] - 2026-11-02
 
