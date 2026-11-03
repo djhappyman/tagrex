@@ -999,6 +999,7 @@ fn token_path(app: &tauri::AppHandle) -> Result<PathBuf, ErrorDto> {
 #[tauri::command]
 fn saved_discogs_token(app: tauri::AppHandle) -> Result<String, ErrorDto> {
     let path = token_path(&app)?;
+    tighten_secret(&path);
     Ok(std::fs::read_to_string(path)
         .unwrap_or_default()
         .trim()
@@ -1011,7 +1012,50 @@ fn save_discogs_token(app: tauri::AppHandle, token: String) -> Result<(), ErrorD
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(ErrorDto::from)?;
     }
-    std::fs::write(path, token.trim()).map_err(ErrorDto::from)
+    write_secret(&path, token.trim()).map_err(ErrorDto::from)
+}
+
+/// Write `contents` to `path` as a file only its owner can read: the Discogs
+/// token and the Beatport session are credentials, and a plain write left them
+/// readable by every account on the machine under the usual umask (0644).
+/// The mode is set on the open handle as well, so a file an earlier version
+/// wrote is tightened on the next save. On Windows the per-user app-config
+/// folder is already private to its owner.
+fn write_secret(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents.as_bytes())?;
+    file.flush()
+}
+
+/// Make a credential file an earlier version left readable by others readable
+/// by its owner alone (#675), when it is read: [`write_secret`] only reaches a
+/// file that is saved again, and a token is saved once and read every session.
+/// Best effort; a file that is missing or cannot be changed is left as it is.
+fn tighten_secret(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = std::fs::metadata(path) {
+            if metadata.permissions().mode() & 0o077 != 0 {
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 // ---- Beatport sign-in (#162) ----------------------------------------------
@@ -1050,6 +1094,7 @@ fn beatport_session_path(app: &tauri::AppHandle) -> Result<PathBuf, ErrorDto> {
 
 fn read_beatport_session(app: &tauri::AppHandle) -> Option<BeatportSession> {
     let path = beatport_session_path(app).ok()?;
+    tighten_secret(&path);
     let json = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&json).ok()
 }
@@ -1063,7 +1108,7 @@ fn write_beatport_session(
         std::fs::create_dir_all(parent).map_err(ErrorDto::from)?;
     }
     let json = serde_json::to_string(session).map_err(ErrorDto::from)?;
-    std::fs::write(path, json).map_err(ErrorDto::from)
+    write_secret(&path, &json).map_err(ErrorDto::from)
 }
 
 /// The proxy every provider request goes through, from settings.
@@ -1672,5 +1717,55 @@ mod tests {
         // A path-traversal / injection attempt in the id must never build a URL.
         assert!(release_url("discogs", "5606/../../evil").is_err());
         assert!(release_url("discogs", "5606?q=1").is_err());
+    }
+
+    /// A credential file is readable by its owner alone, and a file an older
+    /// version wrote world-readable is tightened when it is saved again.
+    #[cfg(unix)]
+    #[test]
+    fn a_secret_is_written_readable_by_its_owner_alone() {
+        use super::write_secret;
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("tagrex-secret-{}", std::process::id()));
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_secret(&path, "token").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let contents = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(mode, 0o600);
+        assert_eq!(contents, "token");
+
+        // A new file starts that way too.
+        let fresh = std::env::temp_dir().join(format!("tagrex-secret-new-{}", std::process::id()));
+        std::fs::remove_file(&fresh).ok();
+        write_secret(&fresh, "t").unwrap();
+        let mode = std::fs::metadata(&fresh).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_file(&fresh).ok();
+        assert_eq!(mode, 0o600);
+    }
+
+    /// A credential file an older version left readable by others is
+    /// tightened when it is read, and its contents are left alone (#675).
+    #[cfg(unix)]
+    #[test]
+    fn a_secret_left_readable_is_tightened_on_read() {
+        use super::tighten_secret;
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("tagrex-secret-old-{}", std::process::id()));
+        std::fs::write(&path, "token").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        tighten_secret(&path);
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let contents = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(mode, 0o600);
+        assert_eq!(contents, "token");
+        // A missing file is no error.
+        tighten_secret(&path);
     }
 }

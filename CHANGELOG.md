@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   download sent it to whatever host the image address named, and in the
   clear over plain HTTP
   ([#674](https://github.com/tagrex/tagrex/issues/674)).
+- The saved Discogs token and Beatport session are readable by their owner
+  alone. They were readable by every account on the machine; a file an
+  earlier version saved is tightened the next time the app reads it
+  ([#675](https://github.com/tagrex/tagrex/issues/675)).
 
 ### Fixed
 
