@@ -1064,7 +1064,283 @@ fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
         }
     }
 
+    if let Some(source) = repaired_id3v2_source(path)? {
+        let probe = match FileType::from_path(path) {
+            Some(file_type) => Probe::with_file_type(source, file_type),
+            None => Probe::new(source).guess_file_type()?,
+        };
+        if let Ok(file) = probe.options(parse_options()).read() {
+            return Ok(file);
+        }
+    }
+
     Err(first.into())
+}
+
+/// The file at `path`, in memory, with the frames of its leading ID3v2 tag that
+/// the backend cannot decode repaired, or `None` when there are none (#686).
+///
+/// The relaxed parse (#183) skips a frame whose header it cannot read, but text
+/// it cannot decode (UTF-16 with no byte-order mark or an odd length, cp1251
+/// bytes labelled UTF-8) fails the whole tag, so the file could not be opened
+/// at all: exactly the files that need their tags fixed. See
+/// [`repair_undecodable_id3v2_frames`] for how each such frame is read. The
+/// repaired text is what the model shows, and the next save writes it in a
+/// valid encoding; the file itself is not touched by the read.
+///
+/// Only reached once every ordinary read has failed, so a file that reads costs
+/// nothing more.
+fn repaired_id3v2_source(path: &Path) -> Result<Option<TagSource>, TagIoError> {
+    let raw = std::fs::read(path)?;
+    Ok(repair_undecodable_id3v2_frames(&raw).map(|fixed| TagSource::Memory(Cursor::new(fixed))))
+}
+
+/// Read the MP3 at `path` from `file`, and when that fails, read it again
+/// with the ID3v2 frames the backend cannot decode repaired
+/// ([`repaired_id3v2_source`]): a save starts from this read,
+/// so a file that now opens can also be saved, which writes the tag afresh.
+fn read_mpeg_past_undecodable_frames(
+    path: &Path,
+    file: &mut TagSource,
+    options: ParseOptions,
+) -> Result<MpegFile, TagIoError> {
+    match MpegFile::read_from(file, options) {
+        Ok(mpeg) => Ok(mpeg),
+        Err(error) => match repaired_id3v2_source(path)? {
+            Some(mut repaired) => Ok(MpegFile::read_from(&mut repaired, options)?),
+            None => Err(error.into()),
+        },
+    }
+}
+
+/// [`repaired_id3v2_source`]'s work on the file's bytes. Each frame of the
+/// leading tag is tried on its own behind silent MPEG frames, the way the
+/// backend itself reads it. A text frame it refuses (`T***`, `TXXX`, `COMM`,
+/// `USLT`) has its text read the way the writer most likely meant it
+/// ([`decode_legacy_text`]) and is written again as UTF-16 with a byte-order
+/// mark, which both ID3v2.3 and 2.4 take; only a frame that cannot be repaired
+/// that way (another kind, a compressed or encrypted one) is left out. The tag
+/// grows when the repaired text needs more room than its padding gives.
+fn repair_undecodable_id3v2_frames(raw: &[u8]) -> Option<Vec<u8>> {
+    if raw.len() < 10 || &raw[..3] != b"ID3" || !matches!(raw[3], 3 | 4) {
+        return None;
+    }
+    let version = raw[3];
+    // An unsynchronised tag or one with an extended header is not walked here:
+    // its frames do not sit where their headers say.
+    if raw[5] & 0xC0 != 0 {
+        return None;
+    }
+    let end = 10 + syncsafe_u32(&raw[6..10]) as usize;
+    if end > raw.len() {
+        return None;
+    }
+    let mut spans = Vec::new();
+    let mut pos = 10;
+    while pos + 10 <= end {
+        let id = &raw[pos..pos + 4];
+        if id[0] == 0 {
+            break; // padding
+        }
+        if !id
+            .iter()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+        {
+            return None;
+        }
+        let size = if version == 4 {
+            syncsafe_u32(&raw[pos + 4..pos + 8])
+        } else {
+            u32::from_be_bytes([raw[pos + 4], raw[pos + 5], raw[pos + 6], raw[pos + 7]])
+        } as usize;
+        let next = pos + 10 + size;
+        if next > end {
+            return None;
+        }
+        spans.push((pos, next));
+        pos = next;
+    }
+
+    let mut silence = vec![0xFF, 0xFB, 0x90, 0x00];
+    silence.resize(SILENT_MPEG_FRAME_LEN, 0);
+    let decodes = |frame: &[u8]| {
+        let mut probe = raw[..5].to_vec();
+        probe.push(0);
+        probe.extend_from_slice(&syncsafe_bytes(frame.len() as u32));
+        probe.extend_from_slice(frame);
+        for _ in 0..SILENT_MPEG_FRAMES {
+            probe.extend_from_slice(&silence);
+        }
+        MpegFile::read_from(&mut Cursor::new(probe), tag_only_options()).is_ok()
+    };
+    let mut refused = false;
+    let mut frames = Vec::new();
+    for (start, stop) in spans {
+        let frame = &raw[start..stop];
+        if decodes(frame) {
+            frames.extend_from_slice(frame);
+            continue;
+        }
+        refused = true;
+        if let Some(repaired) =
+            repair_text_frame(frame, version).filter(|repaired| decodes(repaired))
+        {
+            frames.extend_from_slice(&repaired);
+        }
+    }
+    if !refused {
+        return None;
+    }
+    // The frames in their order, then padding up to the tag's own end, or no
+    // padding when the repaired text needs more room than the tag had.
+    let size = frames.len().max(end - 10);
+    let mut fixed = raw[..6].to_vec();
+    fixed.extend_from_slice(&syncsafe_bytes(size as u32));
+    fixed.extend_from_slice(&frames);
+    fixed.resize(10 + size, 0);
+    fixed.extend_from_slice(&raw[end..]);
+    Some(fixed)
+}
+
+/// `frame` (header included) with its text read by [`decode_legacy_text`] and
+/// written again as UTF-16 with a byte-order mark, or `None` when it is not a
+/// text frame this knows the layout of, or its format flags (compression,
+/// encryption, unsynchronisation) put its body out of reach.
+fn repair_text_frame(frame: &[u8], version: u8) -> Option<Vec<u8>> {
+    let (header, body) = frame.split_at(10);
+    let id = &header[..4];
+    let format_flags = header[9];
+    if format_flags != 0 || body.is_empty() {
+        return None;
+    }
+    let encoding = body[0];
+    let rest = &body[1..];
+    // How many leading text strings end in a terminator before the last one,
+    // and a fixed field (the language) ahead of them.
+    let (prefix, leading) = match id {
+        b"TXXX" => (0, 1),
+        b"COMM" | b"USLT" => (3, 1),
+        [b'T', ..] => (0, 0),
+        _ => return None,
+    };
+    let fixed_field = rest.get(..prefix)?;
+    let mut texts = split_terminated(&rest[prefix..], encoding, leading);
+    if texts.len() <= leading {
+        texts.resize(leading + 1, &[]);
+    }
+
+    let mut out_body = vec![1u8];
+    out_body.extend_from_slice(fixed_field);
+    for (index, text) in texts.iter().enumerate() {
+        if index > 0 {
+            out_body.extend_from_slice(&[0, 0]);
+        }
+        out_body.extend_from_slice(&[0xFF, 0xFE]);
+        let decoded = decode_legacy_text(text, encoding);
+        out_body.extend(decoded.encode_utf16().flat_map(u16::to_le_bytes));
+    }
+    let mut out = id.to_vec();
+    let size = out_body.len() as u32;
+    if version == 4 {
+        out.extend_from_slice(&syncsafe_bytes(size));
+    } else {
+        out.extend_from_slice(&size.to_be_bytes());
+    }
+    out.extend_from_slice(&header[8..10]);
+    out.extend_from_slice(&out_body);
+    Some(out)
+}
+
+/// `bytes` cut at the terminators of `encoding` (one zero byte, or two on a
+/// two-byte boundary for UTF-16): the first `leading` strings each end at one,
+/// and the rest is split the same way, since an ID3v2.4 text frame holds its
+/// several values so. A trailing terminator adds no empty value.
+fn split_terminated(bytes: &[u8], encoding: u8, leading: usize) -> Vec<&[u8]> {
+    let wide = matches!(encoding, 1 | 2);
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut at = 0;
+    while at < bytes.len() {
+        let terminator = if wide {
+            at + 1 < bytes.len() && bytes[at] == 0 && bytes[at + 1] == 0
+        } else {
+            bytes[at] == 0
+        };
+        if terminator {
+            parts.push(&bytes[start..at]);
+            at += if wide { 2 } else { 1 };
+            start = at;
+        } else {
+            at += if wide { 2 } else { 1 };
+        }
+    }
+    if start < bytes.len() || parts.len() <= leading {
+        parts.push(&bytes[start.min(bytes.len())..]);
+    }
+    parts
+}
+
+/// The text of `bytes`, in a frame that says it is in `encoding`, read the way
+/// the file's writer most likely meant it when the backend cannot read it as
+/// labelled (#686):
+/// - UTF-16 with a byte-order mark is read in that order; without one, in the
+///   order its zero bytes point to (Latin text in UTF-16LE has them on the odd
+///   positions); a last odd byte, half a character, is dropped;
+/// - UTF-16BE is read big-endian, a last odd byte dropped the same way;
+/// - UTF-8 that is valid is read as such; bytes that are not are a legacy code
+///   page, cp1251 when its letters come in runs (Cyrillic words), cp1252
+///   otherwise (an accented letter here and there). Neither loses a byte;
+/// - Latin-1 is Latin-1.
+fn decode_legacy_text(bytes: &[u8], encoding: u8) -> String {
+    match encoding {
+        1 | 2 => {
+            let (big_endian, body) = match bytes {
+                [0xFF, 0xFE, rest @ ..] => (false, rest),
+                [0xFE, 0xFF, rest @ ..] => (true, rest),
+                _ if encoding == 2 => (true, bytes),
+                _ => {
+                    let zeros_even = bytes.iter().step_by(2).filter(|&&b| b == 0).count();
+                    let zeros_odd = bytes.iter().skip(1).step_by(2).filter(|&&b| b == 0).count();
+                    (zeros_even > zeros_odd, bytes)
+                }
+            };
+            // A last odd byte is left over by `as_chunks`, so it is dropped.
+            let units = body.as_chunks::<2>().0.iter().map(|&pair| {
+                if big_endian {
+                    u16::from_be_bytes(pair)
+                } else {
+                    u16::from_le_bytes(pair)
+                }
+            });
+            char::decode_utf16(units)
+                .map(|unit| unit.unwrap_or(char::REPLACEMENT_CHARACTER))
+                .collect()
+        }
+        3 => match std::str::from_utf8(bytes) {
+            Ok(text) => text.to_string(),
+            Err(_) => {
+                let code_page = if looks_like_cp1251(bytes) {
+                    encoding_rs::WINDOWS_1251
+                } else {
+                    encoding_rs::WINDOWS_1252
+                };
+                code_page.decode_without_bom_handling(bytes).0.into_owned()
+            }
+        },
+        _ => bytes.iter().map(|&b| char::from(b)).collect(),
+    }
+}
+
+/// Whether the bytes past ASCII in `bytes` are mostly next to one another, as
+/// the letters of a Cyrillic word in cp1251 are, rather than one at a time
+/// between ASCII letters, as accented letters in cp1252 are.
+fn looks_like_cp1251(bytes: &[u8]) -> bool {
+    let high = |at: usize| bytes.get(at).is_some_and(|&b| b >= 0x80);
+    let total = (0..bytes.len()).filter(|&at| high(at)).count();
+    let paired = (0..bytes.len())
+        .filter(|&at| high(at) && ((at > 0 && high(at - 1)) || high(at + 1)))
+        .count();
+    total > 0 && paired * 2 >= total
 }
 
 /// How far past the tag the last-ditch attempt will look for the audio (#204).
@@ -1395,7 +1671,9 @@ fn read_ape(
         Some(FileType::Mpc) => MpcFile::read_from(&mut file, options)?.ape().cloned(),
         Some(FileType::WavPack) => WavPackFile::read_from(&mut file, options)?.ape().cloned(),
         // An MP3 can carry an APE block beside its ID3v2 one (#608).
-        Some(FileType::Mpeg) => MpegFile::read_from(&mut file, options)?.ape().cloned(),
+        Some(FileType::Mpeg) => read_mpeg_past_undecodable_frames(path, &mut file, options)?
+            .ape()
+            .cloned(),
         _ => None,
     })
 }
@@ -2524,9 +2802,11 @@ fn sync_id3v1(
     let old = {
         let mut file = buffered(path)?;
         match container {
-            FileType::Mpeg => MpegFile::read_from(&mut file, tag_only_options())?
-                .id3v1()
-                .cloned(),
+            FileType::Mpeg => {
+                read_mpeg_past_undecodable_frames(path, &mut file, tag_only_options())?
+                    .id3v1()
+                    .cloned()
+            }
             FileType::Aac => AacFile::read_from(&mut file, tag_only_options())?
                 .id3v1()
                 .cloned(),
@@ -3941,7 +4221,9 @@ fn read_id3v2(
 ) -> Result<Option<Id3v2Tag>, TagIoError> {
     let mut file = buffered(path)?;
     let mut tag = match Some(container) {
-        Some(FileType::Mpeg) => MpegFile::read_from(&mut file, options)?.id3v2().cloned(),
+        Some(FileType::Mpeg) => read_mpeg_past_undecodable_frames(path, &mut file, options)?
+            .id3v2()
+            .cloned(),
         Some(FileType::Aac) => AacFile::read_from(&mut file, options)?.id3v2().cloned(),
         Some(FileType::Aiff) => AiffFile::read_from(&mut file, options)?.id3v2().cloned(),
         Some(FileType::Wav) => WavFile::read_from(&mut file, options)?.id3v2().cloned(),

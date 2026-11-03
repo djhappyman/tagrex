@@ -361,6 +361,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   in a Latin-1 frame keeps its bytes for the players that read it that way,
   and a UTF-16 date keeps its encoding and its place in the tag
   ([#684](https://github.com/tagrex/tagrex/issues/684)).
+- An MP3 whose ID3v2 text cannot be decoded as labelled (UTF-16 with no
+  byte-order mark or of an odd length, cp1251 or cp1252 bytes marked as
+  UTF-8) opens again, with that text read the way it was meant instead of the
+  whole file refused; the next save writes it in a valid encoding
+  ([#686](https://github.com/tagrex/tagrex/issues/686)).
 
 ## [1.1.1] - 2026-11-02
 
