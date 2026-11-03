@@ -16,6 +16,11 @@ image = { version = "0.25.5", default-features = false, features = ["jpeg", "png
 # when a shrinking edit ends at EOF (lofty-rs#731). Only a file with no audio after its tags can
 # hit that, and model.rs refuses to write such a file before lofty sees it
 # (`ensure_audio_after_tags`, #416).
+# `tests/lofty_canaries.rs` (#671) runs with every `cargo test` and fails on an
+# upgrade where lofty stops dropping the frames `splice_v23_frames` puts back
+# on a 2.3 write (#667), which would then be written twice, or stops deleting
+# the full-date TYER `lost_v23_year` recovers (#668). Its message names what to
+# remove.
 lofty = "0.25.5"
 regex = "1.13.1"
 # Reads an oversized PNG cover row by row, so shrinking it never holds the full

@@ -4982,6 +4982,35 @@ fn id3v2_frames(path: &std::path::Path) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The frame ids of `path`'s ID3v2.3 block, walked from its bytes: an MP3's
+/// at the head of the file, an AIFF's in its `ID3 ` chunk.
+fn raw_v23_frame_ids(path: &std::path::Path) -> Vec<String> {
+    let data = std::fs::read(path).unwrap();
+    let block = if data.starts_with(b"FORM") {
+        let mut pos = 12;
+        loop {
+            let size = u32::from_be_bytes(data[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            if &data[pos..pos + 4] == b"ID3 " {
+                break &data[pos + 8..pos + 8 + size];
+            }
+            pos += 8 + size + (size & 1);
+        }
+    } else {
+        &data[..]
+    };
+    assert_eq!(&block[..4], b"ID3\x03", "not an ID3v2.3 block");
+    let size = block[6..10]
+        .iter()
+        .fold(0usize, |acc, byte| (acc << 7) | usize::from(byte & 0x7F));
+    let mut ids = Vec::new();
+    let mut pos = 10;
+    while pos + 10 <= 10 + size && block[pos] != 0 {
+        ids.push(String::from_utf8_lossy(&block[pos..pos + 4]).into_owned());
+        pos += 10 + u32::from_be_bytes(block[pos + 4..pos + 8].try_into().unwrap()) as usize;
+    }
+    ids
+}
+
 /// #667: a 2.3 write keeps the frames the backend would drop as 2.4-only, the
 /// sort orders and the release time among them, on an MP3 and in an AIFF.
 #[test]
@@ -5030,6 +5059,17 @@ fn a_v23_write_keeps_the_sort_order_and_release_time_frames() {
                     .iter()
                     .any(|(id, text)| id == expected.0 && text == expected.1),
                 "{path:?} lost {expected:?}: {frames:?}"
+            );
+            // Exactly once on disk: should the backend stop dropping the
+            // frame, the splice must not write it a second time (#671). The
+            // count is taken from the bytes, since a read folds a repeated text
+            // frame into one.
+            let on_disk = raw_v23_frame_ids(path);
+            assert_eq!(
+                on_disk.iter().filter(|id| *id == expected.0).count(),
+                1,
+                "{path:?} has {} more than once: {on_disk:?}",
+                expected.0
             );
         }
         // And a second write finds them where the first put them.

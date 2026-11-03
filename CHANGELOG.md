@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   writes `A1` as it is. An MP4 file always gets the number
   ([#642](https://github.com/tagrex/tagrex/issues/642)).
 
+### Changed
+
+- Canary tests pin the two behaviours of the tag backend that the ID3v2.3
+  fixes work around, so a dependency upgrade that changes either fails the
+  build with the workaround to revisit, rather than writing frames twice
+  ([#671](https://github.com/tagrex/tagrex/issues/671)).
+
 ### Fixed
 
 - A rename no longer overwrites a file when two targets differ only in letter
