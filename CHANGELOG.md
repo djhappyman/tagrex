@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   three genres) through repeated saves that edit another field, with a custom
   or an encoder comment in the block
   ([#681](https://github.com/tagrex/tagrex/issues/681)).
+- Three audit harnesses (tag round-trip, executor failure injection and
+  rollback, mutation fuzz) are kept as ignored tests that print every finding,
+  for the next audit or dependency upgrade
+  ([#682](https://github.com/tagrex/tagrex/issues/682)).
 
 ### Security
 
