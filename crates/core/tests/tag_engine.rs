@@ -1878,6 +1878,38 @@ fn audio_hiding_behind_junk_is_still_found_by_the_extension() {
     );
 }
 
+/// The same file through the operations that only ask for its container, which
+/// no longer parse the whole file to learn it (#690): they still place it as
+/// the MP3 it is, and find the ID3v2 block undo takes a snapshot of.
+#[test]
+fn audio_hiding_behind_junk_keeps_its_container_for_block_operations() {
+    let frames = id3v23_frame(b"TIT2", b"\x00Weekend Lover");
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-junk-blocks-{}.mp3",
+        std::process::id()
+    ));
+    let mut data = id3v23_tag(&frames);
+    let mut junk = vec![0x00u8; 1035];
+    junk[400] = 0xFF;
+    junk[401] = 0xF1;
+    data.extend_from_slice(&junk);
+    data.extend_from_slice(&minimal_mp3());
+    std::fs::write(&path, data).expect("write fixture");
+
+    let dumped = TagEngine::dump_id3v2(&path);
+    let block = TagEngine::read_block(&path, TagBlockKind::Id3v2);
+    std::fs::remove_file(&path).ok();
+    assert!(
+        matches!(dumped, Ok(Some(_))),
+        "the ID3v2 block must be found: {dumped:?}"
+    );
+    let block = block.expect("read the block").expect("an ID3v2 block");
+    assert_eq!(
+        block.tags.get(&TagField::Title).map(String::as_str),
+        Some("Weekend Lover")
+    );
+}
+
 /// The ladder must not turn a file that is genuinely not audio into one that
 /// reads: falling back is for a file the backend can parse, not for anything
 /// wearing the right extension.
