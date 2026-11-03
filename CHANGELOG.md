@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   rollback, mutation fuzz) are kept as ignored tests that print every finding,
   for the next audit or dependency upgrade
   ([#682](https://github.com/tagrex/tagrex/issues/682)).
+- Property tests pin the mask grammar in both directions: random patterns,
+  tags and file names never panic, a separator in a value never reaches the
+  rendered name, and what a mask renders it extracts back
+  ([#689](https://github.com/tagrex/tagrex/issues/689)).
 
 ### Security
 
