@@ -1712,6 +1712,10 @@ const URL_ITEM_NAME: &str = "WWW";
 /// generic tag has no key for it (#613). The backend maps the URL to ID3v2's
 /// `WOAF` and nothing else, and drops the item from every other tag type on
 /// save; `WWW` is what most taggers write there instead.
+///
+/// The BPM and the musical key the same way on APE (#663): the backend maps
+/// neither there, so both were dropped on save. They go under the names Vorbis
+/// gives them, which is what taggers write into APE as well.
 fn field_name_on_tag(field: &TagField, tag_type: TagType) -> Option<&'static str> {
     match field {
         TagField::Url
@@ -1722,6 +1726,8 @@ fn field_name_on_tag(field: &TagField, tag_type: TagType) -> Option<&'static str
         {
             Some(URL_ITEM_NAME)
         }
+        TagField::Bpm if tag_type == TagType::Ape => Some("BPM"),
+        TagField::InitialKey if tag_type == TagType::Ape => Some("INITIALKEY"),
         _ => None,
     }
 }
@@ -1729,10 +1735,11 @@ fn field_name_on_tag(field: &TagField, tag_type: TagType) -> Option<&'static str
 /// The model field a format-specific item name is, on `tag_type` — the inverse
 /// of [`field_name_on_tag`].
 fn field_for_name_on_tag(name: &str, tag_type: TagType) -> Option<TagField> {
-    let url = TagField::Url;
-    field_name_on_tag(&url, tag_type)
-        .filter(|own| own.eq_ignore_ascii_case(name))
-        .map(|_| url)
+    [TagField::Url, TagField::Bpm, TagField::InitialKey]
+        .into_iter()
+        .find(|field| {
+            field_name_on_tag(field, tag_type).is_some_and(|own| own.eq_ignore_ascii_case(name))
+        })
 }
 
 /// Facade over the tag I/O backend (lofty). The rest of the codebase must
@@ -4751,15 +4758,9 @@ mod tests {
                 }
             }
         }
-        // The known holes: APE tags map neither a BPM nor a musical-key field
-        // in lofty. Musepack / Monkey's Audio / WavPack are the exotic tail, and
-        // inventing a spelling for them is a separate decision — but nothing
-        // else may join this list without being noticed.
-        assert_eq!(
-            holes,
-            vec!["Bpm on Ape".to_string(), "InitialKey on Ape".to_string()],
-            "silently unwritable"
-        );
+        // APE's BPM and key were holes until they were written by name
+        // (#663); nothing may join this list without being noticed.
+        assert!(holes.is_empty(), "silently unwritable: {holes:?}");
     }
 
     #[test]

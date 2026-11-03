@@ -266,6 +266,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The XML export leaves out control characters XML cannot hold, so a tag
   with one no longer makes the whole export unreadable to an XML parser
   ([#662](https://github.com/tagrex/tagrex/issues/662)).
+- WavPack, Monkey's Audio and Musepack files now keep a BPM and a musical
+  key: both are written to and read from the APE tag as `BPM` and
+  `INITIALKEY`, where before they were dropped on save without a word
+  ([#663](https://github.com/tagrex/tagrex/issues/663)).
 
 ## [1.1.1] - 2026-11-02
 

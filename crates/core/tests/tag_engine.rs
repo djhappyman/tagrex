@@ -4772,3 +4772,42 @@ fn a_numeric_genre_with_its_name_reads_once() {
     }
     std::fs::remove_file(&path).ok();
 }
+
+/// #663: the backend has no APE item for the BPM or the key and dropped both on
+/// save; they are written and read by name now.
+#[test]
+fn an_ape_tag_keeps_the_bpm_and_the_key() {
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-ape-bpm-key-{}.wv",
+        std::process::id()
+    ));
+    std::fs::write(&path, MINIMAL_WAVPACK).unwrap();
+    let mut tags = BTreeMap::new();
+    tags.insert(TagField::Title, "Title".to_string());
+    tags.insert(TagField::Bpm, "128".to_string());
+    tags.insert(TagField::InitialKey, "8A".to_string());
+    TagEngine::write(&TrackFile {
+        path: path.clone(),
+        format: AudioFormat::WavPack,
+        tags: tags.clone(),
+    })
+    .unwrap();
+    let read = TagEngine::read(&path).unwrap();
+    let block = TagEngine::read_block(&path, TagBlockKind::Ape)
+        .unwrap()
+        .unwrap();
+
+    // Cleared again, both go.
+    let mut file = read.clone();
+    file.tags.remove(&TagField::Bpm);
+    file.tags.remove(&TagField::InitialKey);
+    TagEngine::write(&file).unwrap();
+    let cleared = TagEngine::read(&path).unwrap();
+    std::fs::remove_file(&path).ok();
+
+    assert_eq!(read.tags, tags);
+    assert_eq!(block.tags, tags);
+    assert_eq!(cleared.tags.get(&TagField::Bpm), None);
+    assert_eq!(cleared.tags.get(&TagField::InitialKey), None);
+    assert_eq!(cleared.tags.len(), 1, "{:?}", cleared.tags);
+}
