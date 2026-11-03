@@ -123,6 +123,12 @@ The defaults cover lyrics, cue sheets and per-track cover images. Whether they
 travel at all, and whether the rest of a folder goes with its album, are
 checkboxes on the [RENAMER](renamer.md#sidecar-files) panel.
 
+**Safe file names**: on by default. Names a rename or a transform creates also
+work on Windows and on USB sticks and SD cards: `:` becomes ` -`, `?` and `*`
+are left out, `" < > |` become `_`, and a trailing dot or space is dropped. Off
+keeps these characters where your system allows them; on Windows they are
+always replaced. See [RENAMER](renamer.md#reorganize-into-folders).
+
 ## Display
 
 **Theme** — Auto follows your system appearance; Light and Dark force one.

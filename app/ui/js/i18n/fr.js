@@ -808,6 +808,8 @@ export const fr = {
   "settings.extrasHint": "Quand une réorganisation sort toutes les pistes d'un dossier, ce qui y reste — un journal d'extraction, des images isolées, un sous-dossier Scans — part vers la même destination, pour que rien ne soit abandonné et que le dossier puisse être supprimé. Un dossier qui contient encore d'autre musique, ou des pistes qui partent vers plusieurs destinations, sont laissés tels quels.",
   "settings.extensions": "Extensions des fichiers du même nom",
   "settings.extensionsHint": "Les fichiers du même nom qui suivent une piste renommée ou déplacée. Séparées par des espaces ou des virgules, sans le point, sans tenir compte de la casse. Le fait qu'ils suivent ou non se règle par une case du panneau RENAMER.",
+  "settings.portableNames": "Noms de fichier sûrs",
+  "settings.portableNamesHint": "Les noms créés par un renommage ou une transformation fonctionnent aussi sous Windows et sur les clés USB et cartes SD : \":\" devient \" -\", \"?\" et \"*\" sont retirés, \" < > | deviennent _, et un point ou une espace final est supprimé. Désactivé, ces caractères sont conservés là où ce système les accepte. Sous Windows, ils sont toujours remplacés.",
   "settings.theme": "Thème",
   "settings.theme.light": "Clair",
   "settings.theme.dark": "Sombre",

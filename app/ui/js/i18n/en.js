@@ -810,6 +810,8 @@ export const en = {
   "settings.extrasHint": "When a reorganize takes every track out of a folder, whatever is left in it — a rip log, loose artwork, a Scans subfolder — travels to the same destination, so nothing is stranded and the folder can be tidied away. A folder that still holds other music, or tracks that scatter to several destinations, are left alone.",
   "settings.extensions": "Same-named file extensions",
   "settings.extensionsHint": "Which same-named files travel with a renamed or moved track. Space- or comma-separated, without the dot, case-insensitive. Whether they travel is a checkbox on the RENAMER panel.",
+  "settings.portableNames": "Safe file names",
+  "settings.portableNamesHint": "Names a rename or a transform creates also work on Windows and on USB sticks and SD cards: \":\" becomes \" -\", \"?\" and \"*\" are left out, \" < > | become _, and a trailing dot or space is dropped. Off keeps these characters where this system allows them. On Windows they are always replaced.",
   "settings.theme": "Theme",
   "settings.theme.light": "Light",
   "settings.theme.dark": "Dark",

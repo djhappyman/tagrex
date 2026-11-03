@@ -72,6 +72,15 @@ reorganize doesn't leave a skeleton of empty folders behind.
 A tag value cannot introduce a folder. Only the separators you write in the
 pattern do, so an artist named `AC/DC` stays one folder.
 
+Every folder and file name a rename or a transform creates is made safe to
+create. A separator or a control character becomes `_`, a name that is only
+`..` is refused, and a name longer than 255 bytes is shortened, keeping its
+extension. With **Safe file names** on (the default, see
+[Settings](settings.md#files)), names also work on Windows and on the FAT32
+and exFAT of USB sticks and SD cards: `:` becomes ` -` (so `AC: DC` reads
+`AC - DC`), `?` and `*` are left out, `" < > |` become `_`, a trailing dot or
+space is dropped, and a reserved device name such as `CON` gets a `_` after it.
+
 ## Sidecar files
 
 When a rename or move relocates a track, same-named files travel with it: `.lrc`

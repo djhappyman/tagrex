@@ -808,6 +808,8 @@ export const it = {
   "settings.extrasHint": "Quando una riorganizzazione porta via ogni traccia da una cartella, tutto ciò che rimane in essa — un log di rippaggio, grafica sparsa, una sottocartella Scans — viaggia verso la stessa destinazione, così nulla resta isolato e la cartella può essere pulita. Una cartella che contiene ancora altra musica, o tracce che si disperdono su più destinazioni, viene lasciata stare.",
   "settings.extensions": "Estensioni dei file con lo stesso nome",
   "settings.extensionsHint": "Quali file con lo stesso nome seguono una traccia rinominata o spostata. Separate da spazio o virgola, senza punto, insensibile a maiuscole/minuscole. Se seguirla o no è una casella nel pannello RENAMER.",
+  "settings.portableNames": "Nomi di file sicuri",
+  "settings.portableNamesHint": "I nomi creati da una rinomina o una trasformazione funzionano anche su Windows e su chiavette USB e schede SD: \":\" diventa \" -\", \"?\" e \"*\" vengono omessi, \" < > | diventano _, e un punto o uno spazio finale viene tolto. Disattivato mantiene questi caratteri dove questo sistema li consente. Su Windows vengono sempre sostituiti.",
   "settings.theme": "Tema",
   "settings.theme.light": "Chiaro",
   "settings.theme.dark": "Scuro",

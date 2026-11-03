@@ -328,6 +328,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   flagged in the preview and refused before anything is written, where before
   it was saved without an error and gone on the next read
   ([#677](https://github.com/tagrex/tagrex/issues/677)).
+- A rename or a transform no longer builds names Windows and the FAT32 or
+  exFAT of a USB stick refuse or mangle: with the new **Safe file names**
+  setting (on by default, always on under Windows) `:` becomes ` -`, `?` and
+  `*` are left out, `" < > |` become `_`, a trailing dot or space is dropped
+  and a reserved device name such as `CON` gets a `_`. Whatever the setting, a
+  separator or `..` from a filename transform no longer moves the file, and a
+  name is cut to 255 bytes keeping its extension
+  ([#679](https://github.com/tagrex/tagrex/issues/679)).
 
 ## [1.1.1] - 2026-11-02
 

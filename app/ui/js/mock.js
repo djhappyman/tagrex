@@ -1337,6 +1337,7 @@ function mockInvoke(cmd, args) {
           multi_value_separator: "",
           carry_sidecars: true,
           carry_folder_extras: true,
+          portable_names: true,
         }
       );
     case "save_settings":

@@ -1274,6 +1274,12 @@
               <input id="set-sidecar-exts" type="text" class="mono" data-i18n-placeholder="settings.extensionsPlaceholder" placeholder="lrc cue txt jpg jpeg png" spellcheck="false" />
             </div>
             <p class="settings-hint" data-i18n="settings.extensionsHint">Space- or comma-separated, without the dot. Case-insensitive.</p>
+            <!-- Rename targets (#679): made valid on Windows, FAT32 and exFAT. -->
+            <div class="settings-row">
+              <label for="set-portable-names" data-i18n="settings.portableNames">Safe file names</label>
+              <input id="set-portable-names" type="checkbox" checked />
+            </div>
+            <p class="settings-hint" data-i18n="settings.portableNamesHint">Names a rename or a transform creates also work on Windows and on USB sticks and SD cards.</p>
           </div>
 
           <!-- Keyboard shortcuts (#432): one row per action in the registry

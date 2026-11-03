@@ -25,7 +25,7 @@ use thiserror::Error;
 use base64::Engine as _;
 use tagrex_core::export::{self, CueTrack, PlaylistTrack};
 use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
-use tagrex_core::mask::{FileContext, Mask, MaskError};
+use tagrex_core::mask::{portable_file_name, FileContext, Mask, MaskError};
 use tagrex_core::matching::{self, MatchOptions, TrackRef};
 use tagrex_core::model::{
     is_vinyl_position, is_writable_value, is_writable_value_at, CoverArt, CoverKind, Id3v2Revision,
@@ -1125,6 +1125,12 @@ pub struct SettingsDto {
     /// dozens of tracks. 0 = no limit. See [`too_long_for_bpm`].
     #[serde(default = "default_bpm_max_minutes")]
     pub bpm_max_minutes: u32,
+    /// Whether the names a rename or a transform builds are made valid on
+    /// Windows, FAT32 and exFAT too (#679). On unless switched off, which is
+    /// also what an older settings.json deserializes to; always on under
+    /// Windows. See [`portable_file_name`].
+    #[serde(default = "default_portable_names")]
+    pub portable_names: bool,
 }
 
 fn default_carry_sidecars() -> bool {
@@ -1147,6 +1153,10 @@ fn default_bpm_detection() -> bool {
 
 fn default_bpm_max_minutes() -> u32 {
     20
+}
+
+fn default_portable_names() -> bool {
+    true
 }
 
 fn default_sidecar_extensions() -> Vec<String> {
@@ -1181,6 +1191,7 @@ impl Default for SettingsDto {
             bpm_floor: 0,
             bpm_detection: default_bpm_detection(),
             bpm_max_minutes: default_bpm_max_minutes(),
+            portable_names: default_portable_names(),
         }
     }
 }
@@ -1926,6 +1937,9 @@ pub struct App {
     /// The longest file BPM detection measures (#538), from settings; `None`
     /// = no limit.
     bpm_max_length: Cell<Option<Duration>>,
+    /// Whether rename targets are made valid on Windows, FAT32 and exFAT
+    /// (#679), from settings.
+    portable_names: Cell<bool>,
     /// Storage keys locked against change for this session (#48). Every plan
     /// this backend builds drops changes to them — see [`App::plan`].
     ///
@@ -1978,6 +1992,7 @@ impl App {
             import_vinyl_position: Cell::new(false),
             bpm_floor: Cell::new(0),
             bpm_max_length: Cell::new(bpm_max_length(default_bpm_max_minutes())),
+            portable_names: Cell::new(default_portable_names()),
             locked_fields: RefCell::new(HashSet::new()),
             extra_roots: RefCell::new(Vec::new()),
         })
@@ -2069,6 +2084,13 @@ impl App {
         self.bpm_floor.set(settings.bpm_floor);
         self.bpm_max_length
             .set(bpm_max_length(settings.bpm_max_minutes));
+        self.portable_names.set(settings.portable_names);
+    }
+
+    /// One file or folder name as a rename may create it (#679): see
+    /// [`portable_file_name`], under the setting.
+    fn safe_name(&self, name: &str) -> String {
+        portable_file_name(name, self.portable_names.get())
     }
 
     /// The longest file BPM detection should measure (#538), or `None` for no
@@ -2545,6 +2567,22 @@ impl App {
             Some(ext) => format!("{}.{ext}", components.pop().unwrap_or_default()),
             None => components.pop().unwrap_or_default().to_string(),
         };
+        // Every component made safe to create (#679); one that ends up empty
+        // is refused.
+        let components: Vec<String> = components
+            .into_iter()
+            .map(|part| {
+                if part == "." {
+                    part.to_string()
+                } else {
+                    self.safe_name(part)
+                }
+            })
+            .collect();
+        let last = self.safe_name(&last);
+        if last.is_empty() || components.iter().any(String::is_empty) {
+            return Err(None);
+        }
         // Pushed one at a time so the platform supplies its own separator
         // instead of us embedding one in the string.
         let mut target = root.to_path_buf();
@@ -2956,6 +2994,14 @@ impl App {
                     Some(ext) => format!("{renamed}.{ext}"),
                     None => renamed,
                 };
+                // Made safe to create (#679): a separator in it would move the
+                // file, `..` out of its folder.
+                let file_name = self.safe_name(&file_name);
+                if file_name.is_empty()
+                    || path.file_name().and_then(|name| name.to_str()) == Some(file_name.as_str())
+                {
+                    continue;
+                }
                 let mut change = FileChangeDto {
                     path: path.to_string_lossy().into_owned(),
                     rename_to: Some(
@@ -2996,10 +3042,17 @@ impl App {
                     .file_stem()
                     .map(|stem| stem.to_string_lossy().into_owned())
                     .unwrap_or_default();
+                // Made safe to create (#679), as the filename scope does.
+                let file_name = self.safe_name(&format!("{stem}.{renamed}"));
+                if file_name.is_empty()
+                    || path.file_name().and_then(|name| name.to_str()) == Some(file_name.as_str())
+                {
+                    continue;
+                }
                 let mut change = FileChangeDto {
                     path: path.to_string_lossy().into_owned(),
                     rename_to: Some(
-                        path.with_file_name(format!("{stem}.{renamed}"))
+                        path.with_file_name(file_name)
                             .to_string_lossy()
                             .into_owned(),
                     ),
@@ -3284,12 +3337,16 @@ impl App {
                         for folder in folders.iter_mut() {
                             let next = chain.apply(folder);
                             let trimmed = next.trim();
+                            // Made safe to create too (#679); one that ends up
+                            // empty keeps its name.
+                            let safe = self.safe_name(&next);
                             if !trimmed.is_empty()
                                 && trimmed != "."
                                 && trimmed != ".."
                                 && !next.contains(['/', '\\'])
+                                && !safe.is_empty()
                             {
-                                *folder = next;
+                                *folder = safe;
                             }
                         }
                     }
@@ -3326,6 +3383,16 @@ impl App {
             let file_name = match &ext {
                 Some(ext) => format!("{name}.{ext}"),
                 None => name.clone(),
+            };
+            // Made safe to create (#679): a separator in the cleaned name moved
+            // the file, `..` out of its folder. A name that ends up empty keeps
+            // the one the plan proposed.
+            let file_name = match self.safe_name(&file_name) {
+                safe if safe.is_empty() => proposed
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                safe => safe,
             };
             let target_dir = match &root {
                 Some(root) if proposed_dir.starts_with(root) => folders
@@ -7365,8 +7432,10 @@ mod tests {
             bpm_floor: 70,
             bpm_detection: true,
             bpm_max_minutes: 15,
+            portable_names: false,
         });
         assert_eq!(app.cover_max_px.get(), 500);
+        assert!(!app.portable_names.get());
         assert_eq!(app.cover_quality.get(), 90);
         assert_eq!(app.bpm_floor.get(), 70);
         assert_eq!(app.bpm_max_length(), Some(Duration::from_secs(15 * 60)));
@@ -11504,5 +11573,100 @@ mod tests {
         };
         assert_eq!(flagged("custom:ÜNI"), Some(true));
         assert_eq!(flagged("custom:MOOD"), Some(false));
+    }
+
+    /// A title like `What?` or an artist like `CON` rendered a name Windows and
+    /// the FAT32/exFAT of a USB stick refuse; every component is made safe
+    /// (#679).
+    #[test]
+    fn a_rename_proposes_a_portable_name() {
+        let dir = TempDir::new("rename-portable");
+        let track = dir.tagged_flac("track.flac", "CON", "What? Live: <1996>.");
+        let app = open_app(&dir);
+
+        let plan = app
+            .preview_rename("%artist%/%title%", std::slice::from_ref(&track))
+            .unwrap();
+        let expected = dir.0.join("CON_").join("What Live - _1996_..flac");
+        assert_eq!(
+            plan.changes[0].rename_to.as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+    }
+
+    /// Switched off, the name keeps what this system allows (#679). Only a
+    /// Windows build applies the portable set whatever the setting says.
+    #[test]
+    fn a_rename_keeps_the_characters_when_portable_names_are_off() {
+        let dir = TempDir::new("rename-not-portable");
+        let track = dir.tagged_flac("track.flac", "CON", "What? Live: <1996>.");
+        let app = open_app(&dir);
+        app.apply_settings(&SettingsDto {
+            portable_names: false,
+            ..SettingsDto::default()
+        });
+
+        let plan = app
+            .preview_rename("%artist%/%title%", std::slice::from_ref(&track))
+            .unwrap();
+        let expected = if cfg!(windows) {
+            dir.0.join("CON_").join("What Live - _1996_..flac")
+        } else {
+            dir.0.join("CON").join("What? Live: <1996>..flac")
+        };
+        assert_eq!(
+            plan.changes[0].rename_to.as_deref(),
+            Some(expected.to_string_lossy().as_ref())
+        );
+    }
+
+    /// A filename-scoped chain that writes a separator or `..` into the name
+    /// used to move the file into a subfolder or out of its own; it is a rename
+    /// in place, with the separator made `_` (#679).
+    #[test]
+    fn a_filename_transform_never_moves_the_file() {
+        let dir = TempDir::new("transform-portable");
+        let track = dir.tagged_flac("Artist - Title.flac", "Artist", "Title");
+        let app = open_app(&dir);
+
+        for (rule, expected) in [
+            (replace_rule(" - ", "/"), "Artist_Title.flac"),
+            (replace_rule("Artist - ", "../"), ".._Title.flac"),
+            (replace_rule(" - ", "?"), "ArtistTitle.flac"),
+        ] {
+            let plan = app
+                .preview_transform(std::slice::from_ref(&track), &[rule], "filename")
+                .unwrap();
+            assert_eq!(
+                plan.changes[0].rename_to.as_deref(),
+                Some(dir.0.join(expected).to_string_lossy().as_ref()),
+                "{expected}"
+            );
+        }
+
+        // The same over a plan the rename staged.
+        let staged = app
+            .preview_rename("%artist% - %title%x", std::slice::from_ref(&track))
+            .unwrap();
+        let cleaned = app
+            .preview_transform_over_plan(
+                &staged,
+                &[ActionGroupDto {
+                    name: "separator".into(),
+                    scope: "filename".into(),
+                    rules: vec![replace_rule(" - ", "/../")],
+                    note: String::new(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(
+            cleaned.changes[0].rename_to.as_deref(),
+            Some(
+                dir.0
+                    .join("Artist_.._Titlex.flac")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
     }
 }

@@ -804,6 +804,8 @@ export const de = {
   "settings.extrasHint": "Wenn ein Umorganisieren alle Tracks aus einem Ordner holt, wandert, was darin übrig ist — ein Rip-Log, lose Bilder, ein Scans-Unterordner — zum selben Ziel, sodass nichts zurückbleibt und der Ordner aufgeräumt werden kann. Ein Ordner, der noch andere Musik enthält, oder Tracks, die sich auf mehrere Ziele verteilen, bleiben unberührt.",
   "settings.extensions": "Endungen gleichnamiger Dateien",
   "settings.extensionsHint": "Welche gleichnamigen Dateien mit einem umbenannten oder verschobenen Track wandern. Durch Leerzeichen oder Komma getrennt, ohne Punkt, ohne Beachtung der Groß-/Kleinschreibung. Ob sie mitwandern, legt ein Kontrollkästchen im RENAMER-Bereich fest.",
+  "settings.portableNames": "Sichere Dateinamen",
+  "settings.portableNamesHint": "Namen, die eine Umbenennung oder Transformation erzeugt, funktionieren auch unter Windows und auf USB-Sticks und SD-Karten: \":\" wird zu \" -\", \"?\" und \"*\" entfallen, \" < > | werden zu _, und ein Punkt oder Leerzeichen am Ende wird entfernt. Aus behält diese Zeichen, wo dieses System sie erlaubt. Unter Windows werden sie immer ersetzt.",
   "settings.theme": "Design",
   "settings.theme.light": "Hell",
   "settings.theme.dark": "Dunkel",

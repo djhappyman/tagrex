@@ -394,6 +394,7 @@ async function openSettings() {
     el("set-bpm-range").value = String(s.bpm_floor || 0);
     el("set-bpm-detection").checked = s.bpm_detection !== false;
     el("set-bpm-max").value = s.bpm_max_minutes ?? BPM_MAX_MINUTES_DEFAULT;
+    el("set-portable-names").checked = s.portable_names !== false;
     readPriority = normalizePriority(s.read_priority);
     // The separator is whitespace-significant ("; " is not ";"), so it goes
     // into the box verbatim and comes back verbatim — no trim anywhere (#46).
@@ -571,6 +572,7 @@ async function saveSettings() {
       bpm_floor: parseInt(el("set-bpm-range").value, 10) || 0,
       bpm_detection: el("set-bpm-detection").checked,
       bpm_max_minutes: bpmMaxFromForm(),
+      portable_names: el("set-portable-names").checked,
     };
     setSavedSettings(settings);
     // Display prefs are local-only; apply + persist before the backend
@@ -730,9 +732,11 @@ initGroupResets([
   {
     id: "files",
     isDefault: () =>
-      sameList(parseSidecarExts(el("set-sidecar-exts").value), DEFAULT_SIDECAR_EXTS),
+      sameList(parseSidecarExts(el("set-sidecar-exts").value), DEFAULT_SIDECAR_EXTS) &&
+      el("set-portable-names").checked,
     reset: () => {
       el("set-sidecar-exts").value = DEFAULT_SIDECAR_EXTS.join(" ");
+      el("set-portable-names").checked = true;
     },
   },
   {
