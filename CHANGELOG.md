@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   tags and file names never panic, a separator in a value never reaches the
   rendered name, and what a mask renders it extracts back
   ([#689](https://github.com/tagrex/tagrex/issues/689)).
+- A test previews, applies and undoes a rename with titles Windows and FAT
+  refuse on real files, so the Windows CI job checks NTFS accepts the names
+  ([#693](https://github.com/tagrex/tagrex/issues/693)).
 - Saves, undo and the duplicate scan read each file fewer times: the ID3v2
   revision, whether an MP3 has an APE tag and the file's container are
   answered from a few bytes instead of a full parse, cover art included,
