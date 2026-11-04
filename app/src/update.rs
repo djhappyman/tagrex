@@ -129,9 +129,99 @@ pub async fn installable(app: &AppHandle, proxy: &str, latest: &str) -> Option<U
     same.then_some(update)
 }
 
+/// The folder the running app sits in, when its user cannot write there (#699).
+///
+/// The installer runs without administrator rights and keeps the folder it was
+/// last installed to, so a copy put under `Program Files` by an installer run as
+/// administrator stops every later update with "Error opening file for writing".
+#[cfg(windows)]
+pub fn protected_install_dir() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    refuses_writes(dir).then(|| dir.to_path_buf())
+}
+
+/// Whether `dir` refuses this user a new file. Only a refusal counts: anything
+/// else (a leftover probe, a full disk) is for the installer to find and report.
+#[cfg(any(windows, test))]
+fn refuses_writes(dir: &std::path::Path) -> bool {
+    let probe = dir.join(format!(".tagrex-update-probe-{}", std::process::id()));
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(_) => {
+            let _ = std::fs::remove_file(&probe);
+            false
+        }
+        Err(error) => error.kind() == std::io::ErrorKind::PermissionDenied,
+    }
+}
+
+/// What the elevated installer is told: what the updater plugin passes for the
+/// passive install mode, and the folder to install to. Elevating with another
+/// account's password would otherwise look up that account's folder. NSIS takes
+/// `/D=` only as the last argument and unquoted, spaces included.
+#[cfg(any(windows, test))]
+fn elevated_installer_parameters(dir: &std::path::Path) -> String {
+    format!("/P /UPDATE /R /ARGS /D={}", dir.display())
+}
+
+/// Start the installer in `bytes`, whose signature the download has checked, with
+/// administrator rights, installing to `dir`. Windows asks the user first;
+/// declining is an error and the app goes on. The caller quits on success so the
+/// installer can replace it.
+#[cfg(windows)]
+pub fn run_installer_elevated(
+    bytes: &[u8],
+    version: &str,
+    dir: &std::path::Path,
+) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOW;
+
+    if !bytes.starts_with(b"MZ") {
+        return Err("the update is not an installer".to_string());
+    }
+    let temp = std::env::temp_dir().join(format!("TagRex-{version}-update-{}", std::process::id()));
+    std::fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
+    let installer = temp.join(format!("TagRex_{version}-setup.exe"));
+    std::fs::write(&installer, bytes).map_err(|error| error.to_string())?;
+
+    let wide = |text: &std::ffi::OsStr| -> Vec<u16> {
+        text.encode_wide().chain(std::iter::once(0)).collect()
+    };
+    let file = wide(installer.as_os_str());
+    let parameters = wide(std::ffi::OsStr::new(&elevated_installer_parameters(dir)));
+    let result = unsafe {
+        ShellExecuteW(
+            None,
+            w!("runas"),
+            PCWSTR(file.as_ptr()),
+            PCWSTR(parameters.as_ptr()),
+            PCWSTR::null(),
+            SW_SHOW,
+        )
+    };
+    // At most 32 is a failure, and 5 is what declining the prompt comes back as.
+    match result.0 as isize {
+        code if code > 32 => Ok(()),
+        5 => Err(format!(
+            "TagRex needs administrator rights to update in {}",
+            dir.display()
+        )),
+        code => Err(format!("the installer could not start (error {code})")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{is_newer, parse_version, proxy_url};
+    use super::{
+        elevated_installer_parameters, is_newer, parse_version, proxy_url, refuses_writes,
+    };
 
     #[test]
     fn versions_read_with_or_without_a_v_and_a_suffix() {
@@ -171,6 +261,46 @@ mod tests {
             proxy_url("socks5://127.0.0.1:1080").map(|url| url.to_string()),
             Some("socks5://127.0.0.1:1080".to_string())
         );
+    }
+
+    #[test]
+    fn the_elevated_installer_is_told_the_folder_last_and_unquoted() {
+        assert_eq!(
+            elevated_installer_parameters(std::path::Path::new("Program Files/TagRex")),
+            "/P /UPDATE /R /ARGS /D=Program Files/TagRex"
+        );
+    }
+
+    #[test]
+    fn a_writable_folder_needs_no_elevation_and_keeps_no_probe() {
+        let dir = std::env::temp_dir().join(format!("tagrex-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(!refuses_writes(&dir));
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_folder_is_not_called_a_refusal() {
+        let dir = std::env::temp_dir().join("tagrex-probe-no-such-folder");
+        assert!(!refuses_writes(&dir));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_read_only_folder_is_a_refusal() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("tagrex-probe-ro-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Root ignores the mode, so the check only means something for a user.
+        let probe_landed = std::fs::write(dir.join("root-check"), b"").is_ok();
+        let refused = refuses_writes(&dir);
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        if !probe_landed {
+            assert!(refused);
+        }
     }
 
     #[test]

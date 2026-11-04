@@ -108,7 +108,8 @@ zbus = "5"
 # Controls behind the media keys and the media flyout. The `windows` crate the
 # webview stack already builds, so the window handle Tauri gives is the type the
 # controls take; `windows-future` only to wait for the cover to be copied into a
-# stream.
+# stream. The shell features start the installer with administrator rights
+# when the app sits in a folder its user cannot write to (#699).
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
     "Foundation",
@@ -116,6 +117,8 @@ windows = { version = "0.62", features = [
     "Storage_Streams",
     "Win32_Foundation",
     "Win32_System_WinRT",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 windows-future = "0.3"
 

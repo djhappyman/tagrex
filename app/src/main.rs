@@ -1340,9 +1340,10 @@ async fn check_for_update(
 
 /// Download the update the last check found, check its signature against the
 /// key built into the app, install it and restart (#602). On Windows the
-/// installer takes over and the app quits for it, so this never returns there;
-/// elsewhere it returns only with an error, the update kept for another try.
-/// The frontend refuses to start it while there is anything unapplied.
+/// installer takes over and the app quits for it, so this returns there only
+/// with an error; elsewhere too, the update kept for another try. In a folder
+/// the user cannot write to, Windows is asked for administrator rights first
+/// (#699). The frontend refuses to start it while there is anything unapplied.
 #[tauri::command]
 async fn install_update(
     app: tauri::AppHandle,
@@ -1356,8 +1357,8 @@ async fn install_update(
         .ok_or_else(|| ErrorDto::plain("There is no update to install. Check again."))?;
     let mut downloaded: u64 = 0;
     let mut reported: Option<std::time::Instant> = None;
-    update
-        .download_and_install(
+    let bytes = update
+        .download(
             |chunk, total| {
                 downloaded += chunk as u64;
                 if reported.is_some_and(|at| at.elapsed() < APPLY_PROGRESS_INTERVAL) {
@@ -1373,6 +1374,15 @@ async fn install_update(
             || {},
         )
         .await
+        .map_err(|error| ErrorDto::plain(format!("Could not install the update: {error}")))?;
+    #[cfg(windows)]
+    if let Some(dir) = update::protected_install_dir() {
+        update::run_installer_elevated(&bytes, &update.version, &dir)
+            .map_err(|detail| ErrorDto::plain(format!("Could not install the update: {detail}")))?;
+        std::process::exit(0);
+    }
+    update
+        .install(&bytes)
         .map_err(|error| ErrorDto::plain(format!("Could not install the update: {error}")))?;
     app.restart()
 }

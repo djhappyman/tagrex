@@ -395,6 +395,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   sending into the limit and left that card with a dash. A server that keeps
   refusing ends the fetch after a few rounds
   ([#691](https://github.com/tagrex/tagrex/issues/691)).
+- An update on Windows no longer stops at "Error opening file for writing" when
+  TagRex is installed under `Program Files`: it asks for administrator rights
+  and installs to the same folder. Copies of 1.1.0 and 1.1.1 in such a folder
+  need one manual install to get this
+  ([#699](https://github.com/tagrex/tagrex/issues/699)).
 
 ## [1.1.1] - 2026-11-02
 

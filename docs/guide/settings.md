@@ -56,7 +56,8 @@ to TagRex X** and the document button beside it opens the release page. Clicking
 the note asks first, then downloads the update, checks its signature against the
 key built into TagRex, installs it and restarts. Nothing is downloaded until you
 ask. macOS replaces the app where it is; Windows runs the installer, which shows
-its own progress; on Linux the system asks for your password to install the new
+its own progress and, when TagRex sits in a folder you cannot write to such as
+`Program Files`, first asks for administrator rights; on Linux the system asks for your password to install the new
 `.deb` or `.rpm`. Apply or discard your changes, and let a BPM run finish, before
 updating. Where there is nothing to install (a release without update bundles,
 or a copy that was not installed from a package), the note opens the release
