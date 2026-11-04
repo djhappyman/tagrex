@@ -387,6 +387,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   ignored the time the server asked for and said to wait one second, and
   Beatport lost it when fetching a cover
   ([#692](https://github.com/tagrex/tagrex/issues/692)).
+- The background fetch of track counts on the result cards pauses for as long
+  as a rate limit asks and then tries that release again, where it went on
+  sending into the limit and left that card with a dash. A server that keeps
+  refusing ends the fetch after a few rounds
+  ([#691](https://github.com/tagrex/tagrex/issues/691)).
 
 ## [1.1.1] - 2026-11-02
 
