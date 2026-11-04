@@ -115,7 +115,11 @@ impl BeatportProvider {
 
         let status = response.status().as_u16();
         if !(200..300).contains(&status) {
-            return Err(status_to_error(status, None));
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|value| value.to_str().ok());
+            return Err(status_to_error(status, retry_after));
         }
 
         let mime = response
@@ -245,9 +249,7 @@ pub(crate) fn status_to_error(status: u16, retry_after: Option<&str>) -> Provide
         401 | 403 => ProviderError::Auth(format!("HTTP {status} — sign in to Beatport again")),
         404 => ProviderError::NotFound,
         429 => ProviderError::RateLimited {
-            retry_after_secs: retry_after
-                .and_then(|value| value.parse().ok())
-                .unwrap_or(60),
+            retry_after_secs: tagrex_core::provider::parse_retry_after(retry_after).unwrap_or(60),
         },
         _ => ProviderError::Other(format!("HTTP {status}")),
     }
@@ -500,6 +502,37 @@ fn push_unique(list: &mut Vec<String>, value: Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server that answers 429 with a `Retry-After` (with the whitespace HTTP
+    /// allows around it) is a rate limit for as long as it asks, end to end.
+    #[test]
+    fn a_429_is_a_rate_limit_for_as_long_as_the_server_asks() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            stream
+                .write_all(
+                    b"HTTP/1.1 429 Too Many Requests\r\nRetry-After:  120 \r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        let result =
+            super::BeatportProvider::new("t").fetch_image(&format!("http://{addr}/cover.jpg"));
+        server.join().unwrap();
+        assert!(
+            matches!(
+                result,
+                Err(tagrex_core::provider::ProviderError::RateLimited {
+                    retry_after_secs: 120
+                })
+            ),
+            "{result:?}"
+        );
+    }
 
     const SEARCH_JSON: &str = r#"{
       "releases": [

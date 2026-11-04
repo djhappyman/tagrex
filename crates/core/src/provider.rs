@@ -13,6 +13,14 @@
 
 use thiserror::Error;
 
+/// The seconds a `Retry-After` header asks for, or `None` when it states none
+/// this can read. Surrounding whitespace is allowed, as HTTP allows it; the
+/// other form the header may take, an HTTP date, is left to the caller's
+/// default.
+pub fn parse_retry_after(value: Option<&str>) -> Option<u64> {
+    value.and_then(|value| value.trim().parse().ok())
+}
+
 /// How long a provider waits to connect. The HTTP client waits forever by
 /// default, and every provider call runs under one lock, so a server that
 /// stopped answering held every search, release and cover request in the app
@@ -307,5 +315,19 @@ mod tests {
         assert_eq!(disc_from_position("-3"), None);
         // Disc zero is not a disc.
         assert_eq!(disc_from_position("0-3"), None);
+    }
+
+    #[test]
+    fn retry_after_is_read_as_seconds_with_whitespace_allowed() {
+        assert_eq!(parse_retry_after(Some("120")), Some(120));
+        assert_eq!(parse_retry_after(Some(" 120\t")), Some(120));
+        assert_eq!(parse_retry_after(Some("0")), Some(0));
+        // The other form the header may take is left to the caller's default.
+        assert_eq!(
+            parse_retry_after(Some("Wed, 21 Oct 2026 07:28:00 GMT")),
+            None
+        );
+        assert_eq!(parse_retry_after(Some("")), None);
+        assert_eq!(parse_retry_after(None), None);
     }
 }

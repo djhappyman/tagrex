@@ -383,6 +383,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   two pages is refused and the file left as it was, where the write used to
   report success with part of the audio gone
   ([#688](https://github.com/tagrex/tagrex/issues/688)).
+- Every online source reads how long a rate limit lasts the same way. Soundeo
+  ignored the time the server asked for and said to wait one second, and
+  Beatport lost it when fetching a cover
+  ([#692](https://github.com/tagrex/tagrex/issues/692)).
 
 ## [1.1.1] - 2026-11-02
 
