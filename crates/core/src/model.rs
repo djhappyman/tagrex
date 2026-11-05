@@ -1378,6 +1378,9 @@ fn container_of(path: &Path) -> Result<Option<FileType>, TagIoError> {
 /// an extended header is handed over from memory instead, as a copy without
 /// that header (#648): the backend reads a 2.3 extended header with the 2.4
 /// layout and then takes every frame for padding.
+///
+/// So is a file ending in an APE tag the backend would take for an ID3v1 tag
+/// (#710), as a copy with that tag padded: it then finds the real one.
 fn buffered(path: &Path) -> Result<TagSource, TagIoError> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = std::fs::File::open(path)?;
@@ -1389,15 +1392,22 @@ fn buffered(path: &Path) -> Result<TagSource, TagIoError> {
     } else {
         None
     };
+    let misread = tail_is_ape_tag_misread_as_id3v1(&mut file)?;
     file.seek(SeekFrom::Start(0))?;
-    if leading || chunk.is_some() {
+    if leading || chunk.is_some() || misread {
         let mut raw = Vec::new();
         file.read_to_end(&mut raw)?;
         let fixed = match chunk {
             Some((at, len)) => without_iff_id3_extended_header(&raw, at, len),
-            None => without_id3v2_extended_header(&raw),
+            None if leading => without_id3v2_extended_header(&raw),
+            None => None,
         };
-        return Ok(TagSource::Memory(Cursor::new(fixed.unwrap_or(raw))));
+        let fixed = fixed.unwrap_or(raw);
+        return Ok(TagSource::Memory(Cursor::new(if misread {
+            with_ape_tag_padded(fixed)
+        } else {
+            fixed
+        })));
     }
     Ok(TagSource::File(std::io::BufReader::new(file)))
 }
@@ -2418,7 +2428,7 @@ impl TagEngine {
         guarded(&file.path, || {
             ogg_safe_write(&file.path, || {
                 ensure_audio_after_tags(&file.path)?;
-                ensure_no_misread_id3v1(&file.path)?;
+                pad_ape_tag_misread_as_id3v1(&file.path)?;
                 // Guard the year before touching the file. It is written as a timestamp
                 // (ID3v2.4 TDRC / Vorbis DATE / MP4 ©day) whose year MUST be exactly 4
                 // digits; lofty accepts a shorter one like "222" on write but then
@@ -2558,7 +2568,7 @@ impl TagEngine {
     ) -> Result<(), TagIoError> {
         guarded(path, || {
             ensure_audio_after_tags(path)?;
-            ensure_no_misread_id3v1(path)?;
+            pad_ape_tag_misread_as_id3v1(path)?;
             drop_id3v2_extended_header(path)?;
             // A block journaled before #648 can still carry its extended header.
             let mut synthetic =
@@ -2624,7 +2634,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
-                ensure_no_misread_id3v1(path)?;
+                pad_ape_tag_misread_as_id3v1(path)?;
                 let mut tag = vorbis_comments_from_packet(bytes).ok_or_else(|| {
                     TagIoError::UnsupportedFormat(
                         "the journaled Vorbis comment block did not parse".to_string(),
@@ -2656,7 +2666,7 @@ impl TagEngine {
     pub fn set_id3v2_revision(path: &Path, revision: Id3v2Revision) -> Result<bool, TagIoError> {
         guarded(path, || {
             ensure_audio_after_tags(path)?;
-            ensure_no_misread_id3v1(path)?;
+            pad_ape_tag_misread_as_id3v1(path)?;
             drop_id3v2_extended_header(path)?;
             let Some(container) = container_of(path)? else {
                 return Ok(false);
@@ -2722,7 +2732,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
-                ensure_no_misread_id3v1(path)?;
+                pad_ape_tag_misread_as_id3v1(path)?;
                 drop_id3v2_extended_header(path)?;
                 // An AIFF's or a WAV's ID3v2 is a chunk this module writes itself
                 // (#358, #505); taking it out goes the same way.
@@ -2775,7 +2785,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
-                ensure_no_misread_id3v1(path)?;
+                pad_ape_tag_misread_as_id3v1(path)?;
                 drop_id3v2_extended_header(path)?;
                 let options = match (kind, revision) {
                     (TagBlockKind::Id3v2, Some(revision)) => {
@@ -2910,7 +2920,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
-                ensure_no_misread_id3v1(path)?;
+                pad_ape_tag_misread_as_id3v1(path)?;
                 drop_id3v2_extended_header(path)?;
                 // Same reason as `write`: going through the generic tag would drop an
                 // MP3's non-representable frames, so edit the concrete tag instead.
@@ -3007,7 +3017,7 @@ fn has_id3v1(path: &Path) -> Result<bool, TagIoError> {
     file.seek(SeekFrom::Start(length - 128))?;
     let mut magic = [0u8; 3];
     file.read_exact(&mut magic)?;
-    Ok(&magic == b"TAG")
+    Ok(&magic == b"TAG" && !tail_is_ape_tag_misread_as_id3v1(&mut file)?)
 }
 
 /// Keep an ID3v1 tag the file already carries in step with what was just
@@ -4660,70 +4670,65 @@ fn ensure_audio_after_tags(path: &Path) -> Result<(), TagIoError> {
     Ok(())
 }
 
-/// Refuse to write a file whose APE tag the tag library mistakes for an ID3v1
-/// tag (#614). It takes `TAG` at 128 bytes from the end as an ID3v1 tag without
-/// checking, so an APE tag that ends the file with those bytes at that offset
-/// (a 131-byte one always does: the `TAG` of its own header lands there) is
-/// read as ID3v1 — and the writer then writes over the APE tag, destroying
-/// every item in it. An APE footer in the last 32 bytes says the file ends in
-/// an APE tag, so there is no ID3v1 tag after it.
-fn ensure_no_misread_id3v1(path: &Path) -> Result<(), TagIoError> {
-    if ends_in_ape_tag_misread_as_id3v1(path)? {
-        return Err(TagIoError::Malformed(format!(
-            "{} ends in an APE tag the tag library misreads as an ID3v1 tag; writing to it would destroy the APE tag",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-/// The shape [`ensure_no_misread_id3v1`] refuses: `TAG` where an ID3v1 tag would
-/// start, and an APE footer in the last 32 bytes.
-fn ends_in_ape_tag_misread_as_id3v1(path: &Path) -> Result<bool, TagIoError> {
+/// Whether the file holds what the tag library mistakes for an ID3v1 tag (#614).
+/// It takes `TAG` at 128 bytes from the end as one without checking, so an APE tag
+/// that ends the file with those bytes at that offset (a 131-byte one always does:
+/// the `TAG` of its own header lands there) is read as ID3v1, its real items are
+/// not read at all, and the writer then writes over them. An APE footer in the last
+/// 32 bytes says the file ends in an APE tag, so there is no ID3v1 tag after it.
+fn tail_is_ape_tag_misread_as_id3v1(file: &mut std::fs::File) -> Result<bool, TagIoError> {
     use std::io::{Read, Seek, SeekFrom};
-    let mut file = std::fs::File::open(path)?;
     if file.metadata()?.len() < 128 {
         return Ok(false);
     }
     let mut tail = [0u8; 128];
     file.seek(SeekFrom::End(-128))?;
     file.read_exact(&mut tail)?;
-    Ok(&tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX")
+    Ok(is_ape_tag_misread_as_id3v1(&tail))
 }
 
-/// Keep a write from leaving the shape [`ensure_no_misread_id3v1`] refuses
-/// (#708). A tag that comes out at 131 bytes has it, and the file then reads as
-/// garbage and takes no further writes. A zero byte after the last item moves
-/// the `TAG` off that offset: the tag states how many items it holds, so what
-/// follows them is not read, and the size in its header and footer counts it.
-fn pad_ape_tag_misread_as_id3v1(path: &Path) -> Result<(), TagIoError> {
-    if !ends_in_ape_tag_misread_as_id3v1(path)? {
-        return Ok(());
-    }
+/// The shape of [`tail_is_ape_tag_misread_as_id3v1`], in the last 128 bytes.
+fn is_ape_tag_misread_as_id3v1(tail: &[u8]) -> bool {
+    &tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX"
+}
+
+/// `bytes`, a file ending in an APE tag misread as ID3v1, with the `TAG` moved off
+/// that offset. A zero byte after the last item does it: the tag states how many
+/// items it holds, so what follows them is not read, and the size in its header and
+/// footer counts it.
+fn with_ape_tag_padded(mut bytes: Vec<u8>) -> Vec<u8> {
     const FOOTER: usize = 32;
     const SIZE_AT: usize = 12;
-    let before = std::fs::read(path)?;
-    let mut after = before.clone();
     // A value's own text can hold `TAG` again one byte on, hence more than once.
     for _ in 0..FOOTER {
-        let footer = after.len() - FOOTER;
-        let size_bytes: [u8; 4] = after[footer + SIZE_AT..footer + SIZE_AT + 4]
-            .try_into()
-            .map_err(|_| TagIoError::Malformed("an APE footer cut short".to_string()))?;
-        let size = u32::from_le_bytes(size_bytes);
-        let grown = (size + 1).to_le_bytes();
-        // The size leaves out the header, which sits right before what it counts.
-        let header = after.len().checked_sub(size as usize + FOOTER);
-        if let Some(header) = header.filter(|at| after[*at..].starts_with(b"APETAGEX")) {
-            after[header + SIZE_AT..header + SIZE_AT + 4].copy_from_slice(&grown);
-        }
-        after[footer + SIZE_AT..footer + SIZE_AT + 4].copy_from_slice(&grown);
-        after.insert(footer, 0);
-        let tail = &after[after.len() - 128..];
-        if !(&tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX") {
+        if bytes.len() < 128 || !is_ape_tag_misread_as_id3v1(&bytes[bytes.len() - 128..]) {
             break;
         }
+        let footer = bytes.len() - FOOTER;
+        let at = footer + SIZE_AT;
+        let size = u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]);
+        let grown = size.wrapping_add(1).to_le_bytes();
+        // The size leaves out the header, which sits right before what it counts.
+        let header = bytes.len().checked_sub(size as usize + FOOTER);
+        if let Some(header) = header.filter(|start| bytes[*start..].starts_with(b"APETAGEX")) {
+            bytes[header + SIZE_AT..header + SIZE_AT + 4].copy_from_slice(&grown);
+        }
+        bytes[at..at + 4].copy_from_slice(&grown);
+        bytes.insert(footer, 0);
     }
+    bytes
+}
+
+/// Bring the file out of the shape [`tail_is_ape_tag_misread_as_id3v1`] finds. Before
+/// a write, so that the writer finds the real tag and not one to write over (#710);
+/// after one, because a tag that comes out at 131 bytes has that shape (#708) and
+/// other software that trusts `TAG` would misread it too. Nothing in the tag changes.
+fn pad_ape_tag_misread_as_id3v1(path: &Path) -> Result<(), TagIoError> {
+    if !tail_is_ape_tag_misread_as_id3v1(&mut std::fs::File::open(path)?)? {
+        return Ok(());
+    }
+    let before = std::fs::read(path)?;
+    let after = with_ape_tag_padded(before.clone());
     rewrite_in_place(path, &before, &after)?;
     Ok(())
 }

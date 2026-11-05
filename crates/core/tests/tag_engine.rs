@@ -3255,12 +3255,12 @@ fn a_www_comment_reads_as_the_url() {
     );
 }
 
-/// #614: an APE tag that ends the file with `TAG` at 128 bytes from the end —
-/// a 131-byte one always does, from its own header — is misread by the tag
-/// library as an ID3v1 tag, and its writer then writes over the APE tag. Such
-/// a file is refused before anything is touched.
+/// #614, #710: an APE tag that ends the file with `TAG` at 128 bytes from the end
+/// (a 131-byte one always does, from its own header) is misread by the tag library
+/// as an ID3v1 tag, and its writer then writes over the APE tag. Such a file reads
+/// as the tag it really holds, and a write keeps that tag's items.
 #[test]
-fn an_ape_tag_misread_as_id3v1_is_never_written_over() {
+fn an_ape_tag_misread_as_id3v1_is_read_and_never_written_over() {
     use lofty::ape::{ApeItem, ApeTag};
     use lofty::config::WriteOptions;
     use lofty::prelude::TagExt;
@@ -3285,20 +3285,41 @@ fn an_ape_tag_misread_as_id3v1_is_never_written_over() {
         "fixture does not have the shape"
     );
 
+    // Reading it leaves it alone, and shows the real item and nothing else.
     let read = TagEngine::read(&path).expect("read tags");
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "a read touched the file"
+    );
+    assert_eq!(read.tags.len(), 1, "{:?}", read.tags);
+    let url = "x".repeat(55);
+    assert_eq!(read.tags.get(&TagField::Url), Some(&url), "{:?}", read.tags);
+    assert!(TagEngine::read_block(&path, TagBlockKind::Id3v1)
+        .unwrap()
+        .is_none());
+    assert!(TagEngine::read_block(&path, TagBlockKind::Ape)
+        .unwrap()
+        .is_some());
+
+    // A cover write goes through and keeps the item.
+    TagEngine::write_covers(&path, &[]).unwrap();
+    assert_eq!(TagEngine::read(&path).unwrap().tags, read.tags);
+
+    // So does an edit, from the shape itself.
+    std::fs::write(&path, &before).unwrap();
     let mut tags = read.tags.clone();
     tags.insert(TagField::Title, "New title".to_string());
-    let result = TagEngine::write(&TrackFile {
+    TagEngine::write(&TrackFile {
         path: path.clone(),
         format: read.format,
-        tags,
-    });
-    let covers = TagEngine::write_covers(&path, &[]);
+        tags: tags.clone(),
+    })
+    .unwrap();
+    assert_eq!(TagEngine::read(&path).unwrap().tags, tags);
     let after = std::fs::read(&path).unwrap();
+    assert_ne!(&after[after.len() - 128..after.len() - 125], b"TAG");
     std::fs::remove_file(&path).ok();
-    assert!(result.is_err(), "the write went ahead");
-    assert!(covers.is_err(), "the cover write went ahead");
-    assert_eq!(before, after, "the file was touched");
 }
 
 /// #709: free text in the date a format lets it hold does not stop an edit of

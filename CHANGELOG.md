@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   to it failed on Apply with "invalid year", about a field nobody touched. The date
   stays as it was, and a new value of that shape is still refused
   ([#709](https://github.com/tagrex/tagrex/issues/709)).
+- A WavPack, APE or Musepack file whose tag was taken for an ID3v1 tag reads as what it
+  really holds and takes writes again. Before, it showed nonsense and every write was
+  refused ([#710](https://github.com/tagrex/tagrex/issues/710)).
 
 ## [1.2.0] - 2026-11-05
 
