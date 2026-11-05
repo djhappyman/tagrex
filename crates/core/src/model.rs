@@ -5550,9 +5550,51 @@ pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool 
         TagField::Custom(name) => !value.is_empty() && !is_storable_custom_name_at(path, name),
         _ => false,
     };
+    // An ID3v2 date is a timestamp frame, not text (#696). The other tags keep
+    // whatever they are given.
+    let is_date = match field {
+        TagField::Year => true,
+        TagField::Custom(name) => is_timestamp_frame_id(name),
+        _ => false,
+    };
+    let unholdable_date = is_date
+        && !value.is_empty()
+        && FileType::from_path(path).is_some_and(|file_type| {
+            file_type.primary_tag_type() == TagType::Id3v2 && !is_id3v2_timestamp(value)
+        });
     is_writable_value(field, value)
         && !(integers_only && is_vinyl_position(value))
         && !unstorable_name
+        && !unholdable_date
+}
+
+/// Whether an ID3v2 timestamp frame holds `value` as it is and it is a real date.
+///
+/// The backend refuses a whole save over a field out of range (`1996-13-45`), and
+/// reads as much of a date as fits its zero-padded parts, so `1996-5` was written
+/// as `1996` without an error. A strict parse that prints back the same text is
+/// what it keeps; the ranges cover what it would keep or refuse without being a
+/// date, such as `1996-00` or `1996-02-30`.
+fn is_id3v2_timestamp(value: &str) -> bool {
+    let Ok(Some(stamp)) = Timestamp::parse(&mut value.as_bytes(), ParsingMode::Strict) else {
+        return false;
+    };
+    let in_range = |part: Option<u8>, range: std::ops::RangeInclusive<u8>| {
+        part.is_none_or(|part| range.contains(&part))
+    };
+    let leap = stamp.year % 4 == 0 && (stamp.year % 100 != 0 || stamp.year % 400 == 0);
+    let last_day = match stamp.month {
+        Some(4 | 6 | 9 | 11) => 30,
+        Some(2) if leap => 29,
+        Some(2) => 28,
+        _ => 31,
+    };
+    stamp.to_string() == value
+        && in_range(stamp.month, 1..=12)
+        && in_range(stamp.day, 1..=last_day)
+        && in_range(stamp.hour, 0..=23)
+        && in_range(stamp.minute, 0..=59)
+        && in_range(stamp.second, 0..=59)
 }
 
 /// Whether a custom field called `name` can be stored in the tag the file at
@@ -6726,6 +6768,74 @@ mod tests {
             std::fs::remove_file(&path).ok();
             std::fs::remove_file(&link).ok();
         }
+    }
+
+    /// A date an ID3v2 timestamp cannot hold failed the whole save or lost its
+    /// month on it. The other tags keep the same value as text (#696).
+    #[test]
+    fn a_date_is_checked_against_what_an_id3v2_timestamp_holds() {
+        let year =
+            |path: &str, value: &str| is_writable_value_at(Path::new(path), &TagField::Year, value);
+        for good in [
+            "",
+            "1996",
+            "0000",
+            "1996-05",
+            "1996-05-01",
+            "1996-02-29",
+            "2000-02-29",
+            "1996-05-01T12",
+            "1996-05-01T12:30",
+            "1996-05-01T12:30:45",
+        ] {
+            for path in ["a.mp3", "a.wav", "a.aiff", "a.flac", "a.m4a"] {
+                assert!(year(path, good), "{path} {good:?}");
+            }
+        }
+        for bad in [
+            "1996-13-45",
+            "1996-13",
+            "1996-00",
+            "1996-05-00",
+            "1996-02-30",
+            "1995-02-29",
+            "1900-02-29",
+            "1996-04-31",
+            "1996-5",
+            "1996-5-1",
+            "1996-05-1",
+            "1996-",
+            "1996-05-",
+            "1996-xx",
+            "1996-05-01-02",
+            "1996-05-01 12:30",
+            "1996-05-01T25:30:45",
+            "1996-05-01T12:61",
+            "1996-05-01T12:30:45x",
+        ] {
+            for path in ["a.mp3", "a.wav", "a.aiff"] {
+                assert!(!year(path, bad), "{path} {bad:?}");
+            }
+            // Text in these formats, so nothing is lost.
+            for path in ["a.flac", "a.m4a", "a.ape"] {
+                assert!(year(path, bad), "{path} {bad:?}");
+            }
+        }
+        // Still flagged everywhere: the year itself has to be four digits.
+        assert!(!year("a.flac", "1996/05"));
+        assert!(!year("a.mp3", "1996/05"));
+
+        // The other date frames are read as timestamps too.
+        let custom = |name: &str, value: &str| {
+            is_writable_value_at(
+                Path::new("a.mp3"),
+                &TagField::Custom(name.to_string()),
+                value,
+            )
+        };
+        assert!(custom("TDEN", "2011-01-01"));
+        assert!(!custom("TDEN", "VALUE"));
+        assert!(custom("MYDATE", "VALUE"));
     }
 
     /// A custom field name the file's tag cannot store was written with `Ok` and

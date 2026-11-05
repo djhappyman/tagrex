@@ -11629,6 +11629,43 @@ mod tests {
         assert_eq!(flagged("custom:MOOD"), Some(false));
     }
 
+    /// A date an MP3 cannot hold failed the save late or lost part of itself; it
+    /// is flagged and left unwritten, and the rest of the edit goes through (#696).
+    #[test]
+    fn a_date_an_mp3_cannot_hold_is_flagged_and_not_written() {
+        let dir = TempDir::new("date-invalid");
+        let track = dir.0.join("x.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        std::fs::write(&track, frame.repeat(5)).unwrap();
+        let mut app = open_app(&dir);
+        let edit = |field: &str, value: &str| TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: field.to_string(),
+            value: Some(value.to_string()),
+        };
+
+        for bad in ["1996-13-45", "1996-5"] {
+            let plan = app
+                .preview_tag_edits(&[edit("year", bad), edit("title", "Kept")])
+                .unwrap();
+            let flagged = |key: &str| {
+                plan.changes[0]
+                    .tag_changes
+                    .iter()
+                    .find(|c| c.field == key)
+                    .map(|c| c.invalid)
+            };
+            assert_eq!(flagged("year"), Some(true), "{bad}");
+            assert_eq!(flagged("title"), Some(false), "{bad}");
+            app.apply(&plan).unwrap();
+            let tags = TagEngine::read(&track).unwrap().tags;
+            assert_eq!(tags.get(&TagField::Year), None, "{bad}");
+            assert_eq!(tags.get(&TagField::Title).map(String::as_str), Some("Kept"));
+            std::fs::write(&track, frame.repeat(5)).unwrap();
+        }
+    }
+
     /// A NUL separates the values of an ID3v2.4 frame, so `a\0b` read back as `b`
     /// or as two values. It is gone from the plan, so the preview shows what the
     /// file will say and undo finds what it expects (#695).

@@ -410,6 +410,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   save. In an MP3, WAV, AIFF or APE tag it cut off the text before it or split
   the value in two. A custom field name with a NUL in it is flagged in the
   preview ([#695](https://github.com/tagrex/tagrex/issues/695)).
+- A date an MP3, WAV or AIFF tag cannot hold is flagged in the preview: a month
+  or day that does not exist (`1996-13-45`, `1996-02-30`) or a part that is not
+  zero-padded (`1996-5`). Before, the first failed the whole save with a backend
+  error and the second lost its month. FLAC and MP4 keep such a value as text
+  ([#696](https://github.com/tagrex/tagrex/issues/696)).
 
 ## [1.1.1] - 2026-11-02
 
