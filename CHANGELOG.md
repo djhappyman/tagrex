@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-05
+
+A release about very long releases and about files other tools wrote. A tracklist
+with thousands of tracks now scrolls smoothly, and a click on a file no longer
+freezes the app while one is open. A rename that only changes letter case works on
+macOS and Windows, a year or comment stored under another common name reads as that
+field, and a file whose date is free text can be edited again.
+
+It also closes a rare trap in WavPack, APE and Musepack files: a tag that came out at
+exactly 131 bytes made the file read as nonsense and refuse every write. A write can
+no longer leave that, and a file already in that state reads correctly again.
+
 ### Changed
 
 - CI builds and tests on macOS as well, on every push
