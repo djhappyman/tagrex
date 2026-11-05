@@ -11617,6 +11617,51 @@ mod tests {
         assert_eq!(flagged("custom:MOOD"), Some(false));
     }
 
+    /// A custom field named after a standard one replaced that field or was
+    /// lost beside it, on a save that reported success. The preview flags it,
+    /// and applying the plan leaves the title as it was (#694).
+    #[test]
+    fn a_custom_name_that_is_a_standard_key_is_flagged_and_not_written() {
+        let dir = TempDir::new("custom-name-standard");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        let mut app = open_app(&dir);
+        let edit = |field: &str| TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: field.to_string(),
+            value: Some("value".to_string()),
+        };
+
+        let plan = app
+            .preview_tag_edits(&[
+                edit("custom:TITLE"),
+                edit("custom:title"),
+                edit("custom:MOOD"),
+            ])
+            .unwrap();
+        let flagged = |key: &str| {
+            plan.changes[0]
+                .tag_changes
+                .iter()
+                .find(|c| c.field == key)
+                .map(|c| c.invalid)
+        };
+        assert_eq!(flagged("custom:TITLE"), Some(true));
+        assert_eq!(flagged("custom:title"), Some(true));
+        assert_eq!(flagged("custom:MOOD"), Some(false));
+
+        app.apply(&plan).unwrap();
+        let tags = TagEngine::read(&track).unwrap().tags;
+        assert_eq!(
+            tags.get(&TagField::Title).map(String::as_str),
+            Some("Title")
+        );
+        assert_eq!(
+            tags.get(&TagField::Custom("MOOD".to_string()))
+                .map(String::as_str),
+            Some("value")
+        );
+    }
+
     /// A title like `What?` or an artist like `CON` rendered a name Windows and
     /// the FAT32/exFAT of a USB stick refuse; every component is made safe
     /// (#679).

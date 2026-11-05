@@ -400,6 +400,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   and installs to the same folder. Copies of 1.1.0 and 1.1.1 in such a folder
   need one manual install to get this
   ([#699](https://github.com/tagrex/tagrex/issues/699)).
+- A custom field named after a standard field in that format (`COMM` or `TIT2`
+  in an MP3, `TITLE` in a FLAC, `trkn` in an M4A, or a spelling read as a
+  standard field, such as `LABEL`) is flagged in the preview and refused before
+  anything is written. Before, the save reported success and the value replaced
+  that field, was added to it or was lost
+  ([#694](https://github.com/tagrex/tagrex/issues/694)).
 
 ## [1.1.1] - 2026-11-02
 

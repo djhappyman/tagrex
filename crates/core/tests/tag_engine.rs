@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tagrex_core::model::{
-    AudioFormat, CoverArt, CoverKind, Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine,
-    TagField, TrackFile,
+    is_storable_custom_name_at, AudioFormat, CoverArt, CoverKind, Id3v2Revision, TagBlockContent,
+    TagBlockKind, TagEngine, TagField, TrackFile,
 };
 
 /// `fLaC` + a non-last STREAMINFO block (34 bytes, all zeroed out except a
@@ -5663,4 +5663,105 @@ fn an_ogg_write_that_would_cut_the_audio_is_refused() {
     assert!(result.is_err(), "the write must be refused: {result:?}");
     assert_eq!(after, fixture, "the file must be left as it was");
     assert!(still_reads);
+}
+
+/// The rule behind the preview's flag on a custom field name, held against what
+/// real writes do (#694): a name it accepts comes back as itself and leaves every
+/// other field alone, and a name it refuses does not. It reads the backend's own
+/// maps, so an upgrade that changes one has to agree here too.
+#[test]
+fn a_custom_name_is_refused_exactly_when_it_would_not_come_back_as_itself() {
+    const NAMES: [&str; 37] = [
+        "TITLE",
+        "title",
+        "ARTIST",
+        "ALBUM",
+        "GENRE",
+        "COMMENT",
+        "DATE",
+        "YEAR",
+        "TRACKNUMBER",
+        "DISCTOTAL",
+        "COMPOSER",
+        "LABEL",
+        "ORGANIZATION",
+        "BPM",
+        "ISRC",
+        "KEY",
+        "WWW",
+        "MEDIA",
+        "MEDIATYPE",
+        "COUNTRY",
+        "RELEASECOUNTRY",
+        "COMM",
+        "TIT2",
+        "TPE1",
+        "TALB",
+        "TCON",
+        "TRCK",
+        "TPOS",
+        "TPUB",
+        "TXXX",
+        "USLT",
+        "TIT1",
+        "TPE4",
+        "trkn",
+        "disk",
+        "\u{a9}nam",
+        "MYFIELD",
+    ];
+    let standard = [
+        (TagField::Title, "T"),
+        (TagField::Artist, "A"),
+        (TagField::Album, "L"),
+        (TagField::Genre, "G"),
+        (TagField::Comment, "C"),
+        (TagField::Year, "1999"),
+        (TagField::TrackNumber, "3"),
+        (TagField::TrackTotal, "9"),
+        (TagField::DiscNumber, "1"),
+        (TagField::DiscTotal, "2"),
+        (TagField::Composer, "CO"),
+        (TagField::Publisher, "PB"),
+        (TagField::Bpm, "120"),
+        (TagField::Isrc, "USABC1234567"),
+        (TagField::InitialKey, "Am"),
+        (TagField::Url, "http://x.example"),
+        (TagField::MediaType, "CD"),
+    ];
+    let fixtures: [(&str, Vec<u8>); 3] = [
+        ("flac", MINIMAL_FLAC.to_vec()),
+        ("mp3", minimal_mp3()),
+        ("m4a", include_bytes!("fixtures/minimal.m4a").to_vec()),
+    ];
+    for (extension, bytes) in fixtures {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-custom-name-{}.{extension}",
+            std::process::id()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+        let mut file = TagEngine::read(&path).unwrap();
+        for (field, value) in &standard {
+            file.tags.insert(field.clone(), value.to_string());
+        }
+        TagEngine::write(&file).unwrap();
+        let tagged = std::fs::read(&path).unwrap();
+        let baseline = TagEngine::read(&path).unwrap().tags;
+
+        for name in NAMES {
+            std::fs::write(&path, &tagged).unwrap();
+            let custom = TagField::Custom(name.to_string());
+            let mut file = TagEngine::read(&path).unwrap();
+            file.tags.insert(custom.clone(), "VALUE".to_string());
+            TagEngine::write(&file).unwrap();
+            let mut back = TagEngine::read(&path).unwrap().tags;
+            let kept = back.remove(&custom).as_deref() == Some("VALUE") && back == baseline;
+            assert_eq!(
+                is_storable_custom_name_at(&path, name),
+                kept,
+                "{extension} {name:?}: {back:?}"
+            );
+        }
+        std::fs::remove_file(&path).ok();
+    }
 }

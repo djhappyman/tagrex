@@ -5565,11 +5565,20 @@ pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool 
 ///
 /// ID3v2 (`TXXX`) and MP4 freeform atoms take any non-empty name. A file whose
 /// type the extension does not tell is given the benefit of the doubt.
+///
+/// On every tag a name must also come back as itself (#694): see
+/// [`custom_name_reads_as_itself`].
 pub fn is_storable_custom_name_at(path: &Path, name: &str) -> bool {
     if name.is_empty() {
         return false;
     }
-    match FileType::from_path(path) {
+    let file_type = FileType::from_path(path);
+    if let Some(file_type) = &file_type {
+        if !custom_name_reads_as_itself(name, file_type.primary_tag_type()) {
+            return false;
+        }
+    }
+    match file_type {
         Some(FileType::Flac | FileType::Vorbis | FileType::Opus | FileType::Speex) => name
             .bytes()
             .all(|byte| (0x20..=0x7D).contains(&byte) && byte != b'='),
@@ -5581,6 +5590,28 @@ pub fn is_storable_custom_name_at(path: &Path, name: &str) -> bool {
         }
         _ => true,
     }
+}
+
+/// Whether a custom field called `name` is read back from `tag_type` as a custom
+/// field of that name. A name that is the format's own key for a standard field
+/// (`COMM` or `TIT2` in ID3v2, `TITLE` in Vorbis Comments, `trkn` in MP4), or a
+/// spelling a read folds into one (`LABEL`, `MEDIATYPE`), is not a field of its
+/// own: the value writes over that field, is added to it, or is lost beside it.
+///
+/// The answer comes from the same maps a read uses, so the two cannot disagree.
+/// A difference in case alone is not a different field: APE's `MOOD` comes back
+/// as `Mood`, under the spelling the backend has for it.
+fn custom_name_reads_as_itself(name: &str, tag_type: TagType) -> bool {
+    if tag_type == TagType::VorbisComments && number_pair_fields(name).is_some() {
+        return false;
+    }
+    let field = match item_key_for_custom_name(tag_type, name) {
+        Some(key) => item_key_to_tag_field(key, tag_type),
+        None => {
+            field_for_name_on_tag(name, tag_type).unwrap_or_else(|| field_for_custom_name(name).0)
+        }
+    };
+    matches!(field, TagField::Custom(own) if own.eq_ignore_ascii_case(name))
 }
 
 /// A vinyl (or cassette) position as a track or disc number (#641): one or two
@@ -6752,6 +6783,54 @@ mod tests {
                 "ÜNI a=b \u{1F3B5}"
             ));
             assert!(!is_storable_custom_name_at(Path::new(path), ""));
+        }
+        // A format's own key for a standard field is that field, not a name
+        // for a new one (#694), and only in that format.
+        for (path, name) in [
+            ("a.mp3", "COMM"),
+            ("a.mp3", "TIT2"),
+            ("a.mp3", "TPE1"),
+            ("a.wav", "TALB"),
+            ("a.mp3", "LABEL"),
+            ("a.flac", "TITLE"),
+            ("a.flac", "title"),
+            ("a.flac", "GENRE"),
+            ("a.flac", "TRCK"),
+            ("a.ogg", "DATE"),
+            ("a.opus", "MEDIATYPE"),
+            ("a.m4a", "\u{a9}nam"),
+            ("a.m4a", "trkn"),
+            ("a.m4a", "ISRC"),
+            ("a.wv", "Artist"),
+            ("a.wv", "WWW"),
+        ] {
+            assert!(
+                !is_storable_custom_name_at(Path::new(path), name),
+                "{path} {name:?}"
+            );
+            assert!(!is_writable_value_at(
+                Path::new(path),
+                &custom(name),
+                "value"
+            ));
+            assert!(is_writable_value_at(Path::new(path), &custom(name), ""));
+        }
+        for (path, name) in [
+            ("a.mp3", "TITLE"),
+            ("a.mp3", "TXXX"),
+            ("a.mp3", "USLT"),
+            ("a.mp3", "TIT1"),
+            ("a.mp3", "BPM"),
+            ("a.flac", "COMM"),
+            ("a.m4a", "TITLE"),
+            ("a.wv", "MOOD"),
+            ("a.flac", "RELEASECOUNTRY"),
+            ("a.mp3", "RELEASECOUNTRY"),
+        ] {
+            assert!(
+                is_storable_custom_name_at(Path::new(path), name),
+                "{path} {name:?}"
+            );
         }
         // Clearing a field is always fine, whatever it is called.
         assert!(is_writable_value_at(
