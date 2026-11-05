@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   was written as `0/12` and the file read back as track 0. Clearing a number now
   clears its total too, as a change the preview shows
   ([#700](https://github.com/tagrex/tagrex/issues/700)).
+- A click on a file no longer freezes the app while a very long release is open:
+  the length comparison with the selected files took a second or more at 3,353
+  tracks, and now takes under a millisecond with the same result
+  ([#701](https://github.com/tagrex/tagrex/issues/701)).
 
 ## [1.2.0] - 2026-11-05
 

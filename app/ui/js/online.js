@@ -816,8 +816,62 @@ function durationPairs(release) {
   }
   const byTrack = new Map();
   if (files.length === 0) return { pairs: byTrack, files: 0 };
+  const whole = release.tracks.every((t) => !t.duration_secs || Number.isInteger(t.duration_secs))
+    && files.every((f) => Number.isInteger(f.secs));
+  const pairing = whole ? pairByClosestLength(release.tracks, files) : pairByClosestLengthSorted(release.tracks, files);
+  for (const [i, j] of pairing) {
+    byTrack.set(i, { delta: files[j].secs - release.tracks[i].duration_secs, path: files[j].path, secs: files[j].secs });
+  }
+  return { pairs: byTrack, files: files.length };
+}
+
+// Each track with a length takes the free file closest to it in length, within
+// PAIR_LIMIT_SECS: the closest pairs of all are settled first, a tie goes to the
+// earlier track, then to the earlier file. Returns track index -> file index.
+//
+// Built by listing every track-file pair and sorting them, this ran on each change
+// of the selection: with a release of 3,353 tracks open and 1,000 files selected
+// that was 2 million pairs and a second's freeze per click. Lengths are whole
+// seconds, so the same settling walks the distance up from 0 instead, taking for
+// each open track the earliest free file of a length that far off; the files of
+// one length are taken in order, so the earliest free one is always the next.
+function pairByClosestLength(tracks, files) {
+  const byLength = new Map(); // length -> { indices of the files of that length, the next free one }
+  files.forEach((f, j) => {
+    let bucket = byLength.get(f.secs);
+    if (!bucket) byLength.set(f.secs, (bucket = { files: [], next: 0 }));
+    bucket.files.push(j);
+  });
+  const free = (secs) => {
+    const bucket = byLength.get(secs);
+    return bucket && bucket.next < bucket.files.length ? bucket : null;
+  };
+  const pairing = new Map();
+  let open = [];
+  tracks.forEach((t, i) => {
+    if (t.duration_secs) open.push(i);
+  });
+  for (let distance = 0; distance <= PAIR_LIMIT_SECS && open.length; distance++) {
+    const still = [];
+    for (const i of open) {
+      const secs = tracks[i].duration_secs;
+      const shorter = free(secs - distance);
+      const longer = distance > 0 ? free(secs + distance) : null;
+      let bucket = shorter;
+      if (longer && (!bucket || longer.files[longer.next] < bucket.files[bucket.next])) bucket = longer;
+      if (bucket) pairing.set(i, bucket.files[bucket.next++]);
+      else still.push(i);
+    }
+    open = still;
+  }
+  return pairing;
+}
+
+// The same pairing by listing and sorting every pair: what a length that is not
+// a whole number of seconds needs, which the backend does not send today.
+function pairByClosestLengthSorted(tracks, files) {
   const pairs = [];
-  release.tracks.forEach((t, i) => {
+  tracks.forEach((t, i) => {
     if (!t.duration_secs) return;
     files.forEach((f, j) => {
       const delta = f.secs - t.duration_secs;
@@ -825,13 +879,14 @@ function durationPairs(release) {
     });
   });
   pairs.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta));
+  const pairing = new Map();
   const takenFiles = new Set();
   for (const p of pairs) {
-    if (byTrack.has(p.i) || takenFiles.has(p.j)) continue;
-    byTrack.set(p.i, { delta: p.delta, path: files[p.j].path, secs: files[p.j].secs });
+    if (pairing.has(p.i) || takenFiles.has(p.j)) continue;
+    pairing.set(p.i, p.j);
     takenFiles.add(p.j);
   }
-  return { pairs: byTrack, files: files.length };
+  return pairing;
 }
 
 function deltaBand(delta) {
