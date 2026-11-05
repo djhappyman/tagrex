@@ -3301,6 +3301,47 @@ fn an_ape_tag_misread_as_id3v1_is_never_written_over() {
     assert_eq!(before, after, "the file was touched");
 }
 
+/// #709: free text in the date a format lets it hold does not stop an edit of
+/// another field, and stays as it was. A new value of that shape is still refused.
+#[test]
+fn a_date_that_is_no_year_does_not_block_an_edit() {
+    use lofty::config::WriteOptions;
+    use lofty::prelude::*;
+    use lofty::tag::{ItemKey, Tag};
+
+    let fixtures: [(&str, Vec<u8>); 2] = [
+        ("flac", MINIMAL_FLAC.to_vec()),
+        ("m4a", MINIMAL_M4A.to_vec()),
+    ];
+    for (extension, bytes) in fixtures {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-free-text-date-{}.{extension}",
+            std::process::id()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+        // Put there as another tool would, past the guard this is about.
+        let tagged = lofty::read_from_path(&path).unwrap();
+        let mut tag = tagged
+            .primary_tag()
+            .cloned()
+            .unwrap_or_else(|| Tag::new(tagged.primary_tag_type()));
+        tag.insert_text(ItemKey::RecordingDate, "May 1999".to_string());
+        tag.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        let mut file = TagEngine::read(&path).unwrap();
+        assert_eq!(file.tags.get(&TagField::Year).unwrap(), "May 1999");
+        file.tags.insert(TagField::Title, "New".to_string());
+        TagEngine::write(&file).unwrap();
+        let mut file = TagEngine::read(&path).unwrap();
+        assert_eq!(file.tags.get(&TagField::Title).unwrap(), "New");
+        assert_eq!(file.tags.get(&TagField::Year).unwrap(), "May 1999");
+
+        file.tags.insert(TagField::Year, "June 1999".to_string());
+        assert!(TagEngine::write(&file).is_err(), "{extension}");
+        std::fs::remove_file(&path).ok();
+    }
+}
+
 /// #708: a write can come out at the size #614 refuses to touch. The file has to
 /// read as what was written and go on taking writes, and other readers have to
 /// see the same items.

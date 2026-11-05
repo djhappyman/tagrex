@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   A tag that came out at exactly 131 bytes was taken for an ID3v1 tag, and the file
   then showed nonsense and refused further writes
   ([#708](https://github.com/tagrex/tagrex/issues/708)).
+- A file whose date is free text, such as `May 1999`, can be edited again. Any change
+  to it failed on Apply with "invalid year", about a field nobody touched. The date
+  stays as it was, and a new value of that shape is still refused
+  ([#709](https://github.com/tagrex/tagrex/issues/709)).
 
 ## [1.2.0] - 2026-11-05
 

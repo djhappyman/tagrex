@@ -2425,8 +2425,14 @@ impl TagEngine {
                 // rejects it on the next READ — poisoning the file so it can no longer
                 // be listed or edited. Reject it here, leaving the file untouched, so no
                 // plan source (edits, transforms, import) can ever corrupt a file.
+                //
+                // That is about a new value (#709). One the file already states, free
+                // text like `May 1999` where the format allows it, stays as it is: a
+                // write that does not touch it has no business refusing the file.
                 if let Some(year) = file.tags.get(&TagField::Year) {
-                    if !is_writable_year(year) {
+                    if !is_writable_year(year)
+                        && TagEngine::read(&file.path)?.tags.get(&TagField::Year) != Some(year)
+                    {
                         return Err(TagIoError::Malformed(format!(
                             "invalid year {year:?}: a year must be 4 digits (e.g. 1996)"
                         )));
@@ -3616,6 +3622,24 @@ fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Ta
             }
         }
     }
+    // A year no ID3v2 timestamp can hold is only here because a legacy block
+    // states it (#709). It stays out of the ID3v2 tag, which could not be read
+    // back, and counts as untouched, so that block keeps it.
+    let without_year;
+    let tags = if tags
+        .get(&TagField::Year)
+        .is_some_and(|year| !is_writable_year(year))
+    {
+        before.remove(&TagField::Year);
+        without_year = tags
+            .iter()
+            .filter(|(field, _)| **field != TagField::Year)
+            .map(|(field, value)| (field.clone(), value.clone()))
+            .collect::<TagMap>();
+        &without_year
+    } else {
+        tags
+    };
     save_id3v2(path, container, tags, &before)?;
     if id3v2_write_landed(path, container, tags)? {
         return sync_iff_text(path, container, tags, &before);
