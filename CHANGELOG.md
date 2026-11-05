@@ -415,6 +415,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   zero-padded (`1996-5`). Before, the first failed the whole save with a backend
   error and the second lost its month. FLAC and MP4 keep such a value as text
   ([#696](https://github.com/tagrex/tagrex/issues/696)).
+- A number an M4A cannot hold is flagged in the preview: a track, disc or total
+  of `0` or above 65535, and a BPM with a fraction or above 32767. Before, the
+  save reported success and the track number was gone, `128.5` read back as `129`,
+  and a very large BPM was stored in a form other players cannot read
+  ([#697](https://github.com/tagrex/tagrex/issues/697)).
 
 ## [1.1.1] - 2026-11-02
 

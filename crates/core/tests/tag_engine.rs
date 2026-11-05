@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use tagrex_core::model::{
-    is_storable_custom_name_at, AudioFormat, CoverArt, CoverKind, Id3v2Revision, TagBlockContent,
-    TagBlockKind, TagEngine, TagField, TrackFile,
+    is_storable_custom_name_at, is_writable_value_at, AudioFormat, CoverArt, CoverKind,
+    Id3v2Revision, TagBlockContent, TagBlockKind, TagEngine, TagField, TrackFile,
 };
 
 /// `fLaC` + a non-last STREAMINFO block (34 bytes, all zeroed out except a
@@ -5764,4 +5764,45 @@ fn a_custom_name_is_refused_exactly_when_it_would_not_come_back_as_itself() {
         }
         std::fs::remove_file(&path).ok();
     }
+}
+
+/// The preview's rule for numbers on an MP4, held against real writes (#697): a
+/// value it accepts reads back as the same number, and one it refuses does not.
+#[test]
+fn an_mp4_number_is_refused_exactly_when_it_would_not_read_back() {
+    let path = std::env::temp_dir().join(format!("tagrex-mp4-numbers-{}.m4a", std::process::id()));
+    let fixture = include_bytes!("fixtures/minimal.m4a");
+    let number = |text: &str| text.parse::<f64>().unwrap();
+    for field in [
+        TagField::TrackNumber,
+        TagField::TrackTotal,
+        TagField::DiscNumber,
+        TagField::DiscTotal,
+    ] {
+        for value in ["1", "07", "65535", "0", "65536", "70000", "999999999999"] {
+            std::fs::write(&path, fixture).unwrap();
+            let mut file = TagEngine::read(&path).unwrap();
+            file.tags.insert(field.clone(), value.to_string());
+            TagEngine::write(&file).unwrap();
+            let back = TagEngine::read(&path).unwrap().tags.remove(&field);
+            assert_eq!(
+                is_writable_value_at(&path, &field, value),
+                back.is_some_and(|back| number(&back) == number(value)),
+                "{field:?} {value:?}"
+            );
+        }
+    }
+    for value in ["128", "065", "128.0", "32767", "128.5", "0.5"] {
+        std::fs::write(&path, fixture).unwrap();
+        let mut file = TagEngine::read(&path).unwrap();
+        file.tags.insert(TagField::Bpm, value.to_string());
+        TagEngine::write(&file).unwrap();
+        let back = TagEngine::read(&path).unwrap().tags.remove(&TagField::Bpm);
+        assert_eq!(
+            is_writable_value_at(&path, &TagField::Bpm, value),
+            back.is_some_and(|back| number(&back) == number(value)),
+            "bpm {value:?}"
+        );
+    }
+    std::fs::remove_file(&path).ok();
 }

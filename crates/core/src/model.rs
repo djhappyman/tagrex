@@ -5562,10 +5562,35 @@ pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool 
         && FileType::from_path(path).is_some_and(|file_type| {
             file_type.primary_tag_type() == TagType::Id3v2 && !is_id3v2_timestamp(value)
         });
+    let unholdable_number =
+        FileType::from_path(path) == Some(FileType::Mp4) && !fits_mp4_integer_atom(field, value);
     is_writable_value(field, value)
         && !(integers_only && is_vinyl_position(value))
         && !unstorable_name
         && !unholdable_date
+        && !unholdable_number
+}
+
+/// Whether an MP4's integer atom holds `value` as the number it states (#697).
+/// The track, disc and total numbers share a 16-bit `trkn` or `disk` atom in which
+/// 0 means none, so a value outside 1..=65535 is dropped. The tempo is a `tmpo`
+/// integer: a fraction is rounded, and past [`mp4_tempo_atom`]'s range it goes in
+/// as text no other reader understands. A BPM of 0 means none and is meant so
+/// (#611), and `07` as 7 is the same number.
+fn fits_mp4_integer_atom(field: &TagField, value: &str) -> bool {
+    match field {
+        TagField::TrackNumber
+        | TagField::TrackTotal
+        | TagField::DiscNumber
+        | TagField::DiscTotal => !is_ascii_digits(value) || matches!(value.parse::<u16>(), Ok(1..)),
+        TagField::Bpm => {
+            !is_decimal(value)
+                || value
+                    .parse::<f64>()
+                    .is_ok_and(|bpm| bpm.fract() == 0.0 && bpm <= f64::from(i16::MAX))
+        }
+        _ => true,
+    }
 }
 
 /// Whether an ID3v2 timestamp frame holds `value` as it is and it is a real date.
@@ -6768,6 +6793,41 @@ mod tests {
             std::fs::remove_file(&path).ok();
             std::fs::remove_file(&link).ok();
         }
+    }
+
+    /// A number an MP4 integer atom cannot hold was dropped or rounded on a save
+    /// that reported success. Every other format keeps it as text (#697).
+    #[test]
+    fn a_number_is_checked_against_what_an_mp4_atom_holds() {
+        let at = |path: &str, field: &TagField, value: &str| {
+            is_writable_value_at(Path::new(path), field, value)
+        };
+        for field in [
+            TagField::TrackNumber,
+            TagField::TrackTotal,
+            TagField::DiscNumber,
+            TagField::DiscTotal,
+        ] {
+            for good in ["", "1", "7", "07", "65535"] {
+                assert!(at("a.m4a", &field, good), "{field:?} {good:?}");
+            }
+            for bad in ["0", "00", "65536", "70000", "999999999999"] {
+                assert!(!at("a.m4a", &field, bad), "{field:?} {bad:?}");
+                assert!(at("a.mp3", &field, bad), "{field:?} {bad:?}");
+                assert!(at("a.flac", &field, bad), "{field:?} {bad:?}");
+            }
+        }
+        for good in ["", "0", "128", "065", "128.0", "128.00", "32767"] {
+            assert!(at("a.m4a", &TagField::Bpm, good), "{good:?}");
+        }
+        for bad in ["128.5", "128.4", "0.5", "32768", "70000", "99999999999"] {
+            assert!(!at("a.m4a", &TagField::Bpm, bad), "{bad:?}");
+            assert!(at("a.mp3", &TagField::Bpm, bad), "{bad:?}");
+            assert!(at("a.flac", &TagField::Bpm, bad), "{bad:?}");
+        }
+        // A vinyl position has its own rule (#641), and text is not a number.
+        assert!(!at("a.m4a", &TagField::TrackNumber, "A1"));
+        assert!(!at("a.m4a", &TagField::Bpm, "abc"));
     }
 
     /// A date an ID3v2 timestamp cannot hold failed the whole save or lost its
