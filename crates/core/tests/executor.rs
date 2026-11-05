@@ -1211,6 +1211,77 @@ fn two_targets_the_file_system_folds_together_are_refused() {
     assert!(journal.batches().unwrap().is_empty());
 }
 
+/// The names in `dir` as the file system spells them, which on one that folds
+/// letter case is the only way to tell `track.flac` from `Track.flac`.
+fn names_in(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_rename_that_only_changes_case_goes_through_and_undoes() {
+    let dir = TempDir::new("case-only");
+    let track = dir.flac("track.flac");
+    let renamed = dir.path().join("Track.flac");
+    let mut journal = VecJournal::new();
+    let plan = ChangePlan {
+        description: "case".to_string(),
+        changes: vec![FileChange {
+            path: track.clone(),
+            rename_to: Some(renamed.clone()),
+            ..FileChange::default()
+        }],
+        ..ChangePlan::default()
+    };
+
+    let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
+    assert_eq!(names_in(dir.path()), ["Track.flac"]);
+    assert_eq!(std::fs::read(&renamed).unwrap(), MINIMAL_FLAC);
+
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+    assert_eq!(names_in(dir.path()), ["track.flac"]);
+    assert_eq!(std::fs::read(&track).unwrap(), MINIMAL_FLAC);
+}
+
+#[test]
+fn a_rollback_of_a_rename_that_only_changes_case_reports_no_failure() {
+    let dir = TempDir::new("case-only-rollback");
+    let first = dir.flac("first.flac");
+    let second = dir.flac("second.flac");
+    let mut journal = VecJournal::new();
+    let plan = ChangePlan {
+        description: "case".to_string(),
+        changes: [&first, &second]
+            .iter()
+            .map(|path| FileChange {
+                path: (*path).clone(),
+                rename_to: Some(
+                    dir.path()
+                        .join(path.file_name().unwrap().to_string_lossy().to_uppercase()),
+                ),
+                ..FileChange::default()
+            })
+            .collect(),
+        ..ChangePlan::default()
+    };
+
+    let cancel = AtomicBool::new(false);
+    let result = Executor::apply_with(
+        &plan,
+        &mut journal,
+        &roots(dir.path()),
+        &mut |_| cancel.store(true, Ordering::SeqCst),
+        &cancel,
+    );
+
+    assert!(matches!(result, Err(PlanError::Cancelled)), "{result:?}");
+    assert_eq!(names_in(dir.path()), ["first.flac", "second.flac"]);
+}
+
 #[test]
 fn undo_never_replaces_a_file_put_back_at_the_original_path() {
     let dir = TempDir::new("undo-occupied");

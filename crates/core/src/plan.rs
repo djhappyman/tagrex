@@ -261,9 +261,9 @@ impl Executor {
             ensure_storable_custom_names(change)?;
             if let Some(target) = effective_rename(change) {
                 let canonical_target = resolve_target_within_roots(target, &roots)?;
-                if canonical_target.exists() {
-                    return Err(PlanError::RenameCollision(canonical_target));
-                }
+                // The planned spelling, not the canonical one: canonicalizing a
+                // name the file system folds can hand back the file's own.
+                ensure_target_free(&change.path, target, change.copy)?;
                 if !planned_targets.insert(canonical_target.clone()) {
                     return Err(PlanError::RenameCollision(canonical_target));
                 }
@@ -274,9 +274,7 @@ impl Executor {
             for (from, to) in &change.sidecar_renames {
                 ensure_within_roots(from, &roots)?;
                 let canonical_target = resolve_target_within_roots(to, &roots)?;
-                if canonical_target.exists() {
-                    return Err(PlanError::RenameCollision(canonical_target));
-                }
+                ensure_target_free(from, to, change.copy)?;
                 if !planned_targets.insert(canonical_target.clone()) {
                     return Err(PlanError::RenameCollision(canonical_target));
                 }
@@ -846,7 +844,31 @@ fn is_untransferred(target: &Path, original: &Path, copy: bool) -> bool {
     if copy {
         !target.exists()
     } else {
-        original.exists() && !target.exists()
+        original.exists() && (!target.exists() || folds_onto(original, target))
+    }
+}
+
+/// Whether `to` reaches the file at `from` only because the file system folds
+/// the name (#707): one directory entry, spelled another way. Being the same
+/// file is not enough, as two hard links are that under two real names, and a
+/// rename from one onto the other does nothing. What tells them apart is whether
+/// `to` is spelled so in its folder. Only asked once both paths are found to
+/// exist, so the listing is not a cost a normal rename pays.
+fn folds_onto(from: &Path, to: &Path) -> bool {
+    same_file::is_same_file(from, to).unwrap_or(false) && !is_listed(to)
+}
+
+/// Whether `path`'s folder lists an entry with exactly its name. A folder that
+/// cannot be listed counts as listing it, the answer that refuses a move.
+fn is_listed(path: &Path) -> bool {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return true;
+    };
+    match std::fs::read_dir(parent) {
+        Ok(mut entries) => {
+            entries.any(|entry| entry.map_or(true, |entry| entry.file_name() == name))
+        }
+        Err(_) => true,
     }
 }
 
@@ -889,12 +911,12 @@ fn canonical_roots(allowed_roots: &[PathBuf]) -> Result<Vec<PathBuf>, PlanError>
 /// name) are the same file, so the second of two such moves would land on the
 /// first. Checked again right before each transfer, where the file system has
 /// the last word. The one file allowed to be there already is the one being
-/// moved: a case-only rename of a single file.
+/// moved: a case-only rename of a single file (#707).
 fn ensure_target_free(from: &Path, to: &Path, copy: bool) -> Result<(), PlanError> {
     match std::fs::symlink_metadata(to) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(PlanError::Io(error)),
-        Ok(_) if !copy && same_file::is_same_file(from, to).unwrap_or(false) => Ok(()),
+        Ok(_) if !copy && (from == to || folds_onto(from, to)) => Ok(()),
         Ok(_) => Err(PlanError::RenameCollision(to.to_path_buf())),
     }
 }
@@ -1549,6 +1571,14 @@ mod tests {
         assert!(ensure_target_free(&from, &from, false).is_ok());
         assert!(matches!(
             ensure_target_free(&from, &from, true),
+            Err(PlanError::RenameCollision(_))
+        ));
+        // A second name of the same file is a name of its own: renaming onto
+        // it would do nothing and report success (#707).
+        let link = dir.join("link.flac");
+        std::fs::hard_link(&from, &link).unwrap();
+        assert!(matches!(
+            ensure_target_free(&from, &link, false),
             Err(PlanError::RenameCollision(_))
         ));
         std::fs::remove_dir_all(&dir).ok();

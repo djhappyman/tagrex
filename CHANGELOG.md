@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   shrink. A JPEG of 16000x16000 px, or an interlaced PNG past the decoder's limit,
   ignored the size limit without a word
   ([#706](https://github.com/tagrex/tagrex/issues/706)).
+- A rename that only changes letter case goes through on macOS and Windows, for a
+  file and for its sidecars, and undoes. Before, it was refused as a collision with
+  the file itself ([#707](https://github.com/tagrex/tagrex/issues/707)).
 
 ## [1.2.0] - 2026-11-05
 

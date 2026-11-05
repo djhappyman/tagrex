@@ -8039,6 +8039,42 @@ mod tests {
         assert!(fine.unrendered.is_empty());
     }
 
+    // #707: on a file system that folds case the target is the file itself. The
+    // sidecar has to travel the same way, and undo has to bring back the spelling.
+    #[test]
+    fn a_mask_that_only_changes_letter_case_renames_and_undoes() {
+        let dir = TempDir::new("rename-case-only");
+        let track = dir.tagged_flac("autechre - gantz graf.flac", "Autechre", "Gantz Graf");
+        std::fs::write(dir.0.join("autechre - gantz graf.lrc"), b"lyrics").unwrap();
+        let names = || {
+            let mut names: Vec<String> = std::fs::read_dir(&dir.0)
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.ends_with(".flac") || name.ends_with(".lrc"))
+                .collect();
+            names.sort();
+            names
+        };
+
+        let mut app = open_app(&dir);
+        let plan = app
+            .preview_rename("%artist% - %title%", std::slice::from_ref(&track))
+            .unwrap();
+        assert_eq!(plan.changes.len(), 1);
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(
+            names(),
+            ["Autechre - Gantz Graf.flac", "Autechre - Gantz Graf.lrc"]
+        );
+
+        app.undo(batch.id).unwrap();
+        assert_eq!(
+            names(),
+            ["autechre - gantz graf.flac", "autechre - gantz graf.lrc"]
+        );
+    }
+
     #[test]
     fn preview_rename_with_a_separator_restructures_under_the_files_own_folder() {
         let dir = TempDir::new("rename-subfolder");
