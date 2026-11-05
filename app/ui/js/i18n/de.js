@@ -733,6 +733,7 @@ export const de = {
   "plan.importSoundeo": "Soundeo-Release importieren",
   "plan.carryingExtras": { one: "mit {n} zusätzlichen Datei", other: "mit {n} zusätzlichen Dateien" },
   "plan.cleanedUp": "aufgeräumt",
+  "plan.coverNotShrunk": { one: "{n} Bild ist zu groß zum Verkleinern und wird in voller Größe eingebettet", other: "{n} Bilder sind zu groß zum Verkleinern und werden in voller Größe eingebettet" },
   "plan.interrupted": "vor dem Abschluss unterbrochen",
   // ---- the settings sheet ----
   "settings.discogs.token": "Persönlicher Token",

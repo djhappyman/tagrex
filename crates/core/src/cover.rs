@@ -66,6 +66,21 @@ pub fn resize_cover(art: &CoverArt, max_px: u32, quality: u8) -> CoverArt {
     }
 }
 
+/// Whether `art`, as [`resize_cover`] returned it, is still over `max_px`.
+///
+/// That happens when the image is too large for the decoder to hold (a JPEG of
+/// 16000×16000, an interlaced PNG past its limit), which embeds at full size
+/// and so has to be said in the preview (#706). An image whose size cannot be
+/// read at all is not claimed to be over anything.
+pub fn is_over_max(art: &CoverArt, max_px: u32) -> bool {
+    max_px != 0
+        && image::ImageReader::new(Cursor::new(&art.data))
+            .with_guessed_format()
+            .ok()
+            .and_then(|reader| reader.into_dimensions().ok())
+            .is_some_and(|(width, height)| width > max_px || height > max_px)
+}
+
 /// The size past which a PNG cover is shrunk by [`shrink_png_rows`] before the
 /// final pass instead of being decoded whole: 16 megapixels, 64 MB as RGBA.
 /// Covers below it, which is nearly all of them, come out exactly as before.
@@ -196,6 +211,33 @@ mod tests {
             ..CoverArt::default()
         };
         assert_eq!(resize_cover(&junk, 500, 85), junk);
+        assert!(!is_over_max(&junk, 500));
+        assert!(!is_over_max(&small, 500));
+        assert!(!is_over_max(&big, 0));
+        assert!(is_over_max(&big, 500));
+    }
+
+    /// #706: an image the decoder cannot hold is embedded as it is, and
+    /// [`is_over_max`] is what tells the preview so. Only the header is real,
+    /// which is all this path reads before giving up.
+    #[test]
+    fn a_cover_too_large_to_decode_stays_over_the_limit() {
+        let mut data = Vec::new();
+        let mut encoder = ::png::Encoder::new(&mut data, 30_000, 30_000);
+        encoder.set_color(::png::ColorType::Rgb);
+        encoder.set_depth(::png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_chunk(::png::chunk::IDAT, &[]).unwrap();
+        drop(writer);
+        let art = CoverArt {
+            mime: "image/png".into(),
+            data,
+            ..CoverArt::default()
+        };
+        let out = resize_cover(&art, 500, 85);
+        assert_eq!(out, art);
+        assert!(is_over_max(&out, 500));
+        assert!(!is_over_max(&out, 30_000));
     }
 
     /// #622: the row-by-row shrink averages each output pixel over the input

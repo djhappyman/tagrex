@@ -590,6 +590,10 @@ pub enum PlanMessage {
     },
     /// A note: a rule chain has been over the plan this describes.
     CleanedUp,
+    /// A note: images too large to shrink go in at their full size (#706).
+    CoverNotShrunk {
+        images: usize,
+    },
     /// A note on a History entry: the batch never finished, the app having
     /// stopped part-way through it (#659).
     Interrupted,
@@ -626,6 +630,7 @@ impl PlanMessage {
             },
             Self::CarryingExtras { .. } => "plan.carryingExtras",
             Self::CleanedUp => "plan.cleanedUp",
+            Self::CoverNotShrunk { .. } => "plan.coverNotShrunk",
             Self::Interrupted => "plan.interrupted",
         }
     }
@@ -664,7 +669,9 @@ impl PlanMessage {
             Self::EditTagsWithCover { files } | Self::CarryingExtras { files } => {
                 Some(*files as u64)
             }
-            Self::SetCoverImages { images } => Some(*images as u64),
+            Self::SetCoverImages { images } | Self::CoverNotShrunk { images } => {
+                Some(*images as u64)
+            }
             _ => None,
         }
     }
@@ -709,6 +716,10 @@ impl PlanMessage {
                 n => format!("carrying {n} extra files"),
             },
             Self::CleanedUp => "cleaned up".to_string(),
+            Self::CoverNotShrunk { images } => match images {
+                1 => "1 image too large to shrink goes in at full size".to_string(),
+                n => format!("{n} images too large to shrink go in at full size"),
+            },
             Self::Interrupted => "interrupted before it finished".to_string(),
         }
     }
@@ -3747,10 +3758,33 @@ impl App {
             } else {
                 PlanMessage::EditTags
             },
-            Vec::new(),
+            if with_cover > 0 {
+                self.unshrunk_cover_notes(import_art.iter())
+            } else {
+                Vec::new()
+            },
             changes,
             false,
         ))
+    }
+
+    /// The note for the images in `covers` still over the size limit after
+    /// [`tagrex_core::cover::resize_cover`], which embeds what it cannot decode
+    /// as it is (#706). Nothing else in the preview would show it: a cover has
+    /// no column, and the setting says these are being shrunk.
+    fn unshrunk_cover_notes<'a>(
+        &self,
+        covers: impl IntoIterator<Item = &'a CoverArt>,
+    ) -> Vec<PlanMessage> {
+        let max_px = self.cover_max_px.get();
+        match covers
+            .into_iter()
+            .filter(|art| tagrex_core::cover::is_over_max(art, max_px))
+            .count()
+        {
+            0 => Vec::new(),
+            images => vec![PlanMessage::CoverNotShrunk { images }],
+        }
     }
 }
 
@@ -3920,7 +3954,12 @@ impl App {
                 folder_extras: Vec::new(),
             });
         }
-        Ok(self.plan(PlanMessage::EmbedCover, Vec::new(), changes, false))
+        let notes = if changes.is_empty() {
+            Vec::new()
+        } else {
+            self.unshrunk_cover_notes(new_art.iter())
+        };
+        Ok(self.plan(PlanMessage::EmbedCover, notes, changes, false))
     }
 
     /// Preview replacing every selected file's whole image set with `covers`
@@ -3970,13 +4009,18 @@ impl App {
                 folder_extras: Vec::new(),
             });
         }
+        let notes = if changes.is_empty() {
+            Vec::new()
+        } else {
+            self.unshrunk_cover_notes(&new)
+        };
         Ok(self.plan(
             if new.is_empty() {
                 PlanMessage::RemoveCover
             } else {
                 PlanMessage::SetCoverImages { images: new.len() }
             },
-            Vec::new(),
+            notes,
             changes,
             false,
         ))
@@ -7440,6 +7484,68 @@ mod tests {
         assert_eq!(after.len(), 2, "the back cover was dropped: {after:?}");
         assert_eq!(after[0], image(CoverKind::Front, 9));
         assert_eq!(after[1], image(CoverKind::Back, 2));
+    }
+
+    // #706: an image the decoder cannot hold goes in at full size, and every
+    // way a cover reaches a plan says so while the size limit is on.
+    #[test]
+    fn a_cover_too_large_to_shrink_is_named_in_the_preview() {
+        // A PNG's signature, the header of a 30000 px square and no pixels:
+        // its size can be read, and it cannot be decoded.
+        const TOO_LARGE: [u8; 57] = [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x75, 0x30, 0x00, 0x00, 0x75, 0x30, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0xe9, 0x45, 0x6f, 0xed, 0x00, 0x00, 0x00, 0x00, 0x49, 0x44, 0x41, 0x54, 0x35,
+            0xaf, 0x06, 0x1e, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60,
+            0x82,
+        ];
+        let dir = TempDir::new("cover-not-shrunk");
+        let track = dir.tagged_flac("x.flac", "Autechre", "Gantz Graf");
+        let cover = cover_art_to_dto(&CoverArt {
+            mime: "image/png".to_string(),
+            data: TOO_LARGE.to_vec(),
+            kind: CoverKind::Front,
+            description: String::new(),
+        });
+        let paths = std::slice::from_ref(&track);
+        let edits = [TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: "title".to_string(),
+            value: Some("Gantz".to_string()),
+        }];
+        let app = open_app(&dir);
+        app.import_cover.set(ImportCover::Always);
+        let plans = || {
+            [
+                app.preview_cover_embed(paths, &cover).unwrap(),
+                app.preview_cover_set(paths, std::slice::from_ref(&cover))
+                    .unwrap(),
+                app.preview_tag_edits_with_cover(&edits, Some(&cover))
+                    .unwrap(),
+            ]
+        };
+
+        // No limit set, so nothing was promised and nothing is said.
+        for plan in plans() {
+            assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+        }
+        app.cover_max_px.set(500);
+        for plan in plans() {
+            assert_eq!(plan.notes.len(), 1, "{:?}", plan.description);
+            assert_eq!(plan.notes[0].code, "plan.coverNotShrunk");
+            assert_eq!(plan.notes[0].count, Some(1));
+            assert!(
+                plan.description
+                    .ends_with("1 image too large to shrink goes in at full size"),
+                "{}",
+                plan.description
+            );
+        }
+        // The size it states is the limit it is over: at 30000 px it fits.
+        app.cover_max_px.set(30_000);
+        for plan in plans() {
+            assert!(plan.notes.is_empty(), "{:?}", plan.notes);
+        }
     }
 
     // #56: the whole set is one change — add, reorder and retype at once — and

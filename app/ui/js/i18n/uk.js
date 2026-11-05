@@ -738,6 +738,7 @@ export const uk = {
   "plan.importSoundeo": "Імпорт релізу з Soundeo",
   "plan.carryingExtras": { one: "переноситься {n} додатковий файл", few: "переносяться {n} додаткові файли", many: "переноситься {n} додаткових файлів" },
   "plan.cleanedUp": "очищено",
+  "plan.coverNotShrunk": { one: "{n} зображення завелике для зменшення, записується як є", few: "{n} зображення завеликі для зменшення, записуються як є", many: "{n} зображень завеликі для зменшення, записуються як є" },
   "plan.interrupted": "перервано до завершення",
   // ---- the settings sheet ----
   "settings.discogs.token": "Особистий токен",

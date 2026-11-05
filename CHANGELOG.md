@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A `Retry-After` stated as a date is read as the seconds left until it, on every
   provider. Before, it was dropped and the provider's default wait of 60 s or 1 s
   was used ([#703](https://github.com/tagrex/tagrex/issues/703)).
+- The preview says when a cover goes in at full size because it was too large to
+  shrink. A JPEG of 16000x16000 px, or an interlaced PNG past the decoder's limit,
+  ignored the size limit without a word
+  ([#706](https://github.com/tagrex/tagrex/issues/706)).
 
 ## [1.2.0] - 2026-11-05
 

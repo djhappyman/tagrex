@@ -739,6 +739,7 @@ export const en = {
   "plan.importSoundeo": "Import Soundeo release",
   "plan.carryingExtras": { one: "carrying {n} extra file", other: "carrying {n} extra files" },
   "plan.cleanedUp": "cleaned up",
+  "plan.coverNotShrunk": { one: "{n} image too large to shrink goes in at full size", other: "{n} images too large to shrink go in at full size" },
   "plan.interrupted": "interrupted before it finished",
   // ---- the settings sheet ----
   "settings.discogs.token": "Personal token",
