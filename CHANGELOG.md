@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   reads as the comment only of a file with no comment; beside one it stays a field
   of its own, and clearing that comment shows in the preview what it becomes
   ([#705](https://github.com/tagrex/tagrex/issues/705)).
+- A tag write can no longer leave a WavPack, APE or Musepack file reading as garbage.
+  A tag that came out at exactly 131 bytes was taken for an ID3v1 tag, and the file
+  then showed nonsense and refused further writes
+  ([#708](https://github.com/tagrex/tagrex/issues/708)).
 
 ## [1.2.0] - 2026-11-05
 

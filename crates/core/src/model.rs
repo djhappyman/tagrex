@@ -2156,7 +2156,9 @@ fn ogg_safe_write<T>(
         FileType::from_path(path),
         Some(FileType::Vorbis | FileType::Opus | FileType::Speex)
     ) {
-        return body();
+        let result = body()?;
+        pad_ape_tag_misread_as_id3v1(path)?;
+        return Ok(result);
     }
     let before = std::fs::read(path)?;
     let result = body();
@@ -4642,20 +4644,63 @@ fn ensure_audio_after_tags(path: &Path) -> Result<(), TagIoError> {
 /// every item in it. An APE footer in the last 32 bytes says the file ends in
 /// an APE tag, so there is no ID3v1 tag after it.
 fn ensure_no_misread_id3v1(path: &Path) -> Result<(), TagIoError> {
-    use std::io::{Read, Seek, SeekFrom};
-    let mut file = std::fs::File::open(path)?;
-    if file.metadata()?.len() < 128 {
-        return Ok(());
-    }
-    let mut tail = [0u8; 128];
-    file.seek(SeekFrom::End(-128))?;
-    file.read_exact(&mut tail)?;
-    if &tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX" {
+    if ends_in_ape_tag_misread_as_id3v1(path)? {
         return Err(TagIoError::Malformed(format!(
             "{} ends in an APE tag the tag library misreads as an ID3v1 tag; writing to it would destroy the APE tag",
             path.display()
         )));
     }
+    Ok(())
+}
+
+/// The shape [`ensure_no_misread_id3v1`] refuses: `TAG` where an ID3v1 tag would
+/// start, and an APE footer in the last 32 bytes.
+fn ends_in_ape_tag_misread_as_id3v1(path: &Path) -> Result<bool, TagIoError> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path)?;
+    if file.metadata()?.len() < 128 {
+        return Ok(false);
+    }
+    let mut tail = [0u8; 128];
+    file.seek(SeekFrom::End(-128))?;
+    file.read_exact(&mut tail)?;
+    Ok(&tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX")
+}
+
+/// Keep a write from leaving the shape [`ensure_no_misread_id3v1`] refuses
+/// (#708). A tag that comes out at 131 bytes has it, and the file then reads as
+/// garbage and takes no further writes. A zero byte after the last item moves
+/// the `TAG` off that offset: the tag states how many items it holds, so what
+/// follows them is not read, and the size in its header and footer counts it.
+fn pad_ape_tag_misread_as_id3v1(path: &Path) -> Result<(), TagIoError> {
+    if !ends_in_ape_tag_misread_as_id3v1(path)? {
+        return Ok(());
+    }
+    const FOOTER: usize = 32;
+    const SIZE_AT: usize = 12;
+    let before = std::fs::read(path)?;
+    let mut after = before.clone();
+    // A value's own text can hold `TAG` again one byte on, hence more than once.
+    for _ in 0..FOOTER {
+        let footer = after.len() - FOOTER;
+        let size_bytes: [u8; 4] = after[footer + SIZE_AT..footer + SIZE_AT + 4]
+            .try_into()
+            .map_err(|_| TagIoError::Malformed("an APE footer cut short".to_string()))?;
+        let size = u32::from_le_bytes(size_bytes);
+        let grown = (size + 1).to_le_bytes();
+        // The size leaves out the header, which sits right before what it counts.
+        let header = after.len().checked_sub(size as usize + FOOTER);
+        if let Some(header) = header.filter(|at| after[*at..].starts_with(b"APETAGEX")) {
+            after[header + SIZE_AT..header + SIZE_AT + 4].copy_from_slice(&grown);
+        }
+        after[footer + SIZE_AT..footer + SIZE_AT + 4].copy_from_slice(&grown);
+        after.insert(footer, 0);
+        let tail = &after[after.len() - 128..];
+        if !(&tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX") {
+            break;
+        }
+    }
+    rewrite_in_place(path, &before, &after)?;
     Ok(())
 }
 

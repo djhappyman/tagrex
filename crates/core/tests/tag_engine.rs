@@ -3301,6 +3301,90 @@ fn an_ape_tag_misread_as_id3v1_is_never_written_over() {
     assert_eq!(before, after, "the file was touched");
 }
 
+/// #708: a write can come out at the size #614 refuses to touch. The file has to
+/// read as what was written and go on taking writes, and other readers have to
+/// see the same items.
+#[test]
+fn a_write_never_leaves_an_ape_tag_misread_as_id3v1() {
+    use lofty::ape::ApeTag;
+    use lofty::config::ParseOptions;
+    use lofty::file::AudioFile;
+    use lofty::wavpack::WavPackFile;
+
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-test-pad-ape-{}.wv",
+        std::process::id()
+    ));
+    let name = TagField::Custom("MYFIELD".to_string());
+    // Header and footer are 32 bytes each and an item is 8 + key + 1 + value, so
+    // this value makes the 131 the tag must not stop at.
+    let value = "x".repeat(51);
+    let write = |tags: BTreeMap<TagField, String>| {
+        let format = TagEngine::read(&path).unwrap().format;
+        TagEngine::write(&TrackFile {
+            path: path.clone(),
+            format,
+            tags,
+        })
+    };
+    let tag_at_128 = || {
+        let bytes = std::fs::read(&path).unwrap();
+        &bytes[bytes.len() - 128..bytes.len() - 125] == b"TAG"
+    };
+
+    std::fs::write(&path, MINIMAL_WAVPACK).unwrap();
+    write(BTreeMap::from([(name.clone(), value.clone())])).unwrap();
+    assert!(!tag_at_128(), "the write left the shape");
+    let tags = TagEngine::read(&path).unwrap().tags;
+    assert_eq!(tags.get(&name), Some(&value), "{tags:?}");
+    assert_eq!(tags.len(), 1, "{tags:?}");
+
+    // Read straight through the backend's own APE reader, padding and all.
+    let mut file = std::fs::File::open(&path).unwrap();
+    let parsed = WavPackFile::read_from(&mut file, ParseOptions::new()).unwrap();
+    let ape: &ApeTag = parsed.ape().expect("the tag is an APE tag");
+    assert_eq!(
+        ape.get("MYFIELD").and_then(|item| item.value().text()),
+        Some(value.as_str())
+    );
+
+    // It goes on taking writes, which drop the padding with the old tag.
+    let mut tags = TagEngine::read(&path).unwrap().tags;
+    tags.insert(TagField::Title, "New title".to_string());
+    write(tags.clone()).unwrap();
+    assert_eq!(TagEngine::read(&path).unwrap().tags, tags);
+
+    // A value holding `TAG` where the check looks is the same trap.
+    let mut value = "x".repeat(60);
+    value.replace_range(0..3, "TAG");
+    std::fs::write(&path, MINIMAL_WAVPACK).unwrap();
+    write(BTreeMap::from([(name.clone(), value.clone())])).unwrap();
+    let bytes = std::fs::read(&path).unwrap();
+    let tail = &bytes[bytes.len() - 128..];
+    assert!(!(&tail[..3] == b"TAG" && &tail[96..104] == b"APETAGEX"));
+    assert_eq!(
+        TagEngine::read(&path).unwrap().tags.get(&name),
+        Some(&value)
+    );
+
+    // Clearing what covers leave behind gets the same treatment.
+    std::fs::write(&path, MINIMAL_WAVPACK).unwrap();
+    write(BTreeMap::from([(name.clone(), "x".repeat(51))])).unwrap();
+    TagEngine::write_covers(
+        &path,
+        &[CoverArt {
+            mime: "image/png".into(),
+            data: vec![0x89, 0x50, 0x4e, 0x47],
+            ..CoverArt::default()
+        }],
+    )
+    .unwrap();
+    TagEngine::write_covers(&path, &[]).unwrap();
+    assert!(!tag_at_128(), "clearing the covers left the shape");
+    assert_eq!(TagEngine::read(&path).unwrap().tags.len(), 1);
+    std::fs::remove_file(&path).ok();
+}
+
 /// #615: an ID3v2 tag holding only a picture hid the ID3v1 tag beside it — the
 /// file read as having no fields — and the next edit, keeping ID3v1 in step,
 /// rewrote it with the nothing it had read.
