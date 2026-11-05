@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A track or disc total with no number to go with it is flagged in the preview
+  on MP3, WAV, AIFF and APE tags, which state the two as one value. Before, it
+  was written as `0/12` and the file read back as track 0. Clearing a number now
+  clears its total too, as a change the preview shows
+  ([#700](https://github.com/tagrex/tagrex/issues/700)).
+
 ## [1.2.0] - 2026-11-05
 
 A release about not losing what is in your files. A change is in the undo

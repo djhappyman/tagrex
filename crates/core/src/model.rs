@@ -5660,6 +5660,16 @@ pub fn is_storable_custom_name_at(path: &Path, name: &str) -> bool {
     }
 }
 
+/// Whether the file at `path` is written to a tag that states a total only after
+/// its number. An ID3v2 `TRCK` or `TPOS` and an APE `Track` or `Disc` hold the two
+/// as one `number/total` value, so a total alone comes out as `0/12` and reads back
+/// as number 0, which nobody entered (#700). Vorbis Comments and MP4 keep it apart.
+pub fn total_needs_number_at(path: &Path) -> bool {
+    FileType::from_path(path).is_some_and(|file_type| {
+        matches!(file_type.primary_tag_type(), TagType::Id3v2 | TagType::Ape)
+    })
+}
+
 /// Whether a custom field called `name` is read back from `tag_type` as a custom
 /// field of that name. A name that is the format's own key for a standard field
 /// (`COMM` or `TIT2` in ID3v2, `TITLE` in Vorbis Comments, `trkn` in MP4), or a

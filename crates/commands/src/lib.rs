@@ -28,8 +28,8 @@ use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
 use tagrex_core::mask::{portable_file_name, FileContext, Mask, MaskError};
 use tagrex_core::matching::{self, MatchOptions, TrackRef};
 use tagrex_core::model::{
-    is_vinyl_position, is_writable_value, is_writable_value_at, CoverArt, CoverKind, Id3v2Revision,
-    TagBlock, TagBlockContent, TagBlockKind, TagEngine, TagField, TagMap,
+    is_vinyl_position, is_writable_value, is_writable_value_at, total_needs_number_at, CoverArt,
+    CoverKind, Id3v2Revision, TagBlock, TagBlockContent, TagBlockKind, TagEngine, TagField, TagMap,
 };
 use tagrex_core::plan::{
     ApplyProgress, BlockChange, ChangePlan, CoverChange, Executor, FieldChange, FileChange,
@@ -175,6 +175,71 @@ fn invalid_readings(fields: &[(String, String)], path: Option<&Path>) -> Vec<Str
         })
         .map(|(field, _)| field.clone())
         .collect()
+}
+
+/// Keep a change from leaving a total with no number on a tag that holds the two
+/// as one value, where it would be written as `0/12` and read back as number 0
+/// (#700). What is left of the pair is asked only when the change touches it, so
+/// only those files are read again.
+///
+/// A total set with no number to go with it is flagged. A number cleared under a
+/// total the file keeps takes that total with it, as a change the preview shows,
+/// unless the total is locked, in which case the number stays. Clearing the number
+/// while setting the total asks for both at once, and the number stays then too.
+fn settle_number_pair(
+    change: &mut FileChangeDto,
+    number_key: &str,
+    total_key: &str,
+    locked: &HashSet<String>,
+) {
+    let path = Path::new(&change.path);
+    if !total_needs_number_at(path) {
+        return;
+    }
+    let number_at = change
+        .tag_changes
+        .iter()
+        .position(|c| c.field == number_key && !c.invalid);
+    let total_at = change
+        .tag_changes
+        .iter()
+        .position(|c| c.field == total_key && !c.invalid);
+    if number_at.is_none() && total_at.is_none() {
+        return;
+    }
+    let Ok(file) = TagEngine::read(path) else {
+        return;
+    };
+    let on_file = |key: &str| {
+        file.tags
+            .get(&TagField::from_storage_key(key))
+            .filter(|value| !value.is_empty())
+    };
+    let stated = |at: Option<usize>, key: &str| match at {
+        Some(at) => change.tag_changes[at]
+            .new
+            .as_deref()
+            .is_some_and(|new| !new.is_empty()),
+        None => on_file(key).is_some(),
+    };
+    if stated(number_at, number_key) || !stated(total_at, total_key) {
+        return;
+    }
+    match (number_at, total_at) {
+        (Some(number), Some(_)) if on_file(number_key).is_some() => {
+            change.tag_changes[number].invalid = true;
+        }
+        (_, Some(total)) => change.tag_changes[total].invalid = true,
+        (Some(number), None) if locked.contains(total_key) => {
+            change.tag_changes[number].invalid = true;
+        }
+        _ => change.tag_changes.push(FieldChangeDto {
+            field: total_key.to_string(),
+            old: on_file(total_key).cloned(),
+            new: None,
+            invalid: false,
+        }),
+    }
 }
 
 fn field_value_invalid(field: &str, new: Option<&str>) -> bool {
@@ -2247,6 +2312,8 @@ impl App {
                     false
                 });
             }
+            settle_number_pair(&mut change, "track", "tracktotal", &locked);
+            settle_number_pair(&mut change, "disc", "disctotal", &locked);
             // A file the lock emptied is no longer a change. Dropping it keeps
             // the "12 files to apply" count honest and stops the diff staging a
             // row in which nothing differs.
@@ -11627,6 +11694,98 @@ mod tests {
         };
         assert_eq!(flagged("custom:ÜNI"), Some(true));
         assert_eq!(flagged("custom:MOOD"), Some(false));
+    }
+
+    /// A total with no number was written as `0/12` and read back as track 0, a
+    /// value nobody entered (#700). The pair is settled in the preview instead.
+    #[test]
+    fn a_total_needs_a_number_on_a_tag_that_holds_them_as_one() {
+        let dir = TempDir::new("total-no-number");
+        let track = dir.0.join("x.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        let audio = frame.repeat(5);
+        std::fs::write(&track, &audio).unwrap();
+        let mut app = open_app(&dir);
+        let edit = |field: &str, value: Option<&str>| TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: field.to_string(),
+            value: value.map(str::to_string),
+        };
+        let read = |field: TagField| TagEngine::read(&track).unwrap().tags.remove(&field);
+        let flagged = |plan: &PlanDto, key: &str| {
+            plan.changes[0]
+                .tag_changes
+                .iter()
+                .find(|c| c.field == key)
+                .map(|c| c.invalid)
+        };
+
+        // Alone on a file with no number: flagged, and nothing appears.
+        let plan = app
+            .preview_tag_edits(&[edit("tracktotal", Some("12")), edit("title", Some("T"))])
+            .unwrap();
+        assert_eq!(flagged(&plan, "tracktotal"), Some(true));
+        assert_eq!(flagged(&plan, "title"), Some(false));
+        app.apply(&plan).unwrap();
+        assert_eq!(read(TagField::TrackNumber), None);
+        assert_eq!(read(TagField::TrackTotal), None);
+
+        // With its number in the same edit, or one the file already has: fine.
+        let plan = app
+            .preview_tag_edits(&[edit("track", Some("3")), edit("tracktotal", Some("12"))])
+            .unwrap();
+        assert_eq!(flagged(&plan, "tracktotal"), Some(false));
+        app.apply(&plan).unwrap();
+        assert_eq!(read(TagField::TrackTotal).as_deref(), Some("12"));
+        let plan = app
+            .preview_tag_edits(&[edit("tracktotal", Some("14"))])
+            .unwrap();
+        assert_eq!(flagged(&plan, "tracktotal"), Some(false));
+        app.apply(&plan).unwrap();
+
+        // Clearing the number takes the total, in the preview and on undo.
+        let plan = app.preview_tag_edits(&[edit("track", None)]).unwrap();
+        let total = plan.changes[0]
+            .tag_changes
+            .iter()
+            .find(|c| c.field == "tracktotal")
+            .unwrap();
+        assert_eq!(total.old.as_deref(), Some("14"));
+        assert_eq!(total.new, None);
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(read(TagField::TrackNumber), None);
+        assert_eq!(read(TagField::TrackTotal), None);
+        app.undo(batch.id).unwrap();
+        assert_eq!(read(TagField::TrackNumber).as_deref(), Some("3"));
+        assert_eq!(read(TagField::TrackTotal).as_deref(), Some("14"));
+
+        // Clearing the number while setting the total: the number stays.
+        let plan = app
+            .preview_tag_edits(&[edit("track", None), edit("tracktotal", Some("20"))])
+            .unwrap();
+        assert_eq!(flagged(&plan, "track"), Some(true));
+        assert_eq!(flagged(&plan, "tracktotal"), Some(false));
+        app.apply(&plan).unwrap();
+        assert_eq!(read(TagField::TrackNumber).as_deref(), Some("3"));
+        assert_eq!(read(TagField::TrackTotal).as_deref(), Some("20"));
+
+        // The disc pair is the same.
+        let plan = app
+            .preview_tag_edits(&[edit("disctotal", Some("2"))])
+            .unwrap();
+        assert_eq!(flagged(&plan, "disctotal"), Some(true));
+
+        // FLAC keeps a total alone, so it is left as it was.
+        let flac = dir.tagged_flac("y.flac", "A", "T");
+        let plan = app
+            .preview_tag_edits(&[TagEditDto {
+                path: flac.to_string_lossy().into_owned(),
+                field: "tracktotal".to_string(),
+                value: Some("12".to_string()),
+            }])
+            .unwrap();
+        assert_eq!(flagged(&plan, "tracktotal"), Some(false));
     }
 
     /// A date an MP3 cannot hold failed the save late or lost part of itself; it
