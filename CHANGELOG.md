@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-05
+
+A release about not losing what is in your files. A change is in the undo
+history before its first file is written, so a crash part-way can still be undone,
+and undo refuses to run over later edits instead of overwriting them. Damaged
+files no longer take the app down or lose audio on a save, and a value a format
+cannot hold is flagged in the preview instead of being dropped after it.
+
+Also new: cover art in APE tags and vinyl positions as track numbers. The saved
+Discogs token and Beatport session are better protected, so updating is
+recommended. On Windows an update now asks for administrator rights when TagRex
+is installed under `Program Files`; a copy of 1.1.0 or 1.1.1 in that folder needs
+this one installed by hand, run as administrator, to get it.
+
 ### Added
 
 - Cover art in APE tags: WavPack, Monkey's Audio and Musepack files now show
