@@ -186,6 +186,41 @@ fn invalid_readings(fields: &[(String, String)], path: Option<&Path>) -> Vec<Str
 /// total the file keeps takes that total with it, as a change the preview shows,
 /// unless the total is locked, in which case the number stays. Clearing the number
 /// while setting the total asks for both at once, and the number stays then too.
+/// Say what clearing a comment does to a file with a separate description beside
+/// it (#705). With no comment left the description reads as the comment, so that
+/// is the change: the preview shows it, and undo gets both values back, where a
+/// plain clear would have the description written over as the comment. A
+/// description locked or changed in the same plan keeps to what was asked.
+fn settle_cleared_comment(change: &mut FileChangeDto, locked: &HashSet<String>) {
+    let Some(at) = change
+        .tag_changes
+        .iter()
+        .position(|field_change| field_change.field == "comment" && field_change.new.is_none())
+    else {
+        return;
+    };
+    let Ok(track) = TagEngine::read(Path::new(&change.path)) else {
+        return;
+    };
+    let Some(field) = tagrex_core::model::description_field(&track.tags) else {
+        return;
+    };
+    let key = field.to_storage_key();
+    if locked.contains(&key)
+        || change
+            .tag_changes
+            .iter()
+            .any(|field_change| field_change.field == key)
+    {
+        return;
+    }
+    let description = track.tags.get(field).cloned();
+    change.tag_changes[at].new = description.clone();
+    change
+        .tag_changes
+        .push(FieldChangeDto::new(key, description, None));
+}
+
 fn settle_number_pair(
     change: &mut FileChangeDto,
     number_key: &str,
@@ -2325,6 +2360,7 @@ impl App {
             }
             settle_number_pair(&mut change, "track", "tracktotal", &locked);
             settle_number_pair(&mut change, "disc", "disctotal", &locked);
+            settle_cleared_comment(&mut change, &locked);
             // A file the lock emptied is no longer a change. Dropping it keeps
             // the "12 files to apply" count honest and stops the diff staging a
             // row in which nothing differs.
@@ -7546,6 +7582,54 @@ mod tests {
         for plan in plans() {
             assert!(plan.notes.is_empty(), "{:?}", plan.notes);
         }
+    }
+
+    // #705: a cleared comment with a separate description beside it says that the
+    // description is what the comment reads as now, and undo brings back both.
+    #[test]
+    fn clearing_a_comment_beside_a_description_says_what_it_becomes() {
+        let dir = TempDir::new("comment-description");
+        let track = dir.tagged_flac("x.flac", "Autechre", "Gantz Graf");
+        let description = TagField::Custom("DESCRIPTION".to_string());
+        let mut file = TagEngine::read(&track).unwrap();
+        file.tags.insert(TagField::Comment, "cmt".to_string());
+        file.tags.insert(description.clone(), "text".to_string());
+        TagEngine::write(&file).unwrap();
+        let clear = [TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: "comment".to_string(),
+            value: None,
+        }];
+
+        let mut app = open_app(&dir);
+        let plan = app.preview_tag_edits(&clear).unwrap();
+        let changes = &plan.changes[0].tag_changes;
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        assert_eq!(changes[0].field, "comment");
+        assert_eq!(changes[0].new.as_deref(), Some("text"));
+        assert_eq!(changes[1].field, description.to_storage_key());
+        assert_eq!(changes[1].new, None);
+
+        let batch = app.apply(&plan).unwrap();
+        let tags = TagEngine::read(&track).unwrap().tags;
+        assert_eq!(tags.get(&TagField::Comment).unwrap(), "text");
+        assert!(!tags.contains_key(&description));
+
+        // Clearing it again has no description left to fall back on.
+        let again = app.preview_tag_edits(&clear).unwrap();
+        assert_eq!(again.changes[0].tag_changes.len(), 1);
+        assert_eq!(again.changes[0].tag_changes[0].new, None);
+
+        app.undo(batch.id).unwrap();
+        let tags = TagEngine::read(&track).unwrap().tags;
+        assert_eq!(tags.get(&TagField::Comment).unwrap(), "cmt");
+        assert_eq!(tags.get(&description).unwrap(), "text");
+
+        // A lock on the description leaves it, and the comment clears as asked.
+        app.set_locked_fields(&[description.to_storage_key()]);
+        let plan = app.preview_tag_edits(&clear).unwrap();
+        assert_eq!(plan.changes[0].tag_changes.len(), 1);
+        assert_eq!(plan.changes[0].tag_changes[0].new, None);
     }
 
     // #56: the whole set is one change — add, reorder and retype at once — and

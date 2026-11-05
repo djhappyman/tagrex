@@ -5751,11 +5751,14 @@ fn a_custom_name_is_refused_exactly_when_it_would_not_come_back_as_itself() {
         for name in NAMES {
             std::fs::write(&path, &tagged).unwrap();
             let custom = TagField::Custom(name.to_string());
+            // A date that is no year stays a field of its own (#705), so the
+            // name is put to the test with one that is.
+            let value = if name == "DATE" { "2001" } else { "VALUE" };
             let mut file = TagEngine::read(&path).unwrap();
-            file.tags.insert(custom.clone(), "VALUE".to_string());
+            file.tags.insert(custom.clone(), value.to_string());
             TagEngine::write(&file).unwrap();
             let mut back = TagEngine::read(&path).unwrap().tags;
-            let kept = back.remove(&custom).as_deref() == Some("VALUE") && back == baseline;
+            let kept = back.remove(&custom).as_deref() == Some(value) && back == baseline;
             assert_eq!(
                 is_storable_custom_name_at(&path, name),
                 kept,
@@ -5764,6 +5767,124 @@ fn a_custom_name_is_refused_exactly_when_it_would_not_come_back_as_itself() {
         }
         std::fs::remove_file(&path).ok();
     }
+}
+
+/// #705: the names some encoders write the year and the comment under read as
+/// those fields, on the tags that do not have the name as their own, and are
+/// stated under the format's own name from the next write on.
+#[test]
+fn a_year_or_comment_under_another_name_reads_as_that_field() {
+    let custom = |name: &str| TagField::Custom(name.to_string());
+    let fixtures: [(&str, Vec<u8>); 3] = [
+        ("wv", MINIMAL_WAVPACK.to_vec()),
+        ("mp3", minimal_mp3()),
+        ("m4a", MINIMAL_M4A.to_vec()),
+    ];
+    for (extension, bytes) in fixtures {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-other-names-{}.{extension}",
+            std::process::id()
+        ));
+        std::fs::write(&path, &bytes).unwrap();
+        let mut file = TagEngine::read(&path).unwrap();
+        file.tags.insert(custom("date"), "1999".to_string());
+        file.tags.insert(custom("comment"), "hello".to_string());
+        file.tags.insert(TagField::Title, "Title".to_string());
+        TagEngine::write(&file).unwrap();
+
+        let mut file = TagEngine::read(&path).unwrap();
+        assert_eq!(
+            file.tags.get(&TagField::Year).unwrap(),
+            "1999",
+            "{extension}"
+        );
+        assert_eq!(
+            file.tags.get(&TagField::Comment).unwrap(),
+            "hello",
+            "{extension}"
+        );
+        assert!(!file.tags.contains_key(&custom("date")), "{extension}");
+        assert!(!file.tags.contains_key(&custom("comment")), "{extension}");
+
+        // A clear holds, which it would not with the old item left in the file.
+        file.tags.remove(&TagField::Year);
+        file.tags.remove(&TagField::Comment);
+        TagEngine::write(&file).unwrap();
+        let tags = TagEngine::read(&path).unwrap().tags;
+        assert!(!tags.contains_key(&TagField::Year), "{extension}: {tags:?}");
+        assert!(
+            !tags.contains_key(&TagField::Comment),
+            "{extension}: {tags:?}"
+        );
+
+        // The file's own item wins, and a date that is no year stays what it
+        // was: as the year it would refuse every later write of the file.
+        let mut file = TagEngine::read(&path).unwrap();
+        file.tags.insert(TagField::Year, "2005".to_string());
+        file.tags.insert(TagField::Comment, "own".to_string());
+        file.tags.insert(custom("date"), "1999".to_string());
+        // An APE key ignores case, so there `comment` is the file's own item.
+        if extension != "wv" {
+            file.tags.insert(custom("comment"), "hello".to_string());
+        }
+        TagEngine::write(&file).unwrap();
+        let mut file = TagEngine::read(&path).unwrap();
+        assert_eq!(
+            file.tags.get(&TagField::Year).unwrap(),
+            "2005",
+            "{extension}"
+        );
+        assert_eq!(
+            file.tags.get(&TagField::Comment).unwrap(),
+            "own",
+            "{extension}"
+        );
+        file.tags.remove(&TagField::Year);
+        file.tags.insert(custom("date"), "May 1999".to_string());
+        TagEngine::write(&file).unwrap();
+        let file = TagEngine::read(&path).unwrap();
+        assert_eq!(
+            file.tags.get(&custom("date")).unwrap(),
+            "May 1999",
+            "{extension}"
+        );
+        assert!(!file.tags.contains_key(&TagField::Year), "{extension}");
+        TagEngine::write(&file).unwrap();
+
+        std::fs::remove_file(&path).ok();
+    }
+}
+
+/// #705: a description reads as the comment of a file that states none, and is
+/// a field of its own beside a comment.
+#[test]
+fn a_description_is_the_comment_only_of_a_file_with_none() {
+    let description = TagField::Custom("DESCRIPTION".to_string());
+    let path = temp_flac_path("description");
+    std::fs::write(&path, MINIMAL_FLAC).unwrap();
+    let mut file = TagEngine::read(&path).unwrap();
+    file.tags.insert(description.clone(), "text".to_string());
+    TagEngine::write(&file).unwrap();
+
+    let mut file = TagEngine::read(&path).unwrap();
+    assert_eq!(file.tags.get(&TagField::Comment).unwrap(), "text");
+    assert!(!file.tags.contains_key(&description));
+    // A clear holds, the description being gone with it.
+    file.tags.remove(&TagField::Comment);
+    TagEngine::write(&file).unwrap();
+    let mut file = TagEngine::read(&path).unwrap();
+    assert!(!file.tags.contains_key(&TagField::Comment));
+
+    file.tags.insert(TagField::Comment, "own".to_string());
+    file.tags.insert(description.clone(), "text".to_string());
+    TagEngine::write(&file).unwrap();
+    let file = TagEngine::read(&path).unwrap();
+    assert_eq!(file.tags.get(&TagField::Comment).unwrap(), "own");
+    assert_eq!(file.tags.get(&description).unwrap(), "text");
+    TagEngine::write(&file).unwrap();
+    let tags = TagEngine::read(&path).unwrap().tags;
+    assert_eq!(tags.get(&description).unwrap(), "text", "lost on a write");
+    std::fs::remove_file(&path).ok();
 }
 
 /// The preview's rule for numbers on an MP4, held against real writes (#697): a

@@ -2018,6 +2018,14 @@ fn insert_concrete_items(
             Some(field) => (field, false),
             None => field_for_custom_name(&name),
         };
+        // A date that is no year stays the field it was (#705): as the year it
+        // would refuse every later write of the file.
+        let (field, from_alias) =
+            if from_alias && field == TagField::Year && !is_writable_year(&value) {
+                (TagField::Custom(name), false)
+            } else {
+                (field, from_alias)
+            };
         if !from_alias && !repeated.insert(field.clone()) {
             if let Some(joined) = tags.get_mut(&field) {
                 joined.push_str(&multi_value_separator());
@@ -2027,7 +2035,31 @@ fn insert_concrete_items(
         }
         insert_read_value(tags, field, from_alias, value);
     }
+    fold_description_into_comment(tags);
     Ok(())
+}
+
+/// A `DESCRIPTION` as the comment of a file that states no comment (#705), which
+/// is where some encoders put the comment. Only then, unlike the names in
+/// [`legacy_alias_field`], which go away on the next write: a file can hold a
+/// comment and a separate description, and that description stays a field of its
+/// own. For the same reason the name is not refused as a custom field.
+fn fold_description_into_comment(tags: &mut TagMap) {
+    if tags.contains_key(&TagField::Comment) {
+        return;
+    }
+    let description = description_field(tags).cloned();
+    if let Some(value) = description.and_then(|field| tags.remove(&field)) {
+        tags.insert(TagField::Comment, value);
+    }
+}
+
+/// The field that holds a file's separate description, which is what its comment
+/// reads as once the comment is gone (#705).
+pub fn description_field(tags: &TagMap) -> Option<&TagField> {
+    tags.keys().find(
+        |field| matches!(field, TagField::Custom(name) if name.eq_ignore_ascii_case("DESCRIPTION")),
+    )
 }
 
 /// Whether a block's values say what the track is: a title, an artist or an
@@ -3123,8 +3155,9 @@ fn has_ape(path: &Path, container: FileType) -> Result<bool, TagIoError> {
 fn ape_item_field(key: &str) -> TagField {
     match ItemKey::from_key(TagType::Ape, key) {
         Some(item_key) => item_key_to_tag_field(item_key, TagType::Ape),
-        None => field_for_name_on_tag(key, TagType::Ape)
-            .unwrap_or_else(|| TagField::Custom(key.to_string())),
+        None => {
+            field_for_name_on_tag(key, TagType::Ape).unwrap_or_else(|| field_for_custom_name(key).0)
+        }
     }
 }
 
@@ -5311,6 +5344,10 @@ const RELEASE_COUNTRY: &str = "RELEASECOUNTRY";
 /// labels or two media types, and — because a `TXXX` that is not in the model is
 /// not carried over — the stale one goes away the next time the file is written.
 ///
+/// `DATE` and `COMMENT` are what some encoders write in place of a format's own
+/// year and comment (#705). `DESCRIPTION` can mean something else beside a comment,
+/// so it is not here: see [`fold_description_into_comment`].
+///
 /// Deliberately small, and only for names that mean one unambiguous thing. `KEY`
 /// and `BPM` are **not** here on purpose: DJ tools write those in notations that
 /// differ from the standard frames (Camelot against musical, decimal against
@@ -5326,6 +5363,8 @@ fn legacy_alias_field(name: &str) -> Option<TagField> {
         "LABEL" | "ORGANIZATION" => Some(TagField::Publisher),
         "COUNTRY" | RELEASE_COUNTRY => Some(TagField::Custom(RELEASE_COUNTRY.to_string())),
         "ORIGINALMEDIATYPE" | "MEDIA" | "MEDIATYPE" => Some(TagField::MediaType),
+        "DATE" => Some(TagField::Year),
+        "COMMENT" => Some(TagField::Comment),
         _ => None,
     }
 }
@@ -5840,6 +5879,8 @@ mod tests {
         assert_eq!(alias("ORGANIZATION"), (TagField::Publisher, true));
         assert_eq!(alias("OriginalMediaType"), (TagField::MediaType, true));
         assert_eq!(alias("media"), (TagField::MediaType, true));
+        assert_eq!(alias("date"), (TagField::Year, true));
+        assert_eq!(alias("comment"), (TagField::Comment, true));
         assert_eq!(
             alias("COUNTRY"),
             (TagField::Custom("RELEASECOUNTRY".to_string()), true)

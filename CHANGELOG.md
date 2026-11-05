@@ -37,6 +37,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A rename that only changes letter case goes through on macOS and Windows, for a
   file and for its sidecars, and undoes. Before, it was refused as a collision with
   the file itself ([#707](https://github.com/tagrex/tagrex/issues/707)).
+- A year stated as `date` and a comment stated as `comment` under a name of their
+  own, as some encoders write them, read as the Year and Comment fields and are
+  stored under the format's own name from the next write on. A `DESCRIPTION`
+  reads as the comment only of a file with no comment; beside one it stays a field
+  of its own, and clearing that comment shows in the preview what it becomes
+  ([#705](https://github.com/tagrex/tagrex/issues/705)).
 
 ## [1.2.0] - 2026-11-05
 
