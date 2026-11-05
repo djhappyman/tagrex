@@ -5567,9 +5567,10 @@ pub fn is_writable_value_at(path: &Path, field: &TagField, value: &str) -> bool 
 /// type the extension does not tell is given the benefit of the doubt.
 ///
 /// On every tag a name must also come back as itself (#694): see
-/// [`custom_name_reads_as_itself`].
+/// [`custom_name_reads_as_itself`]. A NUL ends a `TXXX` name, so one inside it
+/// never does (#695).
 pub fn is_storable_custom_name_at(path: &Path, name: &str) -> bool {
-    if name.is_empty() {
+    if name.is_empty() || name.contains('\0') {
         return false;
     }
     let file_type = FileType::from_path(path);
@@ -6831,6 +6832,10 @@ mod tests {
                 is_storable_custom_name_at(Path::new(path), name),
                 "{path} {name:?}"
             );
+        }
+        // A NUL ends a TXXX name, and is no use in any other (#695).
+        for path in ["a.mp3", "a.m4a", "a.flac", "a.ape"] {
+            assert!(!is_storable_custom_name_at(Path::new(path), "MY\0FIELD"));
         }
         // Clearing a field is always fine, whatever it is called.
         assert!(is_writable_value_at(

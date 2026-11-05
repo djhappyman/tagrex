@@ -2210,6 +2210,18 @@ impl App {
         let mut skipped: Vec<LockedSkipDto> = Vec::new();
         let mut kept = Vec::with_capacity(changes.len());
         for mut change in changes {
+            // A NUL is the separator between an ID3v2.4 or APE value's parts:
+            // written, it cut the text before it or split the value in two. It
+            // shows as nothing in the table, and arrives from a paste or a
+            // provider. Taken out here, the preview shows what is written and
+            // undo compares against it, in every format alike (#695).
+            change.tag_changes.retain_mut(|field_change| {
+                let Some(new) = field_change.new.as_mut().filter(|new| new.contains('\0')) else {
+                    return true;
+                };
+                new.retain(|c| c != '\0');
+                field_change.old.as_deref().unwrap_or("") != new.as_str()
+            });
             // A vinyl position is a track number everywhere but in an MP4
             // (#641), which only the file's path can tell.
             for field_change in &mut change.tag_changes {
@@ -11615,6 +11627,61 @@ mod tests {
         };
         assert_eq!(flagged("custom:ÜNI"), Some(true));
         assert_eq!(flagged("custom:MOOD"), Some(false));
+    }
+
+    /// A NUL separates the values of an ID3v2.4 frame, so `a\0b` read back as `b`
+    /// or as two values. It is gone from the plan, so the preview shows what the
+    /// file will say and undo finds what it expects (#695).
+    #[test]
+    fn a_nul_in_a_value_is_taken_out_before_the_save() {
+        let dir = TempDir::new("nul-value");
+        let track = dir.0.join("x.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        std::fs::write(&track, frame.repeat(5)).unwrap();
+        let mut tags = std::collections::BTreeMap::new();
+        tags.insert(TagField::Album, "ab".to_string());
+        TagEngine::write(&tagrex_core::model::TrackFile {
+            path: track.clone(),
+            format: tagrex_core::model::AudioFormat::Mp3,
+            tags,
+        })
+        .unwrap();
+        let mut app = open_app(&dir);
+        let edit = |field: &str, value: &str| TagEditDto {
+            path: track.to_string_lossy().into_owned(),
+            field: field.to_string(),
+            value: Some(value.to_string()),
+        };
+
+        // The album only differs from what the file says by the NUL.
+        let plan = app
+            .preview_tag_edits(&[
+                edit("title", "a\0b"),
+                edit("artist", "c\0d"),
+                edit("album", "a\0b"),
+            ])
+            .unwrap();
+        let new = |key: &str| {
+            plan.changes[0]
+                .tag_changes
+                .iter()
+                .find(|c| c.field == key)
+                .map(|c| c.new.clone())
+        };
+        assert_eq!(new("title"), Some(Some("ab".to_string())));
+        assert_eq!(new("artist"), Some(Some("cd".to_string())));
+        assert_eq!(new("album"), None);
+
+        let batch = app.apply(&plan).unwrap();
+        let tags = TagEngine::read(&track).unwrap().tags;
+        assert_eq!(tags.get(&TagField::Title).map(String::as_str), Some("ab"));
+        assert_eq!(tags.get(&TagField::Artist).map(String::as_str), Some("cd"));
+
+        app.undo(batch.id).unwrap();
+        let tags = TagEngine::read(&track).unwrap().tags;
+        assert_eq!(tags.get(&TagField::Title), None);
+        assert_eq!(tags.get(&TagField::Album).map(String::as_str), Some("ab"));
     }
 
     /// A custom field named after a standard one replaced that field or was

@@ -406,6 +406,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   anything is written. Before, the save reported success and the value replaced
   that field, was added to it or was lost
   ([#694](https://github.com/tagrex/tagrex/issues/694)).
+- A NUL character in a value, from a paste or a provider, is removed before the
+  save. In an MP3, WAV, AIFF or APE tag it cut off the text before it or split
+  the value in two. A custom field name with a NUL in it is flagged in the
+  preview ([#695](https://github.com/tagrex/tagrex/issues/695)).
 
 ## [1.1.1] - 2026-11-02
 
