@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   the length comparison with the selected files took a second or more at 3,353
   tracks, and now takes under a millisecond with the same result
   ([#701](https://github.com/tagrex/tagrex/issues/701)).
+- A release tracklist with thousands of tracks scrolls smoothly: only the rows in
+  and near view are drawn, while the ticks, the tally, Select all, the match and
+  the import still cover every track
+  ([#702](https://github.com/tagrex/tagrex/issues/702)).
+- A `Retry-After` stated as a date is read as the seconds left until it, on every
+  provider. Before, it was dropped and the provider's default wait of 60 s or 1 s
+  was used ([#703](https://github.com/tagrex/tagrex/issues/703)).
 
 ## [1.2.0] - 2026-11-05
 

@@ -15,10 +15,24 @@ use thiserror::Error;
 
 /// The seconds a `Retry-After` header asks for, or `None` when it states none
 /// this can read. Surrounding whitespace is allowed, as HTTP allows it; the
-/// other form the header may take, an HTTP date, is left to the caller's
-/// default.
+/// other form the header may take, an HTTP date, counts as the seconds left
+/// until it (#703).
 pub fn parse_retry_after(value: Option<&str>) -> Option<u64> {
-    value.and_then(|value| value.trim().parse().ok())
+    retry_after_at(value, std::time::SystemTime::now())
+}
+
+/// [`parse_retry_after`] as of `now`. A date already past asks for no wait, and
+/// part of a second left rounds up, so the wait never ends before the date.
+fn retry_after_at(value: Option<&str>, now: std::time::SystemTime) -> Option<u64> {
+    let value = value?.trim();
+    if let Ok(seconds) = value.parse() {
+        return Some(seconds);
+    }
+    let until = httpdate::parse_http_date(value).ok()?;
+    Some(match until.duration_since(now) {
+        Ok(left) => left.as_secs() + u64::from(left.subsec_nanos() > 0),
+        Err(_) => 0,
+    })
 }
 
 /// How long a provider waits to connect. The HTTP client waits forever by
@@ -322,12 +336,32 @@ mod tests {
         assert_eq!(parse_retry_after(Some("120")), Some(120));
         assert_eq!(parse_retry_after(Some(" 120\t")), Some(120));
         assert_eq!(parse_retry_after(Some("0")), Some(0));
-        // The other form the header may take is left to the caller's default.
-        assert_eq!(
-            parse_retry_after(Some("Wed, 21 Oct 2026 07:28:00 GMT")),
-            None
-        );
         assert_eq!(parse_retry_after(Some("")), None);
+        assert_eq!(parse_retry_after(Some("soon")), None);
         assert_eq!(parse_retry_after(None), None);
+    }
+
+    #[test]
+    fn retry_after_given_as_a_date_is_the_seconds_left_until_it() {
+        use std::time::Duration;
+        let date = httpdate::parse_http_date("Wed, 21 Oct 2026 07:28:00 GMT").unwrap();
+        let now = date - Duration::from_secs(600);
+        // The three forms HTTP allows, the first being the one servers send.
+        for value in [
+            "Wed, 21 Oct 2026 07:28:00 GMT",
+            " Wed, 21 Oct 2026 07:28:00 GMT\t",
+            "Wednesday, 21-Oct-26 07:28:00 GMT",
+            "Wed Oct 21 07:28:00 2026",
+        ] {
+            assert_eq!(retry_after_at(Some(value), now), Some(600), "{value}");
+        }
+        let value = Some("Wed, 21 Oct 2026 07:28:00 GMT");
+        // Part of a second left is waited out, not cut short.
+        let close = date - Duration::from_millis(1500);
+        assert_eq!(retry_after_at(value, close), Some(2));
+        // The moment itself and anything after it ask for no wait.
+        assert_eq!(retry_after_at(value, date), Some(0));
+        let late = date + Duration::from_secs(5);
+        assert_eq!(retry_after_at(value, late), Some(0));
     }
 }
