@@ -1,11 +1,12 @@
 //! Tag data model and the tag I/O engine facade.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::RwLock;
 
+use encoding_rs::Encoding;
 use lofty::aac::AacFile;
 use lofty::ape::{ApeFile, ApeItem, ApeTag, APE_PICTURE_TYPES};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
@@ -48,6 +49,43 @@ const SILENT_MPEG_FRAMES: usize = 5;
 /// Set the ID3v2 version future writes use (`true` = v2.3, `false` = v2.4).
 pub fn set_write_id3v23(v23: bool) {
     WRITE_ID3V23.store(v23, Ordering::Relaxed);
+}
+
+/// The code pages Latin-1 text can be read in (#698), by the label the settings
+/// store. A label not listed here, the empty one included, is Latin-1 itself:
+/// the text is read as the standard says.
+pub const LEGACY_CODE_PAGES: [&str; 12] = [
+    "windows-1251",
+    "koi8-r",
+    "koi8-u",
+    "windows-1252",
+    "windows-1250",
+    "windows-1253",
+    "windows-1254",
+    "windows-1257",
+    "shift_jis",
+    "gbk",
+    "big5",
+    "euc-kr",
+];
+
+/// The code page Latin-1 text is read in (#698), `None` for Latin-1 itself.
+/// App-wide and rarely changed, like the two preferences around it.
+static LEGACY_CODE_PAGE: RwLock<Option<&'static Encoding>> = RwLock::new(None);
+
+/// Set the code page future reads take Latin-1 text to be in (#698).
+pub fn set_legacy_code_page(label: &str) {
+    let page = LEGACY_CODE_PAGES
+        .contains(&label)
+        .then(|| Encoding::for_label(label.as_bytes()))
+        .flatten();
+    if let Ok(mut current) = LEGACY_CODE_PAGE.write() {
+        *current = page;
+    }
+}
+
+fn legacy_code_page() -> Option<&'static Encoding> {
+    LEGACY_CODE_PAGE.read().ok().and_then(|page| *page)
 }
 
 /// The write options for an ID3v2 save, honoring the version preference.
@@ -810,7 +848,14 @@ fn tag_for_block(kind: TagBlockKind, content: &TagBlockContent) -> Tag {
         // at — the same silent-drop rule the writer follows (#165), and part of
         // what makes a rebuild exact only for ID3v1.
         if item_key_for(field, tag_type).is_some() {
-            push_field_items(&mut tag, field, value);
+            if kind == TagBlockKind::Id3v1 {
+                // Nothing but the code page can say this text in that block.
+                let width = if *field == TagField::Comment { 28 } else { 30 };
+                let spelled = id3v1_spelling(value, width);
+                push_field_items(&mut tag, field, spelled.as_deref().unwrap_or(value));
+            } else {
+                push_field_items(&mut tag, field, value);
+            }
         }
     }
     for cover in &content.covers {
@@ -850,10 +895,27 @@ fn id3v1_as_written(tag: Id3v1Tag) -> Id3v1Tag {
     if tag.dump_to(&mut synthetic, write_options()).is_err() {
         return tag;
     }
-    MpegFile::read_from(&mut Cursor::new(synthetic), tag_only_options())
+    let mut written = MpegFile::read_from(&mut Cursor::new(synthetic), tag_only_options())
         .ok()
         .and_then(|file| file.id3v1().cloned())
-        .unwrap_or(tag)
+        .unwrap_or(tag);
+    // And what they say is what a read would make of them (#698).
+    if let Some(page) = legacy_code_page() {
+        for text in [
+            &mut written.title,
+            &mut written.artist,
+            &mut written.album,
+            &mut written.comment,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(decoded) = in_code_page(text, page) {
+                *text = decoded;
+            }
+        }
+    }
+    written
 }
 
 /// A generic tag as Vorbis Comments, with its items in their order (#616).
@@ -1341,6 +1403,156 @@ fn looks_like_cp1251(bytes: &[u8]) -> bool {
         .filter(|&at| high(at) && ((at > 0 && high(at - 1)) || high(at + 1)))
         .count();
     total > 0 && paired * 2 >= total
+}
+
+/// `text`, read from a block that spells it in Latin-1, as `page` reads the same
+/// bytes (#698). `None` when that changes nothing: text in plain ASCII, or bytes
+/// that are no text in that code page, which stay what the standard says they
+/// are rather than turn into replacement characters.
+fn in_code_page(text: &str, page: &'static Encoding) -> Option<String> {
+    if text.is_ascii() {
+        return None;
+    }
+    let bytes = text
+        .chars()
+        .map(|c| u8::try_from(u32::from(c)).ok())
+        .collect::<Option<Vec<u8>>>()?;
+    page.decode_without_bom_handling_and_without_replacement(&bytes)
+        .map(std::borrow::Cow::into_owned)
+}
+
+/// `value` as an ID3v1 field holds it in the chosen code page (#698), as the
+/// Latin-1 text that stands for those bytes, cut to `width` bytes without
+/// splitting a character. `None` when no code page is chosen or it has no spelling
+/// for the text, and the value goes to the backend as it is.
+fn id3v1_spelling(value: &str, width: usize) -> Option<String> {
+    let page = legacy_code_page()?;
+    let (bytes, _, unmappable) = page.encode(value);
+    if unmappable {
+        return None;
+    }
+    let mut end = bytes.len().min(width);
+    while end > 0
+        && page
+            .decode_without_bom_handling_and_without_replacement(&bytes[..end])
+            .is_none()
+    {
+        end -= 1;
+    }
+    Some(bytes[..end].iter().map(|&byte| char::from(byte)).collect())
+}
+
+/// The text a frame holds in Latin-1, by the fields it has for it.
+fn latin1_frame_texts<'frame>(
+    frame: &'frame mut Frame<'static>,
+) -> Option<(
+    &'frame mut TextEncoding,
+    [Option<&'frame mut std::borrow::Cow<'static, str>>; 2],
+)> {
+    let (encoding, texts) = match frame {
+        Frame::Text(text) => (&mut text.encoding, [Some(&mut text.value), None]),
+        Frame::UserText(text) => (
+            &mut text.encoding,
+            [Some(&mut text.description), Some(&mut text.content)],
+        ),
+        Frame::Comment(comment) => (
+            &mut comment.encoding,
+            [Some(&mut comment.description), Some(&mut comment.content)],
+        ),
+        Frame::UnsynchronizedText(lyrics) => (
+            &mut lyrics.encoding,
+            [Some(&mut lyrics.description), Some(&mut lyrics.content)],
+        ),
+        _ => return None,
+    };
+    (*encoding == TextEncoding::Latin1).then_some((encoding, texts))
+}
+
+/// Read the Latin-1 text of `tag` in `page` (#698), and answer what each decoded
+/// text was as the file spells it, for [`restore_latin1_spellings`]. Frames in any
+/// other encoding are real Unicode and stay as they are. The frames that changed
+/// still say Latin-1, so a save knows which ones have bytes to give back, unless
+/// `to_unicode` is set: then they go out in Unicode.
+fn decode_latin1_frames(
+    tag: &mut Id3v2Tag,
+    page: &'static Encoding,
+    to_unicode: bool,
+) -> HashMap<String, String> {
+    let mut spellings = HashMap::new();
+    tag.retain_mut(|frame| {
+        if let Some((encoding, texts)) = latin1_frame_texts(frame) {
+            let mut decoded_any = false;
+            for text in texts.into_iter().flatten() {
+                if let Some(decoded) = in_code_page(text, page) {
+                    spellings.insert(decoded.clone(), text.to_string());
+                    *text = decoded.into();
+                    decoded_any = true;
+                }
+            }
+            if decoded_any && to_unicode {
+                *encoding = TextEncoding::UTF8;
+            }
+        }
+        true
+    });
+    spellings
+}
+
+/// Give every frame of `tag` that is to go out in Latin-1 the text the file
+/// spells it with (#698): [`keep_unedited_encodings`] kept the encoding of a frame
+/// nobody edited, and only these spellings are the same bytes again.
+fn restore_latin1_spellings(tag: &mut Id3v2Tag, spellings: &HashMap<String, String>) {
+    if spellings.is_empty() {
+        return;
+    }
+    tag.retain_mut(|frame| {
+        if let Some((_, texts)) = latin1_frame_texts(frame) {
+            for text in texts.into_iter().flatten() {
+                if let Some(spelling) = spellings.get(text.as_ref()) {
+                    *text = spelling.clone().into();
+                }
+            }
+        }
+        true
+    });
+}
+
+/// `tag`, as the probe of the file at `path` gave it, with its Latin-1 text read
+/// in the chosen code page (#698). The generic tag no longer says which encoding a
+/// value came in, so the frames are parsed once more, only with a code page chosen
+/// and for an ID3v2 tag, and a tag that turns out to hold no such text is handed
+/// back as it came. A parse that fails here changes nothing: the probe read the
+/// file, so the file still reads.
+///
+/// An ID3v1 tag has no encoding to ask about: see [`decode_id3v1_values`].
+fn tag_in_code_page(path: &Path, container: FileType, tag: Tag, options: ParseOptions) -> Tag {
+    let Some(page) = legacy_code_page() else {
+        return tag;
+    };
+    if tag.tag_type() != TagType::Id3v2 {
+        return tag;
+    }
+    let Ok(Some(mut parsed)) = parse_id3v2(path, container, options) else {
+        return tag;
+    };
+    if decode_latin1_frames(&mut parsed, page, false).is_empty() {
+        tag
+    } else {
+        Tag::from(parsed)
+    }
+}
+
+/// The values read from an ID3v1 tag, all of them Latin-1, in the chosen code page
+/// (#698).
+fn decode_id3v1_values(tags: &mut TagMap) {
+    let Some(page) = legacy_code_page() else {
+        return;
+    };
+    for value in tags.values_mut() {
+        if let Some(decoded) = in_code_page(value, page) {
+            *value = decoded;
+        }
+    }
 }
 
 /// How far past the tag the last-ditch attempt will look for the audio (#204).
@@ -2341,6 +2553,7 @@ impl TagEngine {
                 let Some(tag) = tagged_file.remove(candidate) else {
                     continue;
                 };
+                let tag = tag_in_code_page(path, container, tag, custom_item_options());
                 let tag_type = tag.tag_type();
                 let comment = owned_comment(&tag);
                 for item in tag.items() {
@@ -2368,6 +2581,9 @@ impl TagEngine {
                     }
                 }
                 insert_concrete_items(path, container, tag, &mut tags)?;
+                if tag_type == TagType::Id3v1 {
+                    decode_id3v1_values(&mut tags);
+                }
                 if tag_type == TagType::Id3v2 && !tags.contains_key(&TagField::Year) {
                     if let Some(year) = lost_v23_year(path, container) {
                         tags.insert(TagField::Year, year);
@@ -2686,6 +2902,71 @@ impl TagEngine {
         })
     }
 
+    /// Whether the file's ID3v2 tag holds Latin-1 text the chosen code page reads
+    /// as something else (#698), which
+    /// [`id3v2_text_to_unicode`](Self::id3v2_text_to_unicode) would rewrite.
+    pub fn has_legacy_id3v2_text(path: &Path) -> Result<bool, TagIoError> {
+        guarded(path, || {
+            let Some(page) = legacy_code_page() else {
+                return Ok(false);
+            };
+            let Some(container) = container_of(path)? else {
+                return Ok(false);
+            };
+            let Some(mut tag) = parse_id3v2(path, container, custom_item_options())? else {
+                return Ok(false);
+            };
+            Ok(!decode_latin1_frames(&mut tag, page, false).is_empty())
+        })
+    }
+
+    /// Whether the file has an ID3v1 tag but no ID3v2 one, with text in that tag
+    /// the chosen code page reads as something else (#698). ID3v1 cannot hold
+    /// Unicode, so such a file gets an ID3v2 tag to hold its text.
+    pub fn has_legacy_id3v1_text_only(path: &Path) -> Result<bool, TagIoError> {
+        guarded(path, || {
+            let Some(page) = legacy_code_page() else {
+                return Ok(false);
+            };
+            let tagged = probe_file(path)?;
+            if tagged.tag(TagType::Id3v2).is_some() {
+                return Ok(false);
+            }
+            let Some(tag) = tagged.tag(TagType::Id3v1) else {
+                return Ok(false);
+            };
+            Ok(tag_to_map(tag)
+                .values()
+                .any(|value| in_code_page(value, page).is_some()))
+        })
+    }
+
+    /// Rewrite the Latin-1 text of the file's ID3v2 tag in Unicode, as the chosen
+    /// code page reads it (#698). Everything else in the tag, the revision included,
+    /// stays as it is. Answers whether the file had such a tag to rewrite.
+    ///
+    /// Only [`Executor`](crate::plan::Executor) should call this.
+    pub fn id3v2_text_to_unicode(path: &Path) -> Result<bool, TagIoError> {
+        guarded(path, || {
+            let Some(page) = legacy_code_page() else {
+                return Ok(false);
+            };
+            ensure_audio_after_tags(path)?;
+            pad_ape_tag_misread_as_id3v1(path)?;
+            drop_id3v2_extended_header(path)?;
+            let Some(container) = container_of(path)? else {
+                return Ok(false);
+            };
+            let Some(mut tag) = read_id3v2(path, container, tag_only_options())? else {
+                return Ok(false);
+            };
+            decode_latin1_frames(&mut tag, page, true);
+            let v23 = Id3v2Revision::from_lofty(tag.original_version()) == Id3v2Revision::V3;
+            save_id3v2_tag_with(path, container, &tag, write_options().use_id3v23(v23))?;
+            Ok(true)
+        })
+    }
+
     /// What one of the file's tag blocks holds, as a snapshot undo can rebuild
     /// it from (#47). `None` when the file carries no block of that kind.
     ///
@@ -2714,8 +2995,13 @@ impl TagEngine {
             };
             // The custom fields too (#616): without them a conversion wrote a
             // block without them and removed the one that had them.
-            let mut tags = tag_to_map(tag);
-            insert_concrete_items(path, tagged.file_type(), tag.clone(), &mut tags)?;
+            let tag =
+                tag_in_code_page(path, tagged.file_type(), tag.clone(), custom_item_options());
+            let mut tags = tag_to_map(&tag);
+            insert_concrete_items(path, tagged.file_type(), tag, &mut tags)?;
+            if tag_type == TagType::Id3v1 {
+                decode_id3v1_values(&mut tags);
+            }
             Ok(Some(TagBlockContent { tags, covers }))
         })
     }
@@ -3133,6 +3419,14 @@ fn sync_id3v1(
         (&mut legacy.album, &old.album, 30),
         (&mut legacy.comment, &old.comment, comment_width),
     ] {
+        // In the chosen code page, each character of the text this holds is a
+        // byte of the field (#698).
+        if let Some(spelled) = new
+            .as_deref()
+            .and_then(|value| id3v1_spelling(value, width))
+        {
+            *new = Some(spelled);
+        }
         let same = match (new.as_deref(), own.as_deref()) {
             (Some(value), Some(own)) => {
                 let held: String = value.chars().take(width).collect();
@@ -3708,7 +4002,12 @@ fn save_id3v2(
         )));
     }
 
-    if let Some(original) = read_id3v2(path, container, tag_only_options())? {
+    if let Some(mut original) = read_id3v2(path, container, tag_only_options())? {
+        // The model read the file's Latin-1 text in the chosen code page, so
+        // that is what everything below has to compare it with (#698).
+        let spellings = legacy_code_page()
+            .map(|page| decode_latin1_frames(&mut original, page, false))
+            .unwrap_or_default();
         // Lyrics reach the model through the custom-field catch-all, under the
         // frame's own name — so the model holds the text and nothing else, while
         // `USLT` is identified by a language and a description it has no room
@@ -3955,6 +4254,7 @@ fn save_id3v2(
             updated.insert(frame);
         }
         keep_unedited_encodings(&mut updated, &original);
+        restore_latin1_spellings(&mut updated, &spellings);
         order_frames(&mut updated, Some(&original));
     } else {
         order_frames(&mut updated, None);
@@ -4488,16 +4788,7 @@ fn read_id3v2(
     container: FileType,
     options: ParseOptions,
 ) -> Result<Option<Id3v2Tag>, TagIoError> {
-    let mut file = buffered(path)?;
-    let mut tag = match Some(container) {
-        Some(FileType::Mpeg) => read_mpeg_past_undecodable_frames(path, &mut file, options)?
-            .id3v2()
-            .cloned(),
-        Some(FileType::Aac) => AacFile::read_from(&mut file, options)?.id3v2().cloned(),
-        Some(FileType::Aiff) => AiffFile::read_from(&mut file, options)?.id3v2().cloned(),
-        Some(FileType::Wav) => WavFile::read_from(&mut file, options)?.id3v2().cloned(),
-        _ => None,
-    };
+    let mut tag = parse_id3v2(path, container, options)?;
     // Every write, undo snapshot and revision switch starts here, so this is
     // where a timestamp lofty would trim gets its text back (#504). Only a tag
     // that has timestamp frames pays for reading the block a second time.
@@ -4526,6 +4817,24 @@ fn read_id3v2(
         }
     }
     Ok(tag)
+}
+
+/// The file's ID3v2 tag as the backend parses it, nothing put back yet.
+fn parse_id3v2(
+    path: &Path,
+    container: FileType,
+    options: ParseOptions,
+) -> Result<Option<Id3v2Tag>, TagIoError> {
+    let mut file = buffered(path)?;
+    Ok(match Some(container) {
+        Some(FileType::Mpeg) => read_mpeg_past_undecodable_frames(path, &mut file, options)?
+            .id3v2()
+            .cloned(),
+        Some(FileType::Aac) => AacFile::read_from(&mut file, options)?.id3v2().cloned(),
+        Some(FileType::Aiff) => AiffFile::read_from(&mut file, options)?.id3v2().cloned(),
+        Some(FileType::Wav) => WavFile::read_from(&mut file, options)?.id3v2().cloned(),
+        _ => None,
+    })
 }
 
 /// The year of an ID3v2.3 `TYER` frame that holds a full date, `2021-09-08`,

@@ -979,6 +979,32 @@ function mockInvoke(cmd, args) {
         plan(`Remove ${label} tag`, { code: "plan.removeBlock", args: { block: label } }, changes)
       );
     }
+    case "preview_fix_encoding": {
+      // The mock's tracks hold real Unicode, so the first two selected stand in
+      // for files with Latin-1 text and an ID3v2 block.
+      const changes = args.paths
+        .filter((p) => (findTrack(p)?.tag_blocks || []).some((b) => b.kind === "id3v2"))
+        .slice(0, 2)
+        .map((p) => ({
+          path: p,
+          rename_to: null,
+          tag_changes: [],
+          cover_change: null,
+          block_changes: [
+            {
+              kind: "id3v2",
+              label: "ID3v2",
+              exact: true,
+              lost_fields: [],
+              lost_pictures: 0,
+              old: { tags: {}, covers: [] },
+              new: { tags: {}, covers: [] },
+              text_to_unicode: true,
+            },
+          ],
+        }));
+      return Promise.resolve(plan("Fix text encoding", { code: "plan.fixEncoding" }, changes));
+    }
     case "tag_block_targets": {
       // The mock library is all MP3, so every MP3-capable block is on offer.
       return Promise.resolve({
@@ -1335,6 +1361,7 @@ function mockInvoke(cmd, args) {
           cover_quality: 85,
           import_skip_fields: [],
           multi_value_separator: "",
+          legacy_code_page: "",
           carry_sidecars: true,
           carry_folder_extras: true,
           portable_names: true,

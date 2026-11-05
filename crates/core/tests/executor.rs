@@ -477,6 +477,7 @@ fn converts_one_block_into_another_and_undo_reverses_both_halves() {
                     old_bytes: None,
                     old: None,
                     new: Some(source.clone()),
+                    text_to_unicode: false,
                 },
                 BlockChange::removal(TagBlockKind::Ape, source.clone()),
             ],
@@ -580,6 +581,7 @@ fn a_revision_switch_keeps_every_frame_and_undo_restores_the_revision() {
                 old_bytes: None,
                 old: Some(content.clone()),
                 new: Some(content),
+                text_to_unicode: false,
             }],
             ..FileChange::default()
         }],
@@ -688,6 +690,7 @@ fn undoing_a_destroyed_id3v2_block_brings_its_binary_frames_back() {
                     old_bytes: None,
                     old: None,
                     new: Some(content.clone()),
+                    text_to_unicode: false,
                 },
                 BlockChange {
                     kind: TagBlockKind::Id3v2,
@@ -696,6 +699,7 @@ fn undoing_a_destroyed_id3v2_block_brings_its_binary_frames_back() {
                     old_bytes: Some(bytes),
                     old: Some(content),
                     new: None,
+                    text_to_unicode: false,
                 },
             ],
             ..FileChange::default()
@@ -1605,6 +1609,7 @@ fn undoing_a_vorbis_block_removal_puts_back_every_comment() {
                 old_bytes: Some(before.clone()),
                 old: Some(content),
                 new: None,
+                text_to_unicode: false,
             }],
             ..FileChange::default()
         }],

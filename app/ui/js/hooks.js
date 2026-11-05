@@ -15,6 +15,7 @@ export const hooks = {
   renderPreview: () => {},
   previewEdits: async () => {},
   refreshCoverWell: () => {},
+  refreshLibrary: async () => {},
   openDrop: async () => {},
   updateSortIndicators: () => {},
   // Lend the column measurer real rows for values the window doesn't hold

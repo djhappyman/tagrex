@@ -10,6 +10,7 @@ import { invoke } from "./invoke.js";
 import {
   edits,
   previewPlan,
+  savedSettings,
   selection,
   selectedPaths,
   setPreviewPlan,
@@ -120,6 +121,44 @@ function renderTagBlocks(paths) {
   }
   renderBlockStrippers(line, strippable);
   renderConvertButton(line, readKinds);
+  renderFixEncodingButton(line);
+}
+
+// "Fix encoding" (#698), only with a code page chosen: without one nothing here
+// reads as anything but what the standard says, so there is nothing to fix.
+function renderFixEncodingButton(line) {
+  if (!savedSettings.legacy_code_page) return;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "text-btn";
+  button.textContent = tr("blocks.fixEncoding");
+  button.title = tr("blocks.fixEncodingTitle");
+  button.addEventListener("click", previewFixEncoding);
+  line.append(" ", button);
+}
+
+// Preview rewriting the selection's text in Unicode. The table already shows it
+// as it will read, so the preview only says which files it touches. Undo puts
+// the bytes back, so unlike a removal this needs no confirmation.
+async function previewFixEncoding() {
+  try {
+    const plan = await invoke("preview_fix_encoding", { paths: selectedPaths() });
+    if (plan.changes.length === 0) {
+      toast(tr("toast.blocks.nothingToFix"));
+      return;
+    }
+    setPreviewPlan(plan);
+    setPreviewSource("blocks");
+    hooks.renderPreview(previewPlan);
+    toast(
+      tr("toast.previewingWhat", {
+        what: planText(plan).toLowerCase(),
+        files: tn("unit.file", plan.changes.length),
+      })
+    );
+  } catch (e) {
+    toast(String(e), true);
+  }
 }
 
 // A "Remove <block>" button per spare block the selection carries (#47).

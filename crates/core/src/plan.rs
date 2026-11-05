@@ -78,6 +78,10 @@ pub struct BlockChange {
     pub old_bytes: Option<Vec<u8>>,
     pub old: Option<TagBlockContent>,
     pub new: Option<TagBlockContent>,
+    /// Whether this rewrites the Latin-1 text of the ID3v2 block in Unicode
+    /// (#698). The block says the same before and after, so both sides are the
+    /// same content, and only `old_bytes` can put the old spelling back.
+    pub text_to_unicode: bool,
 }
 
 impl BlockChange {
@@ -90,6 +94,7 @@ impl BlockChange {
             old_bytes: None,
             old: Some(removed),
             new: None,
+            text_to_unicode: false,
         }
     }
 
@@ -99,7 +104,10 @@ impl BlockChange {
     /// Worth telling apart because it can be done without rebuilding the block,
     /// and so without losing the frames a rebuild cannot carry.
     fn is_revision_only(&self) -> bool {
-        self.kind == TagBlockKind::Id3v2 && self.old.is_some() && self.old == self.new
+        self.kind == TagBlockKind::Id3v2
+            && !self.text_to_unicode
+            && self.old.is_some()
+            && self.old == self.new
     }
 
     /// Whether undoing this change would put the block back whole.
@@ -1361,6 +1369,12 @@ fn write_blocks(path: &Path, change: &FileChange, direction: Direction) -> Resul
                 TagEngine::set_id3v2_revision(path, revision)?;
                 continue;
             }
+        }
+        // The same reason, with the frames the rewrite leaves alone. Undo goes on
+        // below, to the bytes.
+        if block_change.text_to_unicode && matches!(direction, Direction::Apply) {
+            TagEngine::id3v2_text_to_unicode(path)?;
+            continue;
         }
         if let Some(content) = target(block_change) {
             // Undo puts an ID3v2 block back from its bytes when they were kept

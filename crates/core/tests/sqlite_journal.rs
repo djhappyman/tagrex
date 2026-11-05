@@ -272,6 +272,7 @@ fn the_bytes_of_a_destroyed_id3v2_block_survive_a_restart() {
                 old_bytes: Some(bytes.clone()),
                 old: Some(content),
                 new: None,
+                text_to_unicode: false,
             }],
             ..FileChange::default()
         }],

@@ -111,6 +111,7 @@ Object.assign(hooks, {
   renderPreview,
   previewEdits,
   refreshCoverWell,
+  refreshLibrary,
   openDrop,
   updateSortIndicators,
   mountMeasureRows,

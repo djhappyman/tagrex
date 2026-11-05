@@ -451,6 +451,13 @@ impl SqliteJournal {
                 "ALTER TABLE batches ADD COLUMN interrupted INTEGER NOT NULL DEFAULT 0",
             )?;
         }
+        // The rewrite of a block's text in Unicode (#698), added the same way.
+        // Every existing row is some other change.
+        if !column_exists(&conn, "block_changes", "text_to_unicode")? {
+            conn.execute_batch(
+                "ALTER TABLE block_changes ADD COLUMN text_to_unicode INTEGER NOT NULL DEFAULT 0",
+            )?;
+        }
         // Every child table is read and deleted by its parent's id, and SQLite
         // does not index a foreign key by itself. Without these, each of the
         // lookups below — one per file, several per file — scanned its whole
@@ -567,8 +574,9 @@ impl UndoJournal for SqliteJournal {
             for block_change in &change.block_changes {
                 tx.execute(
                     "INSERT INTO block_changes \
-                     (file_change_id, kind, revision, old_revision, old_bytes, has_old, has_new) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                     (file_change_id, kind, revision, old_revision, old_bytes, has_old, has_new, \
+                     text_to_unicode) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     rusqlite::params![
                         file_change_id,
                         block_change.kind.to_storage_key(),
@@ -577,6 +585,7 @@ impl UndoJournal for SqliteJournal {
                         block_change.old_bytes,
                         block_change.old.is_some(),
                         block_change.new.is_some(),
+                        block_change.text_to_unicode,
                     ],
                 )?;
                 let block_change_id = tx.last_insert_rowid();
@@ -911,8 +920,8 @@ impl SqliteJournal {
     /// still be undone.
     fn load_block_changes(&self, file_change_id: i64) -> Result<Vec<BlockChange>, JournalError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, kind, revision, old_revision, old_bytes, has_old, has_new \
-             FROM block_changes WHERE file_change_id = ?1 ORDER BY id",
+            "SELECT id, kind, revision, old_revision, old_bytes, has_old, has_new, \
+             text_to_unicode FROM block_changes WHERE file_change_id = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map(rusqlite::params![file_change_id], |row| {
             Ok((
@@ -923,13 +932,15 @@ impl SqliteJournal {
                 row.get::<_, Option<Vec<u8>>>(4)?,
                 row.get::<_, bool>(5)?,
                 row.get::<_, bool>(6)?,
+                row.get::<_, bool>(7)?,
             ))
         })?;
 
         let mut changes = Vec::new();
         let mut any = false;
         for row in rows {
-            let (id, kind, revision, old_revision, old_bytes, has_old, has_new) = row?;
+            let (id, kind, revision, old_revision, old_bytes, has_old, has_new, text_to_unicode) =
+                row?;
             any = true;
             let Some(kind) = TagBlockKind::from_storage_key(&kind) else {
                 continue;
@@ -954,6 +965,7 @@ impl SqliteJournal {
                 old_bytes,
                 old: side("old", has_old)?,
                 new: side("new", has_new)?,
+                text_to_unicode,
             });
         }
         if any {

@@ -490,6 +490,14 @@ fn preview_remove_tag_block(
 }
 
 #[tauri::command]
+fn preview_fix_encoding(state: State<AppState>, paths: Vec<String>) -> Result<PlanDto, ErrorDto> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    with_app(&state, |app| {
+        app.preview_fix_encoding(&paths).map_err(ErrorDto::from)
+    })
+}
+
+#[tauri::command]
 fn tag_block_targets(
     state: State<AppState>,
     paths: Vec<String>,
@@ -1621,6 +1629,7 @@ fn main() {
             preview_remove_tag_block,
             preview_convert_tag_block,
             tag_block_targets,
+            preview_fix_encoding,
             preview_clear_tags,
             export_playlist,
             export_playlists,

@@ -399,6 +399,7 @@ async function openSettings() {
     // The separator is whitespace-significant ("; " is not ";"), so it goes
     // into the box verbatim and comes back verbatim — no trim anywhere (#46).
     el("set-multi-sep").value = s.multi_value_separator || "";
+    el("set-code-page").value = s.legacy_code_page || "";
     el("set-sidecar-exts").value = (s.sidecar_extensions && s.sidecar_extensions.length
       ? s.sidecar_extensions
       : DEFAULT_SIDECAR_EXTS
@@ -408,6 +409,7 @@ async function openSettings() {
     /* defaults already in the DOM */
     readPriority = PRIO_KEYS.slice();
     el("set-multi-sep").value = "";
+    el("set-code-page").value = "";
     el("set-sidecar-exts").value = DEFAULT_SIDECAR_EXTS.join(" ");
     await renderImportFields([]);
   }
@@ -554,6 +556,8 @@ async function saveSettings() {
     const token = el("discogs-token").value.trim();
     // Spread the last-known settings so we keep fields this form doesn't edit —
     // notably the saved action groups (#57), which also live in settings.json.
+    // What the open library shows was read in the old code page (#698).
+    const codePageChanged = (savedSettings.legacy_code_page || "") !== el("set-code-page").value;
     const settings = {
       ...savedSettings,
       proxy: el("set-proxy").value.trim(),
@@ -562,6 +566,7 @@ async function saveSettings() {
       id3_v23: id3Choice === "v23",
       read_priority: readPriority.slice(),
       multi_value_separator: el("set-multi-sep").value,
+      legacy_code_page: el("set-code-page").value,
       cover_max_px: Math.max(0, parseInt(el("set-cover-max").value, 10) || 0),
       cover_quality: Math.min(100, Math.max(1, parseInt(el("set-cover-quality").value, 10) || 85)),
       action_groups: actionGroups,
@@ -583,6 +588,7 @@ async function saveSettings() {
     applyTableFont(parseInt(el("set-table-font").value, 10));
     await invoke("save_discogs_token", { token });
     await invoke("save_settings", { settings });
+    if (codePageChanged) await hooks.refreshLibrary();
     setBpmEnabled(settings.bpm_detection);
     updateSettingsDot();
     closeSettings();
@@ -701,6 +707,7 @@ initGroupResets([
       id3Choice === "v24" &&
       sameList(readPriority, PRIO_KEYS) &&
       el("set-multi-sep").value === "" &&
+      el("set-code-page").value === "" &&
       (parseInt(el("set-cover-max").value, 10) || 0) === 0 &&
       (parseInt(el("set-cover-quality").value, 10) || 85) === 85 &&
       el("set-bpm-range").value === "0" &&
@@ -710,6 +717,7 @@ initGroupResets([
       setId3Choice("v24");
       resetPriority();
       el("set-multi-sep").value = "";
+      el("set-code-page").value = "";
       el("set-cover-max").value = 0;
       el("set-cover-quality").value = 85;
       el("set-bpm-range").value = "0";

@@ -1187,6 +1187,25 @@
               <input id="set-multi-sep" type="text" class="mono" style="width: 80px" placeholder="; " spellcheck="false" />
             </div>
             <p class="settings-hint" data-i18n="settings.multiSepHint">A track can carry several artists or genres. They are shown and edited as one value joined by this text, and written back as separate values. Only Artist, Album Artist, Genre and Composer are treated this way — every other field keeps a separator as part of its value. Leave it blank for a semicolon and a space.</p>
+            <div class="settings-row">
+              <label for="set-code-page" data-i18n="settings.codePage">Read Latin-1 text as</label>
+              <select id="set-code-page">
+                <option value="" data-i18n="settings.codePage.latin1">Latin-1 (the standard)</option>
+                <option value="windows-1251" data-i18n="settings.codePage.cyrillic">Windows-1251 (Cyrillic)</option>
+                <option value="koi8-r" data-i18n="settings.codePage.russian">KOI8-R (Russian)</option>
+                <option value="koi8-u" data-i18n="settings.codePage.ukrainian">KOI8-U (Ukrainian)</option>
+                <option value="windows-1252" data-i18n="settings.codePage.western">Windows-1252 (Western European)</option>
+                <option value="windows-1250" data-i18n="settings.codePage.central">Windows-1250 (Central European)</option>
+                <option value="windows-1253" data-i18n="settings.codePage.greek">Windows-1253 (Greek)</option>
+                <option value="windows-1254" data-i18n="settings.codePage.turkish">Windows-1254 (Turkish)</option>
+                <option value="windows-1257" data-i18n="settings.codePage.baltic">Windows-1257 (Baltic)</option>
+                <option value="shift_jis" data-i18n="settings.codePage.japanese">Shift_JIS (Japanese)</option>
+                <option value="gbk" data-i18n="settings.codePage.simplified">GBK (Simplified Chinese)</option>
+                <option value="big5" data-i18n="settings.codePage.traditional">Big5 (Traditional Chinese)</option>
+                <option value="euc-kr" data-i18n="settings.codePage.korean">EUC-KR (Korean)</option>
+              </select>
+            </div>
+            <p class="settings-hint" data-i18n="settings.codePageHint">Older files often keep text in a local code page under a Latin-1 label, so Кино shows as Êèíî. Choose the code page they were written in. This applies to ID3v1 tags and to ID3v2 frames marked Latin-1, and text that really is Latin-1 will read wrongly while another code page is chosen. Text you do not edit keeps its bytes, and edited text is written in Unicode.</p>
             <h4 class="settings-sub" data-i18n="editor.coverArt">Cover art</h4>
             <div class="settings-row">
               <label for="set-cover-max" data-i18n="settings.coverMax">Max size</label>

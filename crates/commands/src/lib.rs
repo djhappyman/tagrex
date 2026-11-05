@@ -478,6 +478,10 @@ pub struct BlockChangeDto {
     /// Images the target block cannot hold.
     #[serde(default)]
     pub lost_pictures: usize,
+    /// Whether this rewrites the block's Latin-1 text in Unicode (#698), which
+    /// leaves `old` and `new` the same.
+    #[serde(default)]
+    pub text_to_unicode: bool,
     #[serde(default)]
     pub old: Option<BlockContentDto>,
     #[serde(default)]
@@ -616,6 +620,7 @@ pub enum PlanMessage {
         from: String,
         to: String,
     },
+    FixEncoding,
     ImportRelease {
         source: Option<String>,
     },
@@ -655,6 +660,7 @@ impl PlanMessage {
             Self::ConvertToRevision { .. } => "plan.convertToRevision",
             Self::RewriteBlock { .. } => "plan.rewriteBlock",
             Self::ConvertBlock { .. } => "plan.convertBlock",
+            Self::FixEncoding => "plan.fixEncoding",
             Self::ImportRelease { source } => match source.as_deref() {
                 Some("discogs") => "plan.importDiscogs",
                 Some("musicbrainz") => "plan.importMusicBrainz",
@@ -738,6 +744,7 @@ impl PlanMessage {
             Self::ConvertToRevision { revision } => format!("Convert to ID3v{revision}"),
             Self::RewriteBlock { block } => format!("Rewrite {block} tag"),
             Self::ConvertBlock { from, to } => format!("Convert {from} to {to}"),
+            Self::FixEncoding => "Fix text encoding".to_string(),
             Self::ImportRelease { source } => match source.as_deref() {
                 Some("discogs") => "Import Discogs release".to_string(),
                 Some("musicbrainz") => "Import MusicBrainz release".to_string(),
@@ -1216,6 +1223,11 @@ pub struct SettingsDto {
     /// deserializes to.
     #[serde(default)]
     pub multi_value_separator: String,
+    /// The code page Latin-1 tag text is read in (#698), by its label. Empty = the
+    /// Latin-1 the standard says, which is also what an older settings.json
+    /// deserializes to.
+    #[serde(default)]
+    pub legacy_code_page: String,
     /// Whether the app asks GitHub, at start-up, if a newer release exists
     /// (#435). Notify only: nothing is downloaded. On unless switched off, which
     /// is also what an older settings.json deserializes to.
@@ -1299,6 +1311,7 @@ impl Default for SettingsDto {
             carry_folder_extras: default_carry_folder_extras(),
             import_skip_fields: Vec::new(),
             multi_value_separator: String::new(),
+            legacy_code_page: String::new(),
             check_updates: default_check_updates(),
             bpm_floor: 0,
             bpm_detection: default_bpm_detection(),
@@ -2208,6 +2221,7 @@ impl App {
         tagrex_core::model::set_write_id3v23(settings.id3_v23);
         tagrex_core::model::set_read_priority(&settings.read_priority);
         tagrex_core::model::set_multi_value_separator(&settings.multi_value_separator);
+        tagrex_core::model::set_legacy_code_page(&settings.legacy_code_page);
         self.cover_max_px.set(settings.cover_max_px);
         self.cover_quality
             .set(effective_cover_quality(settings.cover_quality));
@@ -4216,6 +4230,7 @@ impl App {
                     lost_pictures: 0,
                     old: Some(block_content_to_dto(&content)),
                     new: None,
+                    text_to_unicode: false,
                 }],
                 copy: false,
                 rename_root: None,
@@ -4231,6 +4246,75 @@ impl App {
             changes,
             false,
         ))
+    }
+
+    /// Preview rewriting the selection's Latin-1 text in Unicode, as the chosen code
+    /// page reads it (#698). A file with none is skipped, as a removal skips a file
+    /// without the block.
+    ///
+    /// ID3v1 cannot hold Unicode, so it stays as it is. A file that has nothing else
+    /// gets an ID3v2 tag with its text, which is the one place that text can go, and
+    /// undoing that takes the new tag away.
+    pub fn preview_fix_encoding(&self, paths: &[PathBuf]) -> Result<PlanDto, AppError> {
+        let kind = TagBlockKind::Id3v2;
+        let mut changes = Vec::new();
+        for path in paths {
+            let block = if TagEngine::has_legacy_id3v2_text(path)? {
+                let Some(content) = TagEngine::read_block(path, kind)? else {
+                    continue;
+                };
+                let content = block_content_to_dto(&content);
+                BlockChangeDto {
+                    kind: kind.to_storage_key().to_string(),
+                    label: kind.name().to_string(),
+                    revision: None,
+                    old_revision: id3v2_revision_key(path, kind)?,
+                    old_bytes_base64: block_bytes_base64(path, kind)?,
+                    exact: true,
+                    lost_fields: Vec::new(),
+                    lost_pictures: 0,
+                    old: Some(content.clone()),
+                    new: Some(content),
+                    text_to_unicode: true,
+                }
+            } else if TagEngine::has_legacy_id3v1_text_only(path)? {
+                let format = TagEngine::read(path)?.format;
+                let Some(content) = TagEngine::read_block(path, TagBlockKind::Id3v1)? else {
+                    continue;
+                };
+                if !TagBlockKind::writable_for(format).contains(&kind) {
+                    continue;
+                }
+                BlockChangeDto {
+                    kind: kind.to_storage_key().to_string(),
+                    label: kind.name().to_string(),
+                    revision: None,
+                    old_revision: None,
+                    old_bytes_base64: None,
+                    exact: true,
+                    lost_fields: Vec::new(),
+                    lost_pictures: 0,
+                    old: None,
+                    new: Some(block_content_to_dto(&content)),
+                    text_to_unicode: false,
+                }
+            } else {
+                continue;
+            };
+            changes.push(FileChangeDto {
+                path: path.to_string_lossy().into_owned(),
+                rename_to: None,
+                tag_changes: Vec::new(),
+                cover_change: None,
+                sidecar_renames: Vec::new(),
+                block_changes: vec![block],
+                copy: false,
+                rename_root: None,
+                creates_folder: false,
+                folder_extras: Vec::new(),
+            });
+        }
+        Ok(self.plan(PlanMessage::FixEncoding, Vec::new(), changes, false))
     }
 
     /// Which tag blocks the selection can be converted *to* (#205), and which
@@ -4347,6 +4431,7 @@ impl App {
                     .as_ref()
                     .map(block_content_to_dto),
                 new: Some(block_content_to_dto(&content)),
+                text_to_unicode: false,
             }];
             if source != target {
                 block_changes.push(BlockChangeDto {
@@ -4364,6 +4449,7 @@ impl App {
                     lost_pictures: 0,
                     old: Some(block_content_to_dto(&content)),
                     new: None,
+                    text_to_unicode: false,
                 });
             }
             changes.push(FileChangeDto {
@@ -6645,6 +6731,7 @@ impl PlanDto {
                                 ),
                                 old: block_change.old.as_ref().map(block_content_from_dto),
                                 new: block_change.new.as_ref().map(block_content_from_dto),
+                                text_to_unicode: block_change.text_to_unicode,
                             })
                         })
                         .collect(),
@@ -7739,6 +7826,7 @@ mod tests {
             carry_folder_extras: true,
             import_skip_fields: Vec::new(),
             multi_value_separator: String::new(),
+            legacy_code_page: String::new(),
             check_updates: true,
             bpm_floor: 70,
             bpm_detection: true,

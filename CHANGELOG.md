@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A setting, "Read Latin-1 text as", for older files that keep text in a local code page under a Latin-1 label, so that `Кино` no longer shows as `Êèíî`. It offers Windows-1251, KOI8-R, KOI8-U and nine other common code pages, and applies to ID3v1 tags and to ID3v2 frames marked Latin-1. Text nobody edits keeps its bytes, and edited text is written in Unicode. ID3v1 cannot hold Unicode, so it gets edited text in the same code page ([#698](https://github.com/tagrex/tagrex/issues/698)).
+- "Fix encoding" beside the tag block line, with a code page chosen: it rewrites the Latin-1 text of the selection in Unicode through the usual preview, and undo puts the old bytes back. A file with only an ID3v1 tag gets an ID3v2 tag to hold its text ([#698](https://github.com/tagrex/tagrex/issues/698)).
+
 ## [1.2.1] - 2026-11-05
 
 A release about very long releases and about files other tools wrote. A tracklist
