@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- CI builds and tests on macOS as well, on every push
+  ([#704](https://github.com/tagrex/tagrex/issues/704)).
+
 ### Fixed
 
 - A track or disc total with no number to go with it is flagged in the preview

@@ -85,3 +85,26 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  # The same on macOS (#704), for the same reason: code behind `cfg(target_os)`
+  # and a dependency's platform features are otherwise first built on a release
+  # tag. It is also the one job on APFS, which treats the NFC and NFD spellings
+  # of a name as one file.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
