@@ -4469,9 +4469,11 @@ button.tk-art-btn > .ico:last-child {
   overflow-x: auto;
 }
 .release-tracklist table {
-  /* Grow to the longest row (so nothing truncates) but fill the card at least. */
+  /* Grow to the longest row (so nothing truncates) but fill the card at least.
+     Only the rows in view are drawn, so the longest section label is measured
+     instead (online.js, fixTrackColumnWidth) and held as a floor. */
   width: max-content;
-  min-width: 100%;
+  min-width: max(100%, calc(var(--tk-section-min, 0px) + 2 * var(--space-2)));
   border-collapse: separate; /* sticky cells need separate borders */
   border-spacing: 0;
   font-family: var(--font-mono-bundled);
@@ -4496,6 +4498,15 @@ button.tk-art-btn > .ico:last-child {
 }
 .release-tracklist tr:hover td {
   background: var(--row-hover);
+}
+/* The spacers that stand for the rows not drawn (online.js, renderWindow): no
+   padding, rule or hover band, so each is exactly the height it was given. */
+.release-tracklist tbody tr.tk-spacer td,
+.release-tracklist tbody tr.tk-spacer:not(:first-child) td,
+.release-tracklist tbody tr.tk-spacer:hover td {
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 /* A sub-section header row (#328): a labelled band before each run of tracks —
@@ -4572,6 +4583,10 @@ button.tk-art-btn > .ico:last-child {
   display: flex;
   align-items: center;
   gap: 5px;
+  /* The widest title·artist of the whole release, measured (online.js,
+     fixTrackColumnWidth): only the rows in view are drawn, and the column must
+     not change width as others come into view. */
+  min-width: var(--tk-track-min, 0px);
 }
 .tk-t {
   color: var(--text);

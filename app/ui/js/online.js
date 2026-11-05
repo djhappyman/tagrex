@@ -755,7 +755,13 @@ async function toggleCard(card) {
   }
   expandedIds.add(id);
   const body = card.querySelector(".release-tracklist");
-  if (body.dataset.loaded === "1") return;
+  if (body.dataset.loaded === "1") {
+    // Drawn for wherever the list stood when it was last open. A card closed
+    // while its release was loading had no rows to measure its width from.
+    renderWindow(card, true);
+    fixTrackColumnWidth(card);
+    return;
+  }
   // Skeleton while the release fetch is in flight (inert stripe motif).
   body.innerHTML = `<div style="padding: 8px 10px">
       <div class="skeleton-line w-80"></div>
@@ -918,9 +924,13 @@ function durationCell(track, pair) {
 // Rows are rendered in `release.tracks` order, so the index is the row.
 function applyDurationDeltas(card, release) {
   const { pairs, files } = durationPairs(release);
-  card.querySelectorAll(".release-tracklist tbody td.tk-dur").forEach((cell, i) => {
-    cell.innerHTML = durationCell(release.tracks[i], pairs.get(i));
-  });
+  // The pairing is kept with the tracklist, not in the rows: only the rows in
+  // view are drawn, and the ones drawn later must show it too.
+  const state = tracklistState.get(card);
+  if (state) {
+    state.pairs = pairs;
+    renderWindow(card, true);
+  }
   const fit = card.querySelector(".tk-fit");
   if (!fit) return;
   // The tally answers the question the rows only imply — is this the edition? —
@@ -953,35 +963,287 @@ function refreshReleaseMatches() {
   }
 }
 
+// ---- the drawn window of a tracklist ----
+// A release can list thousands of tracks (USB "editions" of 1,017 and 3,353),
+// and every row carries two sticky cells, the number and the duration. Drawn
+// whole, that was about 7,000 composited layers and 34,000 nodes, and the list
+// scrolled at 15 fps. Only the rows in and near view are in the DOM; a spacer
+// row of the exact height stands for the rows above and another for those
+// below. The ticks and the length pairs live in the state below, not in the
+// rows, so they hold for the rows not drawn.
+const tracklistState = new WeakMap(); // card element -> { release, rows, checked, pairs, ... }
+const WINDOW_MARGIN_PX = 1000; // drawn beyond each edge of the view
+const WINDOW_CHUNK = 32; // the window moves this many rows at a time
+
+function trackRowHtml(state, i) {
+  const { release } = state;
+  const t = release.tracks[i];
+  // Show the per-track artist only when it differs from the album artist —
+  // otherwise it's noise on every row; it truncates before the title.
+  const differs = t.artist && t.artist !== release.artist;
+  const artistEl = differs ? `<span class="tk-a">${escapeHtml(t.artist)}</span>` : "";
+  return `<tr class="tk-row">
+    <td class="tk-lead"><span class="tk-lead-inner"><input type="checkbox"${state.checked[i] ? " checked" : ""} data-i="${i}" /><span class="tk-num">${escapeHtml(t.position)}</span></span></td>
+    <td class="tk-track"><span class="tk-track-inner"><span class="tk-t" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>${artistEl}</span></td>
+    <td class="tk-dur">${durationCell(t, state.pairs.get(i))}</td>
+  </tr>`;
+}
+
+function sectionRowHtml(section) {
+  return `<tr class="tk-section"><td colspan="3"><span class="tk-section-label" title="${escapeHtml(section)}">${escapeHtml(section)}</span></td></tr>`;
+}
+
+function spacerRowHtml(px) {
+  return `<tr class="tk-spacer" aria-hidden="true"><td colspan="3" style="height: ${px}px"></td></tr>`;
+}
+
+// The index of the drawn row that covers `y` px below the top of the rows.
+function rowAt(offsets, y) {
+  let lo = 0;
+  let hi = offsets.length - 2;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (offsets[mid] <= y) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+// Measure a drawn row of each kind and lay out where every row starts. A row
+// after the first has a 1 px rule above it, so the first row is measured apart.
+function measureRows(tbody, state) {
+  const drawn = [...tbody.children].filter((tr) => !tr.classList.contains("tk-spacer"));
+  const heights = { track: 0, section: 0, firstTrack: 0, firstSection: 0 };
+  drawn.forEach((tr, k) => {
+    const h = tr.getBoundingClientRect().height;
+    const kind = tr.classList.contains("tk-section") ? "section" : "track";
+    const index = state.start + k;
+    if (index === 0) heights[kind === "track" ? "firstTrack" : "firstSection"] = h;
+    else if (!heights[kind]) heights[kind] = h;
+  });
+  if (!heights.track && !heights.section) return;
+  heights.track ||= heights.firstTrack || 22;
+  heights.section ||= heights.firstSection || heights.track;
+  heights.firstTrack ||= heights.track;
+  heights.firstSection ||= heights.section;
+  const offsets = new Float64Array(state.rows.length + 1);
+  state.rows.forEach((row, k) => {
+    const h = row.section !== undefined
+      ? (k === 0 ? heights.firstSection : heights.section)
+      : (k === 0 ? heights.firstTrack : heights.track);
+    offsets[k + 1] = offsets[k] + h;
+  });
+  state.heights = heights;
+  state.offsets = offsets;
+}
+
+// Draw the rows of `card`'s tracklist that are in and near view. Unless forced,
+// nothing is drawn while the window has not moved by a chunk.
+function renderWindow(card, force = false, remeasured = false) {
+  const state = tracklistState.get(card);
+  const tbody = card.querySelector(".release-tracklist tbody");
+  if (!state || !tbody || card.getAttribute("aria-expanded") !== "true") return;
+  const n = state.rows.length;
+  let start = 0;
+  let end = Math.min(n, WINDOW_CHUNK * 2);
+  const scroller = card.closest(".online-scroll");
+  // A hidden panel has no size to go by, and a selection change can redraw the
+  // list while another tab is open: the rows stay where the panel will show them.
+  const hidden = !scroller || scroller.clientHeight === 0;
+  if (hidden && state.end > 0) {
+    start = state.start;
+    end = state.end;
+  } else if (state.offsets && !hidden) {
+    const view = scroller.getBoundingClientRect();
+    const top = tbody.getBoundingClientRect().top;
+    const from = rowAt(state.offsets, view.top - top - WINDOW_MARGIN_PX);
+    const to = rowAt(state.offsets, view.bottom - top + WINDOW_MARGIN_PX);
+    start = Math.floor(from / WINDOW_CHUNK) * WINDOW_CHUNK;
+    end = Math.min(n, (Math.floor(to / WINDOW_CHUNK) + 1) * WINDOW_CHUNK);
+  }
+  if (!force && state.offsets && start === state.start && end === state.end) return;
+  // Scrolling moves the window a chunk or two at a time: the rows still in it
+  // stay, only the ones leaving and arriving change, and nothing is measured.
+  // Rebuilding the whole window each time cost a dropped frame on a fast scroll.
+  const overlaps = !force && state.offsets && start < state.end && end > state.start;
+  if (overlaps) {
+    shiftWindow(tbody, state, start, end);
+    return;
+  }
+  state.start = start;
+  state.end = end;
+  let html = "";
+  if (state.offsets && start > 0) html += spacerRowHtml(state.offsets[start]);
+  html += rowsHtml(state, start, end);
+  if (state.offsets && end < n) html += spacerRowHtml(state.offsets[n] - state.offsets[end]);
+  tbody.innerHTML = html;
+  if (hidden) return;
+  // Lay the rows out from what was drawn: the first time, and again whenever
+  // the drawn total strays from the layout, so the spacers never drift from the
+  // rows they stand for.
+  if (tracklistDrift(card) > 2) {
+    const before = state.offsets;
+    measureRows(tbody, state);
+    const moved = state.offsets && (!before || Math.abs(before[n] - state.offsets[n]) > 2);
+    if (moved && !remeasured) renderWindow(card, true, true);
+  }
+}
+
+// How far the drawn table is from the height its layout says it should be.
+function tracklistDrift(card) {
+  const state = tracklistState.get(card);
+  const tbody = card.querySelector(".release-tracklist tbody");
+  if (!state?.offsets || !tbody) return Infinity;
+  return Math.abs(tbody.getBoundingClientRect().height - state.offsets[state.rows.length]);
+}
+
+function rowsHtml(state, from, to) {
+  let html = "";
+  for (let k = from; k < to; k++) {
+    const row = state.rows[k];
+    html += row.section !== undefined ? sectionRowHtml(row.section) : trackRowHtml(state, row.i);
+  }
+  return html;
+}
+
+// Move the drawn window from [state.start, state.end) to [start, end), which
+// overlap: take the rows that left off each end, add the ones that arrived, and
+// give the two spacers their new heights.
+function shiftWindow(tbody, state, start, end) {
+  const n = state.rows.length;
+  const spacer = (px) => {
+    const tr = document.createElement("tr");
+    tr.className = "tk-spacer";
+    tr.setAttribute("aria-hidden", "true");
+    tr.innerHTML = `<td colspan="3" style="height: ${px}px"></td>`;
+    return tr;
+  };
+  let top = tbody.firstElementChild?.classList.contains("tk-spacer") ? tbody.firstElementChild : null;
+  let bottom = tbody.lastElementChild?.classList.contains("tk-spacer") && tbody.lastElementChild !== top
+    ? tbody.lastElementChild
+    : null;
+  // Rows that left the top, then the bottom.
+  for (let k = state.start; k < Math.min(start, state.end); k++) (top ? top.nextElementSibling : tbody.firstElementChild).remove();
+  for (let k = Math.max(end, state.start); k < state.end; k++) (bottom ? bottom.previousElementSibling : tbody.lastElementChild).remove();
+  // Rows that arrived at the top, then the bottom.
+  if (start < state.start) {
+    const html = rowsHtml(state, start, state.start);
+    if (top) top.insertAdjacentHTML("afterend", html);
+    else tbody.insertAdjacentHTML("afterbegin", html);
+  }
+  if (end > state.end) {
+    const html = rowsHtml(state, state.end, end);
+    if (bottom) bottom.insertAdjacentHTML("beforebegin", html);
+    else tbody.insertAdjacentHTML("beforeend", html);
+  }
+  // The spacers: present only when rows stand above or below the window.
+  if (start > 0) {
+    if (!top) {
+      top = spacer(0);
+      tbody.prepend(top);
+    }
+    top.firstElementChild.style.height = `${state.offsets[start]}px`;
+  } else if (top) top.remove();
+  if (end < n) {
+    if (!bottom) {
+      bottom = spacer(0);
+      tbody.append(bottom);
+    }
+    bottom.firstElementChild.style.height = `${state.offsets[n] - state.offsets[end]}px`;
+  } else if (bottom) bottom.remove();
+  state.start = start;
+  state.end = end;
+}
+
+// Every open tracklist follows the panel as it scrolls, once a frame.
+let windowFrame = 0;
+function scheduleTracklistWindows() {
+  if (windowFrame) return;
+  windowFrame = requestAnimationFrame(() => {
+    windowFrame = 0;
+    for (const id of expandedIds) {
+      const card = cardEl(id);
+      if (card) renderWindow(card);
+    }
+  });
+}
+const onlineScroll = document.querySelector(".online-scroll");
+onlineScroll?.addEventListener("scroll", scheduleTracklistWindows, { passive: true });
+// The panel's size changes with the window, and from nothing when its tab opens.
+if (onlineScroll) new ResizeObserver(scheduleTracklistWindows).observe(onlineScroll);
+
+// A table that stops matching its layout has changed row height with no scroll
+// to notice it by: a font size set in Settings, a zoom. It is laid out again.
+const tracklistResize = new ResizeObserver((entries) => {
+  for (const entry of entries) {
+    const card = entry.target.closest(".release-card");
+    if (!card || !entry.contentRect.height || tracklistDrift(card) <= 2) continue;
+    renderWindow(card, true);
+    fixTrackColumnWidth(card);
+  }
+});
+
+// The table took the width of its longest row, which with only some rows drawn
+// would change as the list scrolls. The widest title and section label are
+// measured in their own fonts instead and set as the column's minimum.
+let measureCanvas = null;
+function fixTrackColumnWidth(card) {
+  const state = tracklistState.get(card);
+  const table = card.querySelector(".release-tracklist table");
+  const sample = card.querySelector(".release-tracklist .tk-t");
+  if (!state || !table || !sample) return;
+  // A face first used by these rows is still loading, and a canvas would measure
+  // its fallback. Measured again once it is in.
+  if (document.fonts.status === "loading") document.fonts.ready.then(() => fixTrackColumnWidth(card));
+  measureCanvas ||= document.createElement("canvas");
+  const ctx = measureCanvas.getContext("2d");
+  const fontOf = (el) => {
+    const style = getComputedStyle(el);
+    return `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  };
+  ctx.font = fontOf(sample);
+  const dot = ctx.measureText("·").width;
+  const { release } = state;
+  let track = 0;
+  for (const t of release.tracks) {
+    let w = ctx.measureText(t.title || "").width;
+    // Title, a 5 px gap, then "·", 5 px and the artist (.tk-a and its ::before).
+    if (t.artist && t.artist !== release.artist) w += 5 + dot + 5 + ctx.measureText(t.artist).width;
+    track = Math.max(track, w);
+  }
+  table.style.setProperty("--tk-track-min", `${Math.ceil(track) + 1}px`);
+  const sectionLabel = card.querySelector(".release-tracklist .tk-section-label");
+  if (sectionLabel) {
+    ctx.font = fontOf(sectionLabel);
+    let widest = 0;
+    for (const row of state.rows) if (row.section !== undefined) widest = Math.max(widest, ctx.measureText(row.section).width);
+    table.style.setProperty("--tk-section-min", `${Math.ceil(widest) + 1}px`);
+  }
+}
+
 function renderTracklist(card, release) {
   // A sub-section header row (#328) precedes the first track of each labelled
   // run — a Discogs heading or a MusicBrainz medium title. It carries no
-  // checkbox and no `.tk-dur` cell, so the index-based logic (data-i, the delta
-  // pass over `td.tk-dur`) still lines up one-to-one with `release.tracks`.
+  // checkbox and no duration, and stands in the list of rows to draw on its own.
+  const rows = [];
   let lastSection = null;
-  const rows = release.tracks
-    .map((t, i) => {
-      // Show the per-track artist only when it differs from the album artist —
-      // otherwise it's noise on every row; it truncates before the title.
-      const differs = t.artist && t.artist !== release.artist;
-      const artistEl = differs ? `<span class="tk-a">${escapeHtml(t.artist)}</span>` : "";
-      const section = t.section || null;
-      const header =
-        section && section !== lastSection
-          ? `<tr class="tk-section"><td colspan="3"><span class="tk-section-label" title="${escapeHtml(section)}">${escapeHtml(section)}</span></td></tr>`
-          : "";
-      lastSection = section;
-      return (
-        header +
-        `
-      <tr>
-        <td class="tk-lead"><span class="tk-lead-inner"><input type="checkbox" checked data-i="${i}" /><span class="tk-num">${escapeHtml(t.position)}</span></span></td>
-        <td class="tk-track"><span class="tk-track-inner"><span class="tk-t" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>${artistEl}</span></td>
-        <td class="tk-dur">${t.duration_secs ? fmtTime(t.duration_secs) : "—"}</td>
-      </tr>`
-      );
-    })
-    .join("");
+  release.tracks.forEach((t, i) => {
+    const section = t.section || null;
+    if (section && section !== lastSection) rows.push({ section });
+    lastSection = section;
+    rows.push({ i });
+  });
+  tracklistState.set(card, {
+    release,
+    rows,
+    // Every track starts ticked; the ticks live here, not in the rows.
+    checked: new Uint8Array(release.tracks.length).fill(1),
+    pairs: new Map(),
+    offsets: null, // where each drawn row starts, once a row of each kind is measured
+    heights: null,
+    start: -1,
+    end: -1,
+  });
   // Label / catalogue-number picker (#90): a release can list several pairs
   // (even from one label); the user picks the single one to write. One pair (or
   // none) needs no picker — importRelease falls back to the first.
@@ -1041,9 +1303,12 @@ function renderTracklist(card, release) {
         <th class="tk-lead"><label class="tk-selall" title="${escapeHtml(t("online.selectAllTitle"))}"><input type="checkbox" class="tk-selall-box" aria-label="${escapeHtml(t("online.selectAllAria"))}" /></label></th>
         <th class="tk-selcount muted" colspan="2"><span class="tk-readout"><span class="tk-fit" title="${escapeHtml(t("online.fitTitle"))}"></span><span class="tk-tally"></span></span></th>
       </tr></thead>
-      <tbody>${rows}</tbody></table></div>`;
+      <tbody></tbody></table></div>`;
   // The import action moved to a header icon button (shown once loaded + expanded).
   card.classList.add("tracklist-loaded");
+  renderWindow(card, true);
+  fixTrackColumnWidth(card);
+  tracklistResize.observe(card.querySelector(".release-tracklist table"));
   updateTracklistCount(card);
   // The rows above carry the release's own durations; the difference to the
   // selected files is written in afterwards, by the one path that also keeps it
@@ -1052,25 +1317,33 @@ function renderTracklist(card, release) {
 }
 
 function updateTracklistCount(card) {
-  const boxes = [...card.querySelectorAll(".release-tracklist tbody .tk-lead input")];
-  const on = boxes.filter((b) => b.checked).length;
+  const state = tracklistState.get(card);
+  if (!state) return;
+  const total = state.checked.length;
+  const on = state.checked.reduce((sum, v) => sum + v, 0);
   const label = card.querySelector(".tk-tally");
-  if (label) label.textContent = t("online.tally", { on, total: boxes.length });
+  if (label) label.textContent = t("online.tally", { on, total });
   // Mirror the tally onto the master checkbox that replaced the Enable/Disable
   // all pair — same tri-state contract as the file table's #select-all, so the
   // control shows the current scope instead of just offering two commands.
   const master = card.querySelector(".tk-selall-box");
   if (master) {
-    master.checked = boxes.length > 0 && on === boxes.length;
-    master.indeterminate = on > 0 && on < boxes.length;
+    master.checked = total > 0 && on === total;
+    master.indeterminate = on > 0 && on < total;
   }
 }
 
 // The enabled tracks of a card, shaped for import / auto-align.
 function enabledTracksOf(card) {
-  const release = releaseCache.get(card.dataset.id);
-  return [...card.querySelectorAll(".release-tracklist tbody .tk-lead input:checked")].map((cb) => {
-    const t = release.tracks[Number(cb.dataset.i)];
+  const state = tracklistState.get(card);
+  if (!state) return [];
+  const { release } = state;
+  const ticked = [];
+  state.checked.forEach((on, i) => {
+    if (on) ticked.push(i);
+  });
+  return ticked.map((i) => {
+    const t = release.tracks[i];
     return {
       position: t.position,
       // The disc the release puts this track on (#146), when it says.
@@ -1110,9 +1383,11 @@ async function loadFullCover(id, url, card) {
 function applyMatchOrder(card, paths, matchedPairs, unmatched) {
   matchedPairs.sort((a, b) => a.track - b.track);
   const wanted = new Set(matchedPairs.map((p) => p.track));
-  card
-    .querySelectorAll(".release-tracklist tbody .tk-lead input")
-    .forEach((box) => (box.checked = wanted.has(Number(box.dataset.i))));
+  const state = tracklistState.get(card);
+  if (state) {
+    state.checked.forEach((_, i) => (state.checked[i] = wanted.has(i) ? 1 : 0));
+    renderWindow(card, true);
+  }
   updateTracklistCount(card);
   // Matched files first, in release order; anything unmatched keeps its own
   // order after them, where the untouched tail of the tracklist is.
@@ -1660,11 +1935,14 @@ el("release-list").addEventListener("click", (e) => {
 el("release-list").addEventListener("change", (e) => {
   const card = e.target.closest(".release-card");
   if (!card) return;
+  const state = tracklistState.get(card);
+  if (!state) return;
   if (e.target.matches(".tk-selall-box")) {
-    const on = e.target.checked;
-    card.querySelectorAll(".release-tracklist tbody .tk-lead input").forEach((cb) => (cb.checked = on));
+    state.checked.fill(e.target.checked ? 1 : 0);
+    renderWindow(card, true);
     updateTracklistCount(card);
   } else if (e.target.matches(".release-tracklist tbody .tk-lead input")) {
+    state.checked[Number(e.target.dataset.i)] = e.target.checked ? 1 : 0;
     updateTracklistCount(card);
   }
 });
