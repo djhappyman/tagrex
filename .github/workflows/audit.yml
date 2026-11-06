@@ -1,0 +1,47 @@
+name: Audit
+
+# Checks the lockfile against the RustSec advisory database (#712). An advisory
+# is published without any change in this repository, so this runs on a schedule
+# as well as when the dependencies change. It is a workflow of its own so that a
+# new advisory does not turn CI red on an unrelated commit.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - ".github/workflows/audit.yml"
+  pull_request:
+    paths:
+      - "Cargo.lock"
+      - "**/Cargo.toml"
+      - ".github/workflows/audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  advisories:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      # Only vulnerabilities fail this step. The unmaintained and unsound
+      # warnings come from transitive crates of the desktop stack, which cannot
+      # be acted on here, so they stay warnings in the log.
+      - name: Check for published advisories
+        run: cargo audit

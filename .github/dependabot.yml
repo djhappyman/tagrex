@@ -1,0 +1,21 @@
+# Proposes dependency updates as pull requests (#712). Nothing merges by itself.
+# Monthly and grouped, so a tree of this size stays one reviewable change.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
