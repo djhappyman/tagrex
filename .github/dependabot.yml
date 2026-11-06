@@ -7,7 +7,17 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 3
+    # beat-this pins the rten version, so these can only move when it does
+    # (#716). Security updates are not affected by this list.
+    ignore:
+      - dependency-name: "rten"
+      - dependency-name: "rten-tensor"
     groups:
+      # windows-future must match the windows crate's core types, so a bump of
+      # either one alone does not compile (#716). Listed first because a
+      # dependency joins the first group that matches it.
+      windows-crates:
+        patterns: ["windows", "windows-*"]
       cargo-minor-and-patch:
         update-types: [minor, patch]
 

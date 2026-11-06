@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - A weekly and on-change check of the dependencies against published security advisories, plus monthly grouped dependency update proposals ([#712](https://github.com/tagrex/tagrex/issues/712)).
+- Dependency update proposals no longer offer bumps that cannot compile: the `windows` crates move together, and `rten` waits for the crate that pins it ([#716](https://github.com/tagrex/tagrex/issues/716)).
 
 ### Security
 
