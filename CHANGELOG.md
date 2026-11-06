@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-06
+
+A release for older files whose text comes out as nonsense. Many of them keep
+Cyrillic, Greek or East Asian text in a local code page under a Latin-1 label, so
+`Кино` shows as `Êèíî`. Choose the code page in Settings and that text reads
+correctly, without changing a byte of anything you don't edit. "Fix encoding" then
+rewrites the selection in Unicode through the usual preview, and undo puts the old
+bytes back.
+
 ### Added
 
 - A setting, "Read Latin-1 text as", for older files that keep text in a local code page under a Latin-1 label, so that `Кино` no longer shows as `Êèíî`. It offers Windows-1251, KOI8-R, KOI8-U and nine other common code pages, and applies to ID3v1 tags and to ID3v2 frames marked Latin-1. Text nobody edits keeps its bytes, and edited text is written in Unicode. ID3v1 cannot hold Unicode, so it gets edited text in the same code page ([#698](https://github.com/tagrex/tagrex/issues/698)).

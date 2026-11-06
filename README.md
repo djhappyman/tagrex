@@ -31,7 +31,7 @@
 
 ---
 
-> **Status: 1.2.x.** Stable for day-to-day use: table editing, rename masks
+> **Status: 1.3.x.** Stable for day-to-day use: table editing, rename masks
 > with a function language, tags read back out of file names and text lists,
 > text transforms, online lookups, BPM detection from the audio, cover art, tag
 > block conversion, duplicate detection, exports, a preview player, a
@@ -209,6 +209,12 @@ the editor name what a file holds and which block is being read and written;
 a spare block can be dropped; and the tags can be converted to another kind of
 block, or an ID3v2 one moved between 2.3 and 2.4, which restamps the header and
 keeps every frame rather than rebuilding it. All staged, all undoable.
+
+**Old text encodings are readable.** Older files often keep Cyrillic, Greek or
+East Asian text in a local code page under a Latin-1 label, so `Кино` shows as
+`Êèíî`. Choose the code page in Settings and such text reads correctly, with
+the bytes of anything you don't edit left alone; **Fix encoding** rewrites a
+selection in Unicode through the usual preview.
 
 **Cover art** — fetch from a provider, embed, export, resize on embed, save
 `folder.jpg` next to the tracks, or drag an image onto the window.
