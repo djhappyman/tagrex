@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- HTTPS connections no longer accept certificates issued through the distrusted emSign intermediates, whose private keys are publicly known. This updates `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.11 (RUSTSEC-2026-0382, RUSTSEC-2026-0381, [#711](https://github.com/tagrex/tagrex/issues/711)).
+
 ## [1.3.0] - 2026-11-06
 
 A release for older files whose text comes out as nonsense. Many of them keep
