@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A damaged audio file no longer stops the player: one whose header the decoder failed on (an AIFF stating a sample rate of 0, an MP3 read as having no channels) stopped playback until a restart, and is now just a file that cannot be played ([#721](https://github.com/tagrex/tagrex/issues/721)).
+- A write no longer cuts away the start of a damaged file. When the first bytes of an MP3 or AAC were broken and an ID3v2 tag sat further in, the tag library replaced everything up to that tag's end with the new one, audio included; a WAV whose header was damaged could lose nearly all of it. Such a file is now refused with an error and left as it was ([#720](https://github.com/tagrex/tagrex/issues/720)).
 
 ## [1.3.1] - 2026-11-07
 

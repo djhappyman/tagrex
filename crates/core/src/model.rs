@@ -2644,6 +2644,7 @@ impl TagEngine {
         guarded(&file.path, || {
             ogg_safe_write(&file.path, || {
                 ensure_audio_after_tags(&file.path)?;
+                ensure_nothing_before_id3v2(&file.path)?;
                 pad_ape_tag_misread_as_id3v1(&file.path)?;
                 // Guard the year before touching the file. It is written as a timestamp
                 // (ID3v2.4 TDRC / Vorbis DATE / MP4 ©day) whose year MUST be exactly 4
@@ -2784,6 +2785,7 @@ impl TagEngine {
     ) -> Result<(), TagIoError> {
         guarded(path, || {
             ensure_audio_after_tags(path)?;
+            ensure_nothing_before_id3v2(path)?;
             pad_ape_tag_misread_as_id3v1(path)?;
             drop_id3v2_extended_header(path)?;
             // A block journaled before #648 can still carry its extended header.
@@ -2850,6 +2852,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
+                ensure_nothing_before_id3v2(path)?;
                 pad_ape_tag_misread_as_id3v1(path)?;
                 let mut tag = vorbis_comments_from_packet(bytes).ok_or_else(|| {
                     TagIoError::UnsupportedFormat(
@@ -2882,6 +2885,7 @@ impl TagEngine {
     pub fn set_id3v2_revision(path: &Path, revision: Id3v2Revision) -> Result<bool, TagIoError> {
         guarded(path, || {
             ensure_audio_after_tags(path)?;
+            ensure_nothing_before_id3v2(path)?;
             pad_ape_tag_misread_as_id3v1(path)?;
             drop_id3v2_extended_header(path)?;
             let Some(container) = container_of(path)? else {
@@ -2952,6 +2956,7 @@ impl TagEngine {
                 return Ok(false);
             };
             ensure_audio_after_tags(path)?;
+            ensure_nothing_before_id3v2(path)?;
             pad_ape_tag_misread_as_id3v1(path)?;
             drop_id3v2_extended_header(path)?;
             let Some(container) = container_of(path)? else {
@@ -3018,6 +3023,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
+                ensure_nothing_before_id3v2(path)?;
                 pad_ape_tag_misread_as_id3v1(path)?;
                 drop_id3v2_extended_header(path)?;
                 // An AIFF's or a WAV's ID3v2 is a chunk this module writes itself
@@ -3071,6 +3077,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
+                ensure_nothing_before_id3v2(path)?;
                 pad_ape_tag_misread_as_id3v1(path)?;
                 drop_id3v2_extended_header(path)?;
                 let options = match (kind, revision) {
@@ -3206,6 +3213,7 @@ impl TagEngine {
         guarded(path, || {
             ogg_safe_write(path, || {
                 ensure_audio_after_tags(path)?;
+                ensure_nothing_before_id3v2(path)?;
                 pad_ape_tag_misread_as_id3v1(path)?;
                 drop_id3v2_extended_header(path)?;
                 // Same reason as `write`: going through the generic tag would drop an
@@ -4977,6 +4985,51 @@ fn ensure_audio_after_tags(path: &Path) -> Result<(), TagIoError> {
         )));
     }
     Ok(())
+}
+
+/// Refuse to write an MP3 or an AAC whose ID3v2 tag sits after other data
+/// (#720). The tag library looks for the old tag within the junk window it is
+/// given and replaces everything from the start of the file to that tag's end
+/// with the new one, the junk included. When the first bytes are a damaged
+/// header (an `ID3` with a broken magic, a WAV whose `RIFF` went wrong, read as
+/// MP3 because of the tag further in), that junk is the file itself, and a
+/// write cut away the audio before the tag. Zero bytes are refused as well:
+/// dropping them loses nothing, but a file that reads only by way of skipping
+/// junk to a tag reads differently once the tag starts it, and the fuzzer found
+/// one that a write past zero bytes left unreadable.
+fn ensure_nothing_before_id3v2(path: &Path) -> Result<(), TagIoError> {
+    use std::io::Read;
+    let mut head = Vec::new();
+    std::fs::File::open(path)?
+        .take(STUBBORN_JUNK_BYTES as u64 + 10)
+        .read_to_end(&mut head)?;
+    if head.starts_with(b"ID3") {
+        return Ok(());
+    }
+    if buried_id3v2_header(&head).is_none()
+        || !matches!(container_of(path), Ok(Some(FileType::Mpeg | FileType::Aac)))
+    {
+        return Ok(());
+    }
+    Err(TagIoError::Malformed(format!(
+        "{} has data before its ID3v2 tag, which a write would cut off; the start of the file looks damaged",
+        path.display()
+    )))
+}
+
+/// Where the tag library's write would find the old ID3v2 tag in `head`, the
+/// file's first bytes: the first `ID3` inside its junk window, when a header it
+/// accepts follows (a version from 2 to 4, and no 2.2 compression flag).
+fn buried_id3v2_header(head: &[u8]) -> Option<usize> {
+    let window = &head[..head.len().min(STUBBORN_JUNK_BYTES)];
+    let at = window.windows(3).position(|bytes| bytes == b"ID3")?;
+    let header = head.get(at..at + 10)?;
+    let accepted = match header[3] {
+        2 => header[5] & 0x40 == 0,
+        3 | 4 => true,
+        _ => false,
+    };
+    accepted.then_some(at)
 }
 
 /// Whether the file holds what the tag library mistakes for an ID3v1 tag (#614).

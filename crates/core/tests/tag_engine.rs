@@ -6073,3 +6073,79 @@ fn an_mp4_number_is_refused_exactly_when_it_would_not_read_back() {
     }
     std::fs::remove_file(&path).ok();
 }
+
+/// #720: the tag library replaces everything from the start of a file to the
+/// end of the old ID3v2 tag it finds, junk included. On a file whose first
+/// bytes are damaged, that junk is the file itself. Inputs from the fuzzer,
+/// minimized: an MP3 with a broken leading tag, a WAV whose `RIFF` is broken,
+/// an ADTS AAC. Each reads, as MP3 by way of the tag further in; a write must
+/// be refused and leave every byte where it was.
+#[test]
+fn a_write_never_cuts_what_comes_before_a_buried_id3v2_tag() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["buried-id3v2.mp3", "buried-id3v2.wav", "buried-id3v2.aac"] {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-buried-{}-{name}",
+            std::process::id()
+        ));
+        std::fs::copy(fixtures.join(name), &path).expect("copy the fixture");
+        let before = std::fs::read(&path).expect("read the fixture");
+        let mut file = TagEngine::read(&path).expect("the file reads");
+        file.tags.insert(TagField::Artist, "New Artist".to_string());
+        let written = TagEngine::write(&file);
+        let after = std::fs::read(&path).expect("read the file again");
+        std::fs::remove_file(&path).ok();
+        assert!(written.is_err(), "{name}: the write went through");
+        assert!(after == before, "{name}: a refused write changed the file");
+    }
+}
+
+/// The same shape built by hand, through both kinds of write: junk, then an
+/// ID3v2 tag, then audio. Zero bytes count as junk too; only the file whose tag
+/// starts it is written.
+#[test]
+fn nothing_may_come_before_an_id3v2_tag_a_write_replaces() {
+    let frames = id3v23_frame(b"TIT2", b"\x00Old Title");
+    for (fill, writable) in [(Some(0x55u8), false), (Some(0x00u8), false), (None, true)] {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-before-tag-{fill:?}-{}.mp3",
+            std::process::id()
+        ));
+        let mut data = fill.map_or_else(Vec::new, |byte| vec![byte; 64]);
+        data.extend_from_slice(&id3v23_tag(&frames));
+        data.extend_from_slice(&minimal_mp3());
+        std::fs::write(&path, &data).expect("write fixture");
+
+        let mut file = TagEngine::read(&path).expect("the file reads");
+        assert_eq!(
+            file.tags.get(&TagField::Title).map(String::as_str),
+            Some("Old Title")
+        );
+        file.tags.insert(TagField::Title, "New Title".to_string());
+        let written = TagEngine::write(&file);
+        let covered = TagEngine::write_covers(
+            &path,
+            &[CoverArt {
+                mime: "image/png".to_string(),
+                data: vec![0x89, b'P', b'N', b'G'],
+                ..CoverArt::default()
+            }],
+        );
+        let after = std::fs::read(&path).expect("read the file again");
+        let reread = TagEngine::read(&path);
+        std::fs::remove_file(&path).ok();
+        if writable {
+            written.expect("a write to a file its tag starts");
+            covered.expect("a cover write to a file its tag starts");
+            let reread = reread.expect("the written file reads");
+            assert_eq!(
+                reread.tags.get(&TagField::Title).map(String::as_str),
+                Some("New Title")
+            );
+        } else {
+            assert!(written.is_err(), "the tag write went through");
+            assert!(covered.is_err(), "the cover write went through");
+            assert!(after == data, "a refused write changed the file");
+        }
+    }
+}
