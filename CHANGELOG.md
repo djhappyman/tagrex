@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-07
+
+A robustness release. TagRex now fuzzes its own file handling every week, and
+the first runs found six ways a damaged or misnamed file could hurt: a tag write
+could cut away the audio at the start of the file, change a file it reported it
+had not written, or leave an Ogg file saved under another extension unreadable;
+reading one AAC file could hang the app; and playing a broken file could stop
+the player or crash the app. All six are fixed. Healthy files behave exactly as
+before.
+
 ### Added
 
 - Coverage-guided fuzzing of the tag read and write paths, the cover resize and the player's decode path, run weekly with the corpus kept between runs ([#719](https://github.com/tagrex/tagrex/issues/719)).
