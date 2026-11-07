@@ -2374,10 +2374,7 @@ fn ogg_safe_write<T>(
     path: &Path,
     body: impl FnOnce() -> Result<T, TagIoError>,
 ) -> Result<T, TagIoError> {
-    if !matches!(
-        FileType::from_path(path),
-        Some(FileType::Vorbis | FileType::Opus | FileType::Speex)
-    ) {
+    if !holds_ogg(path)? {
         let result = body()?;
         pad_ape_tag_misread_as_id3v1(path)?;
         return Ok(result);
@@ -2403,6 +2400,23 @@ fn ogg_safe_write<T>(
             path.display()
         ))),
     }
+}
+
+/// Whether the file at `path` is an Ogg stream (Vorbis, Opus, Speex), for
+/// [`ogg_safe_write`]: by its extension, or by the `OggS` page it starts with.
+/// The reader goes by content, so a misnamed Ogg file is written by the tag
+/// library's Ogg writer all the same, and it skipped the guard (#723).
+fn holds_ogg(path: &Path) -> Result<bool, TagIoError> {
+    use std::io::Read;
+    if matches!(
+        FileType::from_path(path),
+        Some(FileType::Vorbis | FileType::Opus | FileType::Speex)
+    ) {
+        return Ok(true);
+    }
+    let mut magic = [0u8; 4];
+    let read = std::fs::File::open(path)?.read_exact(&mut magic);
+    Ok(read.is_ok() && &magic == b"OggS")
 }
 
 /// The granule position of the last Ogg page in `bytes`, found from the end,

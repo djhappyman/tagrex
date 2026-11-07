@@ -6172,3 +6172,30 @@ fn a_write_that_does_not_land_leaves_the_file_as_it_was() {
         assert!(after == before, "{name}: a failed write changed the file");
     }
 }
+
+/// #723: a Speex file named `.mp3`. The reader places it by content, so the
+/// Ogg writer runs on it, and the Ogg guard has to as well: whatever the write
+/// does, the file must still read afterwards, or be left as it was.
+#[test]
+fn a_misnamed_ogg_file_is_written_under_the_ogg_guard() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-misnamed-ogg-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::copy(fixtures.join("misnamed-speex.mp3"), &path).expect("copy the fixture");
+    let before = std::fs::read(&path).expect("read the fixture");
+    let mut file = TagEngine::read(&path).expect("the file reads");
+    assert_eq!(file.format, AudioFormat::Speex);
+    file.tags.insert(TagField::Artist, "New Artist".to_string());
+    let written = TagEngine::write(&file);
+    let after = std::fs::read(&path).expect("read the file again");
+    let reread = TagEngine::read(&path);
+    std::fs::remove_file(&path).ok();
+    match written {
+        Ok(()) => {
+            reread.expect("a successful write left the file unreadable");
+        }
+        Err(_) => assert!(after == before, "a failed write changed the file"),
+    }
+}
