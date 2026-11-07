@@ -6199,3 +6199,22 @@ fn a_misnamed_ogg_file_is_written_under_the_ogg_guard() {
         Err(_) => assert!(after == before, "a failed write changed the file"),
     }
 }
+
+/// #724: an ADTS file on which the tag library's frame search finds the same
+/// non-frame again and again. The read has to come to an end; before, it never
+/// returned. Once the read budget stops the looping attempt, a later rung of
+/// the probe ladder reads the file, so it may well list. The input is from the
+/// fuzzer.
+#[test]
+fn a_read_the_tag_library_would_loop_on_comes_to_an_end() {
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/aac-sync-loop.aac");
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        done.send(TagEngine::read(&path).map(|_| ())).ok();
+    });
+    finished
+        .recv_timeout(std::time::Duration::from_secs(20))
+        .expect("the read did not come to an end")
+        .ok();
+}

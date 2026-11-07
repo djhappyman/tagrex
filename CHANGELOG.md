@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A write no longer cuts away the start of a damaged file. When the first bytes of an MP3 or AAC were broken and an ID3v2 tag sat further in, the tag library replaced everything up to that tag's end with the new one, audio included; a WAV whose header was damaged could lose nearly all of it. Such a file is now refused with an error and left as it was ([#720](https://github.com/tagrex/tagrex/issues/720)).
 - A WAV or AIFF write that reports it could not write the tags now leaves the file exactly as it was; before, the attempt and the container repair behind it had already rewritten the file ([#722](https://github.com/tagrex/tagrex/issues/722)).
 - An Ogg file (Vorbis, Opus, Speex) saved under another extension now gets the same write protection as one named `.ogg`/`.opus`/`.spx`: a write that would leave it unreadable or cut its audio is undone ([#723](https://github.com/tagrex/tagrex/issues/723)).
+- Reading a damaged AAC file no longer hangs. The tag library could search the same spot of such a file for ever, and since folder listings read under one lock, the whole app waited with it; a read now ends after a bounded amount of reading ([#724](https://github.com/tagrex/tagrex/issues/724)).
 
 ## [1.3.1] - 2026-11-07
 

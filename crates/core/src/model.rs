@@ -1154,7 +1154,7 @@ fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
 /// nothing more.
 fn repaired_id3v2_source(path: &Path) -> Result<Option<TagSource>, TagIoError> {
     let raw = std::fs::read(path)?;
-    Ok(repair_undecodable_id3v2_frames(&raw).map(|fixed| TagSource::Memory(Cursor::new(fixed))))
+    Ok(repair_undecodable_id3v2_frames(&raw).map(TagSource::memory))
 }
 
 /// Read the MP3 at `path` from `file`, and when that fails, read it again
@@ -1615,13 +1615,13 @@ fn buffered(path: &Path) -> Result<TagSource, TagIoError> {
             None => None,
         };
         let fixed = fixed.unwrap_or(raw);
-        return Ok(TagSource::Memory(Cursor::new(if misread {
+        return Ok(TagSource::memory(if misread {
             with_ape_tag_padded(fixed)
         } else {
             fixed
-        })));
+        }));
     }
-    Ok(TagSource::File(std::io::BufReader::new(file)))
+    TagSource::file(file)
 }
 
 /// Where an AIFF's or a WAV's `ID3 ` chunk payload sits, as offset and length,
@@ -1689,26 +1689,76 @@ fn without_iff_id3_extended_header(raw: &[u8], at: usize, len: usize) -> Option<
 }
 
 /// What [`buffered`] hands the backend: the file itself, or the copy of it that
-/// lost its ID3v2 extended header (#648).
-enum TagSource {
+/// lost its ID3v2 extended header (#648), behind a read budget (#724).
+///
+/// The tag library can loop on a damaged file: its AAC reader finds a frame
+/// sync that is not a valid header, stays where it was, and finds the same one
+/// again, for ever. A read of the file never returned, and every probe of a
+/// listing runs under the app's one lock, so the whole app waited on it. Any
+/// such loop reads, so the source stops serving bytes after a generous multiple
+/// of the file's length and the read ends as an error about a damaged file. A
+/// real read goes over a file a few times at most.
+struct TagSource {
+    bytes: SourceBytes,
+    /// How many more bytes the backend may read before reads fail.
+    budget: u64,
+}
+
+enum SourceBytes {
     File(std::io::BufReader<std::fs::File>),
     Memory(Cursor<Vec<u8>>),
 }
 
+/// How many times over the backend may read a file, plus a fixed allowance so a
+/// tiny file is not cut short by a header or two read twice.
+const READ_BUDGET_PASSES: u64 = 16;
+const READ_BUDGET_SLACK: u64 = 1024 * 1024;
+
+impl TagSource {
+    fn file(file: std::fs::File) -> Result<Self, TagIoError> {
+        let len = file.metadata()?.len();
+        Ok(Self::with_budget(
+            SourceBytes::File(std::io::BufReader::new(file)),
+            len,
+        ))
+    }
+
+    fn memory(bytes: Vec<u8>) -> Self {
+        let len = bytes.len() as u64;
+        Self::with_budget(SourceBytes::Memory(Cursor::new(bytes)), len)
+    }
+
+    fn with_budget(bytes: SourceBytes, len: u64) -> Self {
+        Self {
+            bytes,
+            budget: len
+                .saturating_mul(READ_BUDGET_PASSES)
+                .saturating_add(READ_BUDGET_SLACK),
+        }
+    }
+}
+
 impl std::io::Read for TagSource {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        match self {
-            TagSource::File(file) => file.read(buf),
-            TagSource::Memory(bytes) => bytes.read(buf),
+        if self.budget == 0 {
+            return Err(std::io::Error::other(
+                "the file is damaged: reading it does not come to an end",
+            ));
         }
+        let read = match &mut self.bytes {
+            SourceBytes::File(file) => file.read(buf),
+            SourceBytes::Memory(bytes) => bytes.read(buf),
+        }?;
+        self.budget = self.budget.saturating_sub(read as u64);
+        Ok(read)
     }
 }
 
 impl std::io::Seek for TagSource {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
-        match self {
-            TagSource::File(file) => file.seek(pos),
-            TagSource::Memory(bytes) => bytes.seek(pos),
+        match &mut self.bytes {
+            SourceBytes::File(file) => file.seek(pos),
+            SourceBytes::Memory(bytes) => bytes.seek(pos),
         }
     }
 }
