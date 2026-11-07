@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-07
+
+A security update. HTTPS connections, which carry every online source's traffic
+including a saved Discogs token, trusted certificates issued through emSign
+intermediates whose private keys are publicly known, and no longer do. The one
+behaviour change to check: if your proxy address holds a password with a literal
+sequence such as `%40`, write its `%` as `%25`.
+
 ### Added
 
 - A weekly and on-change check of the dependencies against published security advisories, plus monthly grouped dependency update proposals ([#712](https://github.com/tagrex/tagrex/issues/712)).
