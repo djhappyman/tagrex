@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The README's install notes now say that an in-app update asks for your password on Linux, and for administrator rights on Windows when TagRex is installed in a protected folder ([#718](https://github.com/tagrex/tagrex/issues/718)).
+
 ## [1.3.1] - 2026-11-07
 
 A security update. HTTPS connections, which carry every online source's traffic

@@ -73,8 +73,10 @@ sudo dnf install ./TagRex-*.x86_64.rpm    # Fedora (aarch64.rpm on ARM)
 
 **Updates.** Once installed, TagRex tells you when a newer release is out and
 can install it itself: it downloads the update, checks its signature, installs
-it and restarts. See [Settings](docs/guide/settings.md#network) to switch the
-check off.
+it and restarts. On Linux the system asks for your password to install the new
+package; on Windows, administrator rights are asked for only when TagRex sits
+in a folder you cannot write to, such as `Program Files`. See
+[Settings](docs/guide/settings.md#network) to switch the check off.
 
 ## What it does
 
