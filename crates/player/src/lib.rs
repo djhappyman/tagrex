@@ -385,8 +385,11 @@ fn enqueue(sink: &Sink, queue: &mut VecDeque<Track>, path: PathBuf) -> bool {
 /// AIFF that states a sample rate of 0 fails an assert, an MP3 it reads as
 /// having no channels divides by zero (#721). The player thread opens every
 /// queued track here, so one such file stopped the player until a restart. As
-/// an error, the file is just one that cannot be played.
-fn open_decoder(path: &std::path::Path) -> Result<Decoder<BufReader<aiff::AudioFile>>, String> {
+/// an error, the file is just one that cannot be played. The same goes for a
+/// panic while it decodes, which [`PanicSafe`] turns into the end of the track.
+fn open_decoder(
+    path: &std::path::Path,
+) -> Result<PanicSafe<Decoder<BufReader<aiff::AudioFile>>>, String> {
     let file = aiff::AudioFile::open(path).map_err(|err| err.to_string())?;
     let len = file.len();
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -397,7 +400,84 @@ fn open_decoder(path: &std::path::Path) -> Result<Decoder<BufReader<aiff::AudioF
             .build()
     }))
     .map_err(|_| "the file is damaged: the decoder failed on it".to_string())?
+    .map(PanicSafe::new)
     .map_err(|err| err.to_string())
+}
+
+/// A source whose panics end it instead of unwinding out (#725).
+///
+/// Symphonia also panics part-way through some damaged files, not only on
+/// their headers: a broken AAC frame indexes past one of its tables. Playback
+/// pulls samples on the audio output thread, where nothing of ours could catch
+/// that, so one such file could take the app down mid-track; the waveform and
+/// the tempo detection only lost their result. A panic now ends the track at
+/// that point, as if the file stopped there.
+struct PanicSafe<S> {
+    inner: S,
+    /// Set once the inner source has panicked; it is not touched again.
+    failed: bool,
+}
+
+impl<S> PanicSafe<S> {
+    fn new(inner: S) -> Self {
+        Self {
+            inner,
+            failed: false,
+        }
+    }
+}
+
+impl<S: rodio::Source> Iterator for PanicSafe<S> {
+    type Item = rodio::Sample;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.failed {
+            return None;
+        }
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.inner.next())).unwrap_or_else(
+            |_| {
+                self.failed = true;
+                None
+            },
+        )
+    }
+}
+
+impl<S: rodio::Source> rodio::Source for PanicSafe<S> {
+    fn current_span_len(&self) -> Option<usize> {
+        if self.failed {
+            Some(0)
+        } else {
+            self.inner.current_span_len()
+        }
+    }
+
+    fn channels(&self) -> rodio::ChannelCount {
+        self.inner.channels()
+    }
+
+    fn sample_rate(&self) -> rodio::SampleRate {
+        self.inner.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.inner.total_duration()
+    }
+
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        if self.failed {
+            return Err(rodio::source::SeekError::Other(std::sync::Arc::new(
+                std::io::Error::other("the file is damaged: the decoder failed on it"),
+            )));
+        }
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.inner.try_seek(pos)))
+            .unwrap_or_else(|_| {
+                self.failed = true;
+                Err(rodio::source::SeekError::Other(std::sync::Arc::new(
+                    std::io::Error::other("the file is damaged: the decoder failed on it"),
+                )))
+            })
+    }
 }
 
 /// How close to the end of the current track the queue gets primed with the
@@ -571,6 +651,27 @@ mod tests {
         let mut reference = open_decoder(&plain).unwrap();
         reference.try_seek(Duration::from_millis(500)).unwrap();
         assert_eq!(at, (reference.next().unwrap() * 32768.0) as i16);
+    }
+
+    // #725: an AAC the decoder panics on part-way through, minimized from a
+    // fuzz input. The track ends where it broke instead of unwinding out of
+    // whoever pulls the samples (on playback, the audio output thread).
+    #[test]
+    fn a_panic_while_decoding_ends_the_track() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/decode-panic.aac");
+        let mut decoder = open_decoder(&path).expect("the header reads");
+        let pulled = decoder.by_ref().count();
+        assert!(decoder.failed, "the decoder no longer panics on this file");
+        assert_eq!(
+            decoder.next(),
+            None,
+            "a failed track kept going after {pulled} samples"
+        );
+        use rodio::Source;
+        assert_eq!(decoder.current_span_len(), Some(0));
+        assert!(decoder.try_seek(Duration::ZERO).is_err());
+        let _ = waveform(&path);
     }
 
     // #721: headers the decoder panics on, minimized from fuzz inputs, come
