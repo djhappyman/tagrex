@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A weekly and on-change check of the dependencies against published security advisories, plus monthly grouped dependency update proposals ([#712](https://github.com/tagrex/tagrex/issues/712)).
 - Dependency update proposals no longer offer bumps that cannot compile: the `windows` crates move together, and `rten` waits for the crate that pins it ([#716](https://github.com/tagrex/tagrex/issues/716)).
 
+### Changed
+
+- Updated `ureq`, `tauri` and other locked dependencies. A percent-encoded proxy password now reaches the proxy decoded, so `p%40ss` sends `p@ss`; a password that literally contains a sequence such as `%40` has to write its `%` as `%25` ([#717](https://github.com/tagrex/tagrex/issues/717)).
+
 ### Security
 
 - HTTPS connections no longer accept certificates issued through the distrusted emSign intermediates, whose private keys are publicly known. This updates `rustls-webpki` to 0.103.16 and `webpki-roots` to 1.0.11 (RUSTSEC-2026-0382, RUSTSEC-2026-0381, [#711](https://github.com/tagrex/tagrex/issues/711)).
