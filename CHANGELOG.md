@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - The README's install notes now say that an in-app update asks for your password on Linux, and for administrator rights on Windows when TagRex is installed in a protected folder ([#718](https://github.com/tagrex/tagrex/issues/718)).
 
+### Fixed
+
+- A damaged audio file no longer stops the player: one whose header the decoder failed on (an AIFF stating a sample rate of 0, an MP3 read as having no channels) stopped playback until a restart, and is now just a file that cannot be played ([#721](https://github.com/tagrex/tagrex/issues/721)).
+
 ## [1.3.1] - 2026-11-07
 
 A security update. HTTPS connections, which carry every online source's traffic

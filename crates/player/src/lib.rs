@@ -380,15 +380,24 @@ fn enqueue(sink: &Sink, queue: &mut VecDeque<Track>, path: PathBuf) -> bool {
 /// with padding before its samples, which Symphonia would refuse (#525). The
 /// length goes to the decoder as `TryFrom<File>` would pass it: without it
 /// Symphonia calls a FLAC unseekable (#190).
+///
+/// Symphonia panics on some damaged headers instead of returning an error: an
+/// AIFF that states a sample rate of 0 fails an assert, an MP3 it reads as
+/// having no channels divides by zero (#721). The player thread opens every
+/// queued track here, so one such file stopped the player until a restart. As
+/// an error, the file is just one that cannot be played.
 fn open_decoder(path: &std::path::Path) -> Result<Decoder<BufReader<aiff::AudioFile>>, String> {
     let file = aiff::AudioFile::open(path).map_err(|err| err.to_string())?;
     let len = file.len();
-    Decoder::builder()
-        .with_data(BufReader::new(file))
-        .with_byte_len(len)
-        .with_seekable(true)
-        .build()
-        .map_err(|err| err.to_string())
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        Decoder::builder()
+            .with_data(BufReader::new(file))
+            .with_byte_len(len)
+            .with_seekable(true)
+            .build()
+    }))
+    .map_err(|_| "the file is damaged: the decoder failed on it".to_string())?
+    .map_err(|err| err.to_string())
 }
 
 /// How close to the end of the current track the queue gets primed with the
@@ -562,6 +571,18 @@ mod tests {
         let mut reference = open_decoder(&plain).unwrap();
         reference.try_seek(Duration::from_millis(500)).unwrap();
         assert_eq!(at, (reference.next().unwrap() * 32768.0) as i16);
+    }
+
+    // #721: headers the decoder panics on, minimized from fuzz inputs, come
+    // back as an error instead of unwinding out of the player thread.
+    #[test]
+    fn a_header_the_decoder_panics_on_is_an_error() {
+        let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        for name in ["zero-sample-rate.aiff", "zero-channels.mp3"] {
+            let path = fixtures.join(name);
+            assert!(open_decoder(&path).is_err(), "{name} opened");
+            assert!(waveform(&path).is_err(), "{name} drew a waveform");
+        }
     }
 
     #[test]
