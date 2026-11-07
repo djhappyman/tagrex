@@ -1,0 +1,47 @@
+# Coverage-guided fuzzing (#719). Its own workspace, so the stable build of the
+# app never sees it; it needs a nightly toolchain and cargo-fuzz. See README.md
+# in this folder for how to run it.
+[package]
+name = "tagrex-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+tagrex-core = { path = "../crates/core" }
+tagrex-player = { path = "../crates/player" }
+
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "tag_read"
+path = "fuzz_targets/tag_read.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tag_write"
+path = "fuzz_targets/tag_write.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "cover_resize"
+path = "fuzz_targets/cover_resize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "player_decode"
+path = "fuzz_targets/player_decode.rs"
+test = false
+doc = false
+bench = false

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Coverage-guided fuzzing of the tag read and write paths, the cover resize and the player's decode path, run weekly with the corpus kept between runs ([#719](https://github.com/tagrex/tagrex/issues/719)).
+
 ### Changed
 
 - The README's install notes now say that an in-app update asks for your password on Linux, and for administrator rights on Windows when TagRex is installed in a protected folder ([#718](https://github.com/tagrex/tagrex/issues/718)).
