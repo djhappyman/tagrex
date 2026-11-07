@@ -6149,3 +6149,26 @@ fn nothing_may_come_before_an_id3v2_tag_a_write_replaces() {
         }
     }
 }
+
+/// #722: a WAV or AIFF write whose tag does not land, nor after the AIFF
+/// repair, ends in an error. It must leave the file as it found it, not as the
+/// save and the repair left it. Inputs from the fuzzer, minimized.
+#[test]
+fn a_write_that_does_not_land_leaves_the_file_as_it_was() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for name in ["unlanded-write.wav", "unlanded-write.aiff"] {
+        let path = std::env::temp_dir().join(format!(
+            "tagrex-tag-engine-unlanded-{}-{name}",
+            std::process::id()
+        ));
+        std::fs::copy(fixtures.join(name), &path).expect("copy the fixture");
+        let before = std::fs::read(&path).expect("read the fixture");
+        let mut file = TagEngine::read(&path).expect("the file reads");
+        file.tags.insert(TagField::Artist, "New Artist".to_string());
+        let written = TagEngine::write(&file);
+        let after = std::fs::read(&path).expect("read the file again");
+        std::fs::remove_file(&path).ok();
+        assert!(written.is_err(), "{name}: the write now lands");
+        assert!(after == before, "{name}: a failed write changed the file");
+    }
+}

@@ -3952,21 +3952,40 @@ fn write_id3v2(path: &Path, container: FileType, tags: &TagMap) -> Result<(), Ta
     } else {
         tags
     };
-    save_id3v2(path, container, tags, &before)?;
-    if id3v2_write_landed(path, container, tags)? {
-        return sync_iff_text(path, container, tags, &before);
-    }
-    // The write was a silent no-op. Repair a broken AIFF once and retry.
-    if container == FileType::Aiff && repair_aiff_container(path)? {
+    // A WAV or AIFF write that does not land has still rewritten the file, and
+    // the repair below rewrites it again, so the error at the end used to
+    // report a failure over a file that was no longer what it had been (#722).
+    // The bytes are put back on any error. The tag library reads such a file
+    // whole to write it, so holding a copy costs no more than the write does.
+    let original = if matches!(container, FileType::Wav | FileType::Aiff) {
+        Some(std::fs::read(path)?)
+    } else {
+        None
+    };
+    let written = (|| {
         save_id3v2(path, container, tags, &before)?;
         if id3v2_write_landed(path, container, tags)? {
             return sync_iff_text(path, container, tags, &before);
         }
+        // The write was a silent no-op. Repair a broken AIFF once and retry.
+        if container == FileType::Aiff && repair_aiff_container(path)? {
+            save_id3v2(path, container, tags, &before)?;
+            if id3v2_write_landed(path, container, tags)? {
+                return sync_iff_text(path, container, tags, &before);
+            }
+        }
+        Err(TagIoError::Malformed(format!(
+            "could not write tags to {}: its container is malformed and could not be repaired",
+            path.display()
+        )))
+    })();
+    if let (Err(_), Some(original)) = (&written, original) {
+        let now = std::fs::read(path)?;
+        if now != original {
+            rewrite_in_place(path, &now, &original)?;
+        }
     }
-    Err(TagIoError::Malformed(format!(
-        "could not write tags to {}: its container is malformed and could not be repaired",
-        path.display()
-    )))
+    written
 }
 
 /// Whether an ID3v2 write actually persisted. When the write set any non-empty
