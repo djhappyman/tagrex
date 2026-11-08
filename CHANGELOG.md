@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-11-08
+
+A small robustness release with two fixes from the first weekly fuzz run. A tag
+write could damage an ID3v2 frame that was stored compressed, in some cases
+leaving the whole file unreadable, and a damaged M4A could make the player ask
+for tens of gigabytes of memory, which on Windows and Linux could crash the app.
+Both are fixed; healthy files behave exactly as before.
+
 ### Fixed
 
 - A write no longer damages an ID3v2 frame that was stored compressed. The tag library unpacks such a frame on read and writes it back plain, but the frame kept its "compressed" flag, so it went out claiming data it did not hold; with some frames the whole file could not be read afterwards ([#726](https://github.com/tagrex/tagrex/issues/726)).
