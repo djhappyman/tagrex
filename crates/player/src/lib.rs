@@ -18,6 +18,7 @@
 //! the player bar, and the tempo detection in [`tempo`] (#536).
 
 mod aiff;
+mod mp4;
 pub mod tempo;
 
 use std::collections::VecDeque;
@@ -387,9 +388,14 @@ fn enqueue(sink: &Sink, queue: &mut VecDeque<Track>, path: PathBuf) -> bool {
 /// queued track here, so one such file stopped the player until a restart. As
 /// an error, the file is just one that cannot be played. The same goes for a
 /// panic while it decodes, which [`PanicSafe`] turns into the end of the track.
+///
+/// An MP4 whose sample tables state more entries than the file holds is
+/// refused before the decoder sees it: the decoder would reserve room for all
+/// of them first, and an allocation that large can abort the app (#727).
 fn open_decoder(
     path: &std::path::Path,
 ) -> Result<PanicSafe<Decoder<BufReader<aiff::AudioFile>>>, String> {
+    mp4::check_sample_tables(path)?;
     let file = aiff::AudioFile::open(path).map_err(|err| err.to_string())?;
     let len = file.len();
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -684,6 +690,21 @@ mod tests {
             assert!(open_decoder(&path).is_err(), "{name} opened");
             assert!(waveform(&path).is_err(), "{name} drew a waveform");
         }
+    }
+
+    // #727: an M4A whose `stsc` states about 1.87 billion entries, from the
+    // fuzzer. The decoder would reserve 30 GB for them before reading one; the
+    // file is refused before it gets that far.
+    #[test]
+    fn an_mp4_sample_table_larger_than_the_file_is_refused() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/huge-sample-table.m4a");
+        let err = open_decoder(&path).err().expect("the file opened");
+        assert!(
+            err.contains("sample tables"),
+            "refused for another reason: {err}"
+        );
+        assert!(waveform(&path).is_err());
     }
 
     #[test]

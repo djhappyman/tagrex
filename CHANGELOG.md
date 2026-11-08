@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A write no longer damages an ID3v2 frame that was stored compressed. The tag library unpacks such a frame on read and writes it back plain, but the frame kept its "compressed" flag, so it went out claiming data it did not hold; with some frames the whole file could not be read afterwards ([#726](https://github.com/tagrex/tagrex/issues/726)).
+- A damaged M4A can no longer make the player reserve tens of gigabytes. A sample table stating more entries than the file holds made the decoder ask for all of that memory up front, which on Windows and Linux could crash the app; such a file is now refused as damaged ([#727](https://github.com/tagrex/tagrex/issues/727)).
 
 ## [1.3.2] - 2026-11-07
 
