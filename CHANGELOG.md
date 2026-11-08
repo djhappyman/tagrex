@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A write no longer damages an ID3v2 frame that was stored compressed. The tag library unpacks such a frame on read and writes it back plain, but the frame kept its "compressed" flag, so it went out claiming data it did not hold; with some frames the whole file could not be read afterwards ([#726](https://github.com/tagrex/tagrex/issues/726)).
+
 ## [1.3.2] - 2026-11-07
 
 A robustness release. TagRex now fuzzes its own file handling every week, and

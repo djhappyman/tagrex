@@ -6218,3 +6218,68 @@ fn a_read_the_tag_library_would_loop_on_comes_to_an_end() {
         .expect("the read did not come to an end")
         .ok();
 }
+
+/// #726: a frame stored zlib-compressed is inflated by the tag library on read
+/// and written back plain. A write that carried it over kept the compression
+/// flag, so the frame went out claiming zlib data it did not hold. The MP3
+/// holds a genuinely compressed `PRIV` frame the model does not own: after a
+/// write it must come out plain, flag and bytes agreeing.
+#[test]
+fn a_carried_compressed_frame_is_written_plainly() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-compressed-{}.mp3",
+        std::process::id()
+    ));
+    std::fs::copy(fixtures.join("compressed-frame.mp3"), &path).expect("copy the fixture");
+    let mut file = TagEngine::read(&path).expect("the file reads");
+    file.tags.insert(TagField::Artist, "New Artist".to_string());
+    TagEngine::write(&file).expect("the write succeeds");
+    let after = std::fs::read(&path).expect("read the file again");
+    let reread = TagEngine::read(&path);
+    std::fs::remove_file(&path).ok();
+    reread.expect("the written file reads");
+
+    let at = after
+        .windows(4)
+        .position(|window| window == b"PRIV")
+        .expect("the PRIV frame is carried over");
+    let format_flags = after[at + 9];
+    assert_eq!(
+        format_flags & 0x08,
+        0,
+        "the carried frame is still flagged compressed"
+    );
+    let owner = b"com.example.owner\0payload payload";
+    assert_eq!(
+        &after[at + 10..at + 10 + owner.len()],
+        owner,
+        "the carried frame does not hold its plain bytes"
+    );
+}
+
+/// #726: the fuzzer's input, minimized. Its `RVA2` frame is flagged grouped
+/// and compressed; carrying the flag over left the whole file unreadable after
+/// a write that reported success.
+#[test]
+fn a_write_over_a_compressed_frame_leaves_the_file_readable() {
+    let fixtures = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let path = std::env::temp_dir().join(format!(
+        "tagrex-tag-engine-compressed-grouped-{}.aac",
+        std::process::id()
+    ));
+    std::fs::copy(fixtures.join("compressed-grouped-frame.aac"), &path).expect("copy the fixture");
+    let before = std::fs::read(&path).expect("read the fixture");
+    let mut file = TagEngine::read(&path).expect("the file reads");
+    file.tags.insert(TagField::Artist, "New Artist".to_string());
+    let written = TagEngine::write(&file);
+    let after = std::fs::read(&path).expect("read the file again");
+    let reread = TagEngine::read(&path);
+    std::fs::remove_file(&path).ok();
+    match written {
+        Ok(()) => {
+            reread.expect("a successful write left the file unreadable");
+        }
+        Err(_) => assert!(after == before, "a failed write changed the file"),
+    }
+}

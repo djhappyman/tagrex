@@ -4334,10 +4334,17 @@ fn save_id3v2(
             // as `InvalidUnsynchronisation` — poisoning the whole file so lofty
             // can neither read nor rewrite it. Write it plainly instead, clearing
             // the data-length indicator that the unsynchronisation flag pairs with.
+            // Compression goes the same way (#726): lofty inflates a compressed
+            // frame on read and writes it back plain, so a kept flag would claim
+            // zlib data that is not there. An encrypted frame is left as it is:
+            // lofty holds its raw bytes and cannot tell what is inside.
             let mut carried = frame.clone();
             let mut flags = carried.flags();
             flags.unsynchronisation = false;
             flags.data_length_indicator = None;
+            if flags.encryption.is_none() {
+                flags.compression = false;
+            }
             carried.set_flags(flags);
             updated.insert(carried);
         }
