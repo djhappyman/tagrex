@@ -32,7 +32,8 @@ regex = "1.13.1"
 # Reads an oversized PNG cover row by row, so shrinking it never holds the full
 # decoded image (#622). Already in the tree via image.
 png = "0.18.1"
-rusqlite = { version = "0.40.1", features = ["bundled"] }
+# 0.41 for its bundled SQLite 3.54.1 (RUSTSEC-2026-0459, #728).
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 # Tells a case-only rename of one file from a move onto another file on a
 # case-insensitive file system (#604, #605). Already in the tree via walkdir.
 same-file = "1.0.6"
