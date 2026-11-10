@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-11-10
+
+A security update. The undo journal moves to SQLite 3.54.1, which fixes a flaw
+that could hand back stale bytes from memory when a database is opened together
+with a crafted write-ahead log. TagRex only ever opens its own journal, so the
+exposure was low; nothing else changes.
+
 ### Security
 
 - The undo journal now runs on SQLite 3.54.1, which fixes a flaw that could hand back stale bytes from memory when a database is opened together with a crafted write-ahead log (RUSTSEC-2026-0459). Only the app's own journal is ever opened, so exposure was low. This updates `rusqlite` to 0.41.1 and `libsqlite3-sys` to 0.39.1 ([#728](https://github.com/tagrex/tagrex/issues/728)).
