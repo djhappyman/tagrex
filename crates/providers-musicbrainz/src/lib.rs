@@ -140,6 +140,8 @@ impl MusicBrainzProvider {
 
         let data = response
             .body_mut()
+            .with_config()
+            .limit(tagrex_core::provider::MAX_IMAGE_BYTES)
             .read_to_vec()
             .map_err(|err| ProviderError::Network(err.to_string()))?;
 
@@ -622,6 +624,70 @@ mod tests {
                 Err(tagrex_core::provider::ProviderError::RateLimited {
                     retry_after_secs: 120
                 })
+            ),
+            "{result:?}"
+        );
+    }
+
+    /// An image over the HTTP client's 10 MiB default arrives whole (#746):
+    /// Cover Art Archive originals are often larger.
+    #[test]
+    fn an_image_over_ten_mebibytes_is_downloaded_whole() {
+        use std::io::{Read, Write};
+        const SIZE: usize = 13 * 1024 * 1024;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {SIZE}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            let _ = stream.write_all(&vec![0xAB; SIZE]);
+        });
+        let result =
+            super::MusicBrainzProvider::new().fetch_image(&format!("http://{addr}/cover.jpg"));
+        server.join().unwrap();
+        let image = result.unwrap();
+        assert_eq!(image.mime, "image/jpeg");
+        assert_eq!(image.data.len(), SIZE);
+    }
+
+    /// A body past the cap is refused rather than read without limit.
+    #[test]
+    fn an_image_past_the_cap_is_refused() {
+        use std::io::{Read, Write};
+        let size = tagrex_core::provider::MAX_IMAGE_BYTES as usize + 1;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0u8; 2048];
+            let _ = stream.read(&mut request);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: image/jpeg\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            // The client stops reading at the cap; a broken pipe after it is expected.
+            let chunk = vec![0u8; 1024 * 1024];
+            let mut sent = 0;
+            while sent < size {
+                let n = chunk.len().min(size - sent);
+                if stream.write_all(&chunk[..n]).is_err() {
+                    break;
+                }
+                sent += n;
+            }
+        });
+        let result =
+            super::MusicBrainzProvider::new().fetch_image(&format!("http://{addr}/cover.jpg"));
+        drop(server);
+        assert!(
+            matches!(
+                result,
+                Err(tagrex_core::provider::ProviderError::Network(_))
             ),
             "{result:?}"
         );
