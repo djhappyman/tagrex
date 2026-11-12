@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
+  import { subscribeWorkspaceState, setWorkspaceMode, setWorkspaceSubtab, type WorkspaceMode, type WorkspaceSubtab } from '$lib/workspace-state';
   import DockWorkspace from './DockWorkspace.svelte';
+  import CompactPlayer from './CompactPlayer.svelte';
   import DockModule from './DockModule.svelte';
   import type { WorkspaceLayout } from '$lib/workspace-layout';
   import FilterPanel from './FilterPanel.svelte';
@@ -13,8 +16,8 @@
   import { Textarea } from '$lib/components/ui/textarea/index.js';
   import { NativeSelect, NativeSelectOption } from '$lib/components/ui/native-select/index.js';
   let dock = $state<WorkspaceLayout>();
-  let mode = $state('tagger');
-  let subtab = $state('online');
+  let mode = $state<WorkspaceMode>('tagger');
+  let subtab = $state<WorkspaceSubtab>('online');
   // Narrow windows show one working pane at a time. Dock modules stay mounted, so
   // a cell edit, staged field or scroll position survives the switch.
   let viewOpen = $state(false);
@@ -95,25 +98,20 @@
       host?.querySelector<HTMLElement>('button:not([hidden]), input, select')?.focus();
     });
   }
-  function attachTabs(node: HTMLDivElement) {
-    const observer = new MutationObserver(() => {
-      const activeMode = node.querySelector<HTMLElement>('.mode-tab.active')?.dataset.mode;
-      const activeSubtab = node.querySelector<HTMLElement>('.subtab.active')?.dataset.subtab;
-      if (activeMode && mode !== activeMode) mode = activeMode;
-      if (activeSubtab && subtab !== activeSubtab) subtab = activeSubtab;
-    });
-    node.querySelectorAll('.mode-tab, .subtab').forEach(tab => observer.observe(tab, { attributes: true, attributeFilter: ['class'] }));
-    return () => observer.disconnect();
+  onMount(() => subscribeWorkspaceState(next => {
+    mode = next.mode;
+    subtab = next.subtab;
+  }));
+  function changeTab(value: string, isSubtab = false) {
+    if (isSubtab) setWorkspaceSubtab(value);
+    else {
+      setWorkspaceMode(value);
+      dock?.reveal('inspector');
+    }
   }
-  function changeTab(value: string, subtab = false) {
-    queueMicrotask(() => {
-      const selector = subtab ? `.subtab[data-subtab="${value}"]` : `.mode-tab[data-mode="${value}"]`;
-      const tab = document.querySelector<HTMLButtonElement>(selector);
-      if (tab && !tab.classList.contains('active')) tab.click();
-    });
-  }
+
 </script>
-<div class="controller-tabs-layout" {@attach attachTabs} {@attach attachPaneRouting}>
+<div class="controller-tabs-layout" {@attach attachPaneRouting}>
 <Tabs.Root bind:value={mode} class="controller-tabs-root" onValueChange={(value) => changeTab(value)}>
 
 <header class="topbar" data-tauri-drag-region>
@@ -124,7 +122,7 @@
       <svg viewBox="0 0 470.61 93.61" aria-hidden="true" focusable="false"><path fill="currentColor" d="M38.38,0.00 L49.17,0.00 L10.80,82.19 L0.00,82.19 L38.38,0.00 Z M88.38,2.69 L88.38,18.22 L107.08,18.22 L107.08,29.20 L88.38,29.20 L88.38,55.08 Q88.38,58.75 90.16,60.34 Q91.94,61.92 96.10,61.92 L107.08,61.92 L107.08,72.91 L95.06,72.91 Q82.77,72.91 78.42,68.98 Q74.08,65.05 74.08,54.41 L74.08,29.20 L60.11,29.20 L60.11,18.22 L74.08,18.22 L74.08,2.69 L88.38,2.69 Z M149.08,47.22 Q141.07,47.22 137.89,49.28 Q134.72,51.33 134.72,56.30 Q134.72,60.02 136.91,62.22 Q139.11,64.41 142.88,64.41 Q148.54,64.41 151.66,60.14 Q154.79,55.86 154.79,48.20 L154.79,47.22 L149.08,47.22 Z M169.00,41.70 L169.00,72.91 L154.79,72.91 L154.79,66.80 Q152.21,70.42 148.14,72.38 Q144.10,74.33 139.21,74.33 Q129.88,74.33 124.68,69.39 Q119.49,64.45 119.49,55.62 Q119.49,46.05 125.69,41.48 Q131.89,36.92 144.88,36.92 L154.79,36.92 L154.79,34.53 Q154.79,31.06 152.27,29.28 Q149.75,27.50 144.88,27.50 Q139.75,27.50 134.94,28.80 Q130.13,30.08 124.91,32.92 L124.91,20.70 Q129.64,18.75 134.52,17.83 Q139.41,16.91 144.88,16.91 Q158.21,16.91 163.60,22.33 Q169.00,27.73 169.00,41.70 Z M214.30,44.69 Q214.30,37.36 211.52,32.94 Q208.74,28.52 204.21,28.52 Q199.71,28.52 196.94,32.92 Q194.19,37.31 194.19,44.69 Q194.19,52.11 196.94,56.50 Q199.71,60.89 204.21,60.89 Q208.74,60.89 211.52,56.48 Q214.30,52.06 214.30,44.69 Z M228.62,68.80 Q228.62,81.94 222.68,87.77 Q216.76,93.61 203.43,93.61 Q198.93,93.61 194.54,92.95 Q190.15,92.30 185.60,90.92 L185.60,77.80 Q189.65,80.03 193.85,81.11 Q198.05,82.19 202.49,82.19 Q208.55,82.19 211.43,79.33 Q214.30,76.47 214.30,70.42 L214.30,64.50 Q212.21,68.41 208.74,70.31 Q205.27,72.22 200.30,72.22 Q190.93,72.22 185.40,64.91 Q179.88,57.58 179.88,45.03 Q179.88,32.03 185.40,24.42 Q190.93,16.80 200.19,16.80 Q204.88,16.80 208.54,19.00 Q212.21,21.20 214.30,25.20 L214.30,18.22 L228.62,18.22 L228.62,68.80 Z M291.51,33.31 Q289.16,31.16 286.01,30.09 Q282.87,29.02 279.10,29.02 Q274.57,29.02 271.16,30.61 Q267.77,32.19 265.91,35.20 Q264.74,37.06 264.27,39.70 Q263.82,42.34 263.82,47.70 L263.82,72.91 L249.51,72.91 L249.51,18.22 L263.82,18.22 L263.82,26.72 Q265.91,22.03 270.26,19.47 Q274.62,16.91 280.43,16.91 Q283.35,16.91 286.15,17.61 Q288.96,18.31 291.51,19.69 L291.51,33.31 Z M349.32,70.22 Q344.34,72.27 339.17,73.30 Q333.99,74.33 328.23,74.33 Q314.51,74.33 307.26,66.98 Q300.01,59.62 300.01,45.81 Q300.01,32.42 306.98,24.67 Q313.96,16.91 326.03,16.91 Q338.18,16.91 344.90,24.11 Q351.62,31.30 351.62,44.39 L351.62,50.20 L314.56,50.20 Q314.60,56.64 318.35,59.83 Q322.12,63.00 329.59,63.00 Q334.53,63.00 339.31,61.58 Q344.09,60.16 349.32,57.08 L349.32,70.22 Z M337.21,39.45 Q337.12,33.80 334.31,30.89 Q331.49,27.98 326.03,27.98 Q321.10,27.98 318.17,30.98 Q315.24,33.98 314.70,39.50 L337.21,39.45 Z M411.62,18.22 L393.21,44.39 L413.23,72.91 L396.54,72.91 L385.79,54.50 L375.11,72.91 L358.40,72.91 L378.62,44.39 L360.01,18.22 L376.71,18.22 L385.79,34.53 L394.92,18.22 L411.62,18.22 Z M459.81,0.00 L470.61,0.00 L432.23,82.19 L421.44,82.19 L459.81,0.00 Z"/></svg>
     </div>
 
-    <Tabs.List class="mode-tabs">
+    <Tabs.List class="mode-tabs" aria-label="Tools">
       <Tabs.Trigger value="tagger">
 {#snippet child({ props })}
 <Button {...props} data-slot="button" variant="ghost" size="sm" class="mode-tab active" data-mode="tagger" data-i18n-title="mode.tagger.title" title="Edit tags from an online source, by hand, and manage cover art" aria-label="TAGGER"><svg class="ico"><use href="#i-tag"/></svg><span class="lbl">TAGGER</span></Button>
@@ -551,15 +549,22 @@
 
     <Tabs.Content value="generator" id="panel-generator" class="mode-panel" hidden>
 
-      <div class="gen-jobs" role="tablist" aria-label="Generator job" data-i18n-aria-label="generator.jobs">
-        <Button id="gen-job-transform" variant="ghost" size="sm" class="gen-job" role="tab" aria-selected={generatorJob === 'transform'} onclick={() => generatorJob = 'transform'} data-i18n="generator.job.transform">Transform</Button>
-        <Button id="gen-job-number" variant="ghost" size="sm" class="gen-job" role="tab" aria-selected={generatorJob === 'number'} onclick={() => generatorJob = 'number'} data-i18n="generator.job.number">Number</Button>
-        <Button id="gen-job-sides" variant="ghost" size="sm" class="gen-job" role="tab" aria-selected={generatorJob === 'sides'} onclick={() => generatorJob = 'sides'} data-i18n="generator.job.sides">Vinyl sides</Button>
-      </div>
+      <Tabs.Root bind:value={generatorJob} class="generator-jobs-root" style="display: contents">
+      <Tabs.List class="gen-jobs" aria-label="Generator job" data-i18n-aria-label="generator.jobs">
+        <Tabs.Trigger value="transform" id="gen-job-transform">
+          {#snippet child({ props })}<Button {...props} variant="ghost" size="sm" class="gen-job" data-i18n="generator.job.transform">Transform</Button>{/snippet}
+        </Tabs.Trigger>
+        <Tabs.Trigger value="number" id="gen-job-number">
+          {#snippet child({ props })}<Button {...props} variant="ghost" size="sm" class="gen-job" data-i18n="generator.job.number">Number</Button>{/snippet}
+        </Tabs.Trigger>
+        <Tabs.Trigger value="sides" id="gen-job-sides">
+          {#snippet child({ props })}<Button {...props} variant="ghost" size="sm" class="gen-job" data-i18n="generator.job.sides">Vinyl sides</Button>{/snippet}
+        </Tabs.Trigger>
+      </Tabs.List>
 
-      <p class="hint muted" hidden={generatorJob !== 'transform'}>Select presets in the Transformations module.</p>
+      <Tabs.Content value="transform" hidden={generatorJob !== 'transform'}><p class="hint muted">Select presets in the Transformations module.</p></Tabs.Content>
 
-      <div class="panel-block" hidden={generatorJob !== 'number'}>
+      <Tabs.Content value="number" class="panel-block" hidden={generatorJob !== 'number'}>
         <h2><span data-i18n="generator.numberTracks">Number tracks</span> <span id="autonum-count" class="muted"></span></h2>
         <p class="hint muted" style="padding: 0" data-i18n="generator.numberHint">Writes track numbers in table order.</p>
 
@@ -577,16 +582,17 @@
           </label>
           <Button variant="default" size="sm" id="autonum-run" class="primary" data-i18n="generator.numberRun">Number</Button>
         </div>
-      </div>
+      </Tabs.Content>
 
-      <div class="panel-block" hidden={generatorJob !== 'sides'}>
+      <Tabs.Content value="sides" class="panel-block" hidden={generatorJob !== 'sides'}>
         <h2><span data-i18n="generator.vinylSides">Vinyl sides</span> <span id="vinyl-count" class="muted"></span></h2>
 
         <div class="panel-actions">
           <p class="panel-note" data-i18n="generator.vinylHint" data-i18n-html>Side A becomes disc 1, side B disc 2. <b>A1</b> becomes track 1. Rows without a side letter stay as they are.</p>
           <Button variant="default" size="sm" id="vinyl-split" class="primary" data-i18n="generator.splitSide">Split</Button>
         </div>
-      </div>
+      </Tabs.Content>
+      </Tabs.Root>
     </Tabs.Content>
 
     <Tabs.Content value="deduplicator" id="panel-deduplicator" class="mode-panel" hidden>
@@ -713,40 +719,7 @@
 
   <div class="sb-left">
 
-  <Button variant="ghost" size="icon-sm" id="sb-play" class="icon" hidden data-i18n-title="player.play" title="Play the current track" data-i18n-aria-label="player.play" aria-label="Play the current track"><svg class="ico"><use href="#i-play"/></svg></Button>
-  <div id="player" hidden>
-
-    <div class="pl-transport">
-      <Button variant="ghost" size="icon-sm" id="pl-prev" class="icon" data-i18n-title="player.prev" title="Previous track" data-i18n-aria-label="player.prev" aria-label="Previous track"><svg class="ico"><use href="#i-prev"/></svg></Button>
-      <Button variant="ghost" size="icon-sm" id="pl-toggle" class="icon" data-i18n-title="player.toggle" title="Play / pause" data-i18n-aria-label="player.toggle" aria-label="Play / pause"><svg class="ico"><use href="#i-play"/></svg></Button>
-      <Button variant="ghost" size="icon-sm" id="pl-stop" class="icon" data-i18n-title="player.stop" title="Stop" data-i18n-aria-label="player.stop" aria-label="Stop"><svg class="ico"><use href="#i-stop"/></svg></Button>
-      <Button variant="ghost" size="icon-sm" id="pl-next" class="icon" data-i18n-title="player.next" title="Next track" data-i18n-aria-label="player.next" aria-label="Next track"><svg class="ico"><use href="#i-next"/></svg></Button>
-      <Button variant="ghost" size="icon-sm" id="pl-repeat" class="icon" data-i18n-title="player.repeatOff" title="Repeat off" data-i18n-aria-label="player.repeatOff" aria-label="Repeat off"><svg class="ico"><use href="#i-repeat"/></svg></Button>
-    </div>
-
-    <div class="pl-vol">
-      <Button variant="ghost" size="icon-sm" id="pl-volume-btn" class="icon" data-i18n-title="player.volume" title="Volume" data-i18n-aria-label="player.volume" aria-label="Volume"><svg class="ico"><use href="#i-volume"/></svg></Button>
-      <div id="pl-volume-pop" class="pl-vol-pop" hidden>
-        <Button variant="ghost" size="icon-sm" id="pl-mute" class="icon" data-i18n-title="player.mute" title="Mute" data-i18n-aria-label="player.mute" aria-label="Mute"><svg class="ico"><use href="#i-volume"/></svg></Button>
-        <NativeSlider id="pl-volume" min="0" max="100" value="100" step="1" data-i18n-title="player.volume" title="Volume" data-i18n-aria-label="player.volume" aria-label="Volume" />
-      </div>
-    </div>
-
-    <span id="pl-cover" class="pl-cover" aria-hidden="true"><img id="pl-cover-img" alt="" /></span>
-
-    <div class="pl-main">
-
-      <div class="pl-line">
-        <Button variant="outline" size="sm" type="button" id="pl-title" class="mono" title=""></Button>
-        <span id="pl-time" class="muted">0:00 / 0:00</span>
-      </div>
-
-      <span id="pl-wave-wrap" class="pl-wave-wrap">
-        <canvas id="pl-wave" aria-hidden="true"></canvas>
-        <NativeSlider id="pl-seek" min="0" max="1000" value="0" step="1" data-i18n-aria-label="player.seek" aria-label="Seek" />
-      </span>
-    </div>
-  </div>
+    <CompactPlayer />
   </div>
   <div class="sb-right">
 

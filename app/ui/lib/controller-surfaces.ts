@@ -118,7 +118,7 @@ export function initControllerSurfaces() {
     } });
     mounted.set(root, component);
   }
-  for (const id of ['group-menu', 'columns-menu', 'presets-menu', 'health-menu', 'root-recent-menu', 'query-preset-menu', 'pl-volume-pop']) {
+  for (const id of ['group-menu', 'columns-menu', 'presets-menu', 'health-menu', 'root-recent-menu', 'query-preset-menu']) {
     const root = document.getElementById(id);
     if (root) enhance(root);
   }

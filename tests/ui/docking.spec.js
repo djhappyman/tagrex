@@ -228,3 +228,23 @@ for (const [weight, expectedMinimum, expectedMaximum] of [[.32, 215, 400], [.42,
     expect(height).toBeLessThan(expectedMaximum);
   });
 }
+
+test('bottom splitter follows arrow direction and persists the resulting height', async ({ page }) => {
+  await moduleMenu(page, 'Files');
+  await page.getByRole('menuitem', { name: 'Dock bottom', exact: true }).click();
+  const splitter = page.getByRole('separator', { name: 'Resize bottom modules', exact: true });
+  await expect(splitter).toBeVisible();
+  const before = await splitter.boundingBox();
+  const initialHeight = (await page.locator('[data-dock-host="bottom"]').boundingBox()).height;
+  await splitter.focus();
+  await page.keyboard.press('ArrowDown');
+  const afterDown = await splitter.boundingBox();
+  expect(afterDown.y).toBeGreaterThan(before.y + 10);
+  expect((await page.locator('[data-dock-host="bottom"]').boundingBox()).height).toBeLessThan(initialHeight - 10);
+  await page.keyboard.press('ArrowUp');
+  expect((await splitter.boundingBox()).y).toBeCloseTo(before.y, 0);
+  await page.keyboard.press('ArrowDown');
+  const saved = await splitter.getAttribute('aria-valuenow');
+  await page.reload();
+  await expect(page.getByRole('separator', { name: 'Resize bottom modules', exact: true })).toHaveAttribute('aria-valuenow', saved);
+});
