@@ -42,6 +42,7 @@ const USER_AGENT: &str = concat!(
     " +https://github.com/tagrex/tagrex"
 );
 
+#[derive(Clone)]
 pub struct MusicBrainzProvider {
     agent: ureq::Agent,
 }
@@ -391,6 +392,7 @@ fn parse_release(body: &str) -> Result<Release, ProviderError> {
         .filter(|count| *count > 0);
 
     Ok(Release {
+        links: Vec::new(),
         id: ReleaseId(id.clone()),
         artist,
         title,

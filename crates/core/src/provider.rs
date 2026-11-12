@@ -196,6 +196,21 @@ pub struct Release {
     /// images to disk. `cover_image_url` is the first entry's URL; this exposes
     /// the rest, plus each image's dimensions when the provider states them.
     pub images: Vec<ReleaseImage>,
+    /// Named artist and label identities for inspecting the provider's pages.
+    pub links: Vec<ReleaseLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseLinkKind {
+    Artist,
+    Label,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReleaseLink {
+    pub name: String,
+    pub kind: ReleaseLinkKind,
+    pub id: String,
 }
 
 /// One image of a release: a download handle plus its pixel dimensions when the

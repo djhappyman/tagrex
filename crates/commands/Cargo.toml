@@ -15,7 +15,7 @@ tagrex-providers-musicbrainz = { path = "../providers-musicbrainz" }
 tagrex-providers-beatport = { path = "../providers-beatport" }
 tagrex-providers-bandcamp = { path = "../providers-bandcamp" }
 tagrex-providers-soundeo = { path = "../providers-soundeo" }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror.workspace = true
 base64 = "0.23.1"
@@ -32,3 +32,7 @@ regex = "1.13.1"
 trash = { version = "5.2.6", default-features = false, features = [
     "coinit_apartmentthreaded",
 ] }
+
+[target.'cfg(unix)'.dependencies]
+# Directory-relative atomic outputs: pin parents and never follow target links.
+rustix = { version = "1.1.5", features = ["fs"] }
