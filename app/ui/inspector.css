@@ -1,0 +1,259 @@
+/* Compact tagging inspector. Palette/type stay with the active app theme;
+ * this scope follows the existing .mode-col subtree when it is docked. */
+.mode-col {
+  --inspector-inset: 6px;
+  --inspector-label: 84px;
+  --ctl-h: 32px;
+  --ctl-h-sm: 28px;
+  --panel-inset: var(--inspector-inset);
+  min-width: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  background: var(--workbench-chrome,var(--panel));
+  font-size: 12px;
+}
+
+/* Keep the established app controls; this pass changes placement, not their theme. */
+.mode-col :is(input[data-slot='input'], button.app-select-trigger, .field) { border-radius:var(--input-radius); }
+.mode-col textarea[data-slot='textarea'] { border-radius:var(--input-radius); }
+.mode-col :is(input[data-slot='input'], button.app-select-trigger):focus-visible { outline:1px solid var(--accent); outline-offset:1px; }
+.mode-col .field-tools { gap:1px; }
+.mode-col .field > input[data-slot='input'] { border:0; background:transparent; }
+
+/* A tab strip and shallow section bars keep the value grid's edges aligned. */
+.mode-col .subtabs[data-slot='tabs-list'] {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 2px 4px;
+  border-radius: 0;
+  background: var(--panel);
+}
+body .mode-col button[data-slot='button'].subtab {
+  flex: 0 1 auto;
+  min-height: 25px;
+  height: 25px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+.mode-col :is(.editor-scroll, .from-name-scroll) { gap: 8px; padding: 5px var(--inspector-inset); }
+.mode-col .mode-panel:not(#panel-tagger) { gap: 8px; padding: 6px var(--inspector-inset); }
+.mode-col .panel-block { gap: 5px; padding-bottom: 6px; border: 0; }
+.mode-col .panel-block + .panel-block { padding-top: 6px; }
+.mode-col .panel-block h2 { margin: 0; font-size: 11.5px; line-height: 18px; font-weight: 600; }
+.mode-col .panel-help { font-size: 10.5px; line-height: 1.3; }
+.mode-col .panel-help summary { padding-block: 1px; color: var(--muted); }
+.mode-col .panel-help .hint { margin-block: 3px; }
+.mode-col :is(.hint, .cover-meta, .cover-hint, .probe) { font-size: 11px; line-height: 1.35; }
+.mode-col #fields-blocks { font-size: 10.5px; line-height: 16px; font-variant-numeric: tabular-nums; }
+.mode-col .blocks-convert { gap: 3px; padding: 4px; border-radius: 3px; }
+
+/* Label/value rows share a fixed label rail, including the number pairs. */
+.mode-col .fe { gap: 4px; }
+.mode-col .fe-group { gap: 1px; }
+.mode-col .fe-group-head,
+body .mode-col button.fe-group-head {
+  min-height: 21px;
+  height: auto;
+  padding: 2px 4px;
+  margin: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 17px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.mode-col .fe-group-count { font-weight: 400; font-size: 10px; }
+.mode-col .fe-row {
+  grid-template-columns: 3px minmax(100px, 32%) minmax(0, 1fr) 16px;
+  column-gap: 4px;
+  min-height: 34px;
+  padding: 0;
+  margin: 0;
+  border-radius: 2px;
+}
+.mode-col .fe-row + .fe-row { margin-top: 0; }
+.mode-col .fe-label { font-size: 11px; line-height: 1.15; color: var(--muted); }
+body .mode-col .fe .field-input { height:var(--ctl-h); min-height:var(--ctl-h); padding:4px var(--input-inset); border-radius:var(--input-radius); font-size:var(--text-sm); }
+.mode-col .fe-cell.num { align-items: flex-start; }
+.mode-col .field-input.num { width: 62px; }
+.mode-col .fe-pair { gap: 4px; max-width: 100%; }
+body .mode-col .fe-pair .field-input { width: 36px; }
+.mode-col .fe-duo { gap: 8px; }
+.mode-col .fe-duo-unit { gap: 4px; min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.mode-col .fe-duo-label { font-size: 10.5px; }
+body .mode-col button[data-slot='button'].fe-lock {
+  width: 16px;
+  min-width: 16px;
+  height: 22px;
+  min-height: 22px;
+  padding: 1px;
+  border: 0;
+  background: transparent;
+}
+.mode-col .fe-lock > svg { width: 11px; height: 11px; }
+.mode-col .fe-add { margin-top: 3px; }
+.mode-col .fe-add-row { gap: 3px; flex-wrap: wrap; }
+.mode-col .fe-add-row .fe-add-name { flex: 1 1 100px; min-width: 80px; }
+.mode-col .fe-add-row .fe-add-value { flex: 2 1 130px; min-width: 100px; }
+
+/* Artwork and generated values are ordinary inspector rows, not nested cards. */
+.mode-col .cover-well { gap: 8px; padding: 4px 0; border: 0; border-radius: 0; background: transparent; }
+.mode-col .cover-thumb { width: 64px; height: 64px; border-radius: 3px; }
+.mode-col .cover-stack { width: 64px; height: 64px; }
+.mode-col .cover-stack .cover-thumb { width: 53px; height: 53px; }
+.mode-col .cover-body { gap: 3px; }
+.mode-col .cover-title { font-size: 11.5px; }
+.mode-col .cover-actions { gap: 3px; }
+.mode-col .cover-row { gap: 5px; padding: 3px 0; border-radius: 0; }
+.mode-col .cover-row-thumb { width: 36px; height: 36px; }
+.mode-col :is(.probe-fields, .probe-subject, .mask-example, .empty.inert-panel) { border-radius: 3px; padding: 5px 6px; }
+.mode-col .probe { gap: 3px; }
+.mode-col .probe-fields { border: 0; padding-inline: 0; background: transparent; }
+.mode-col .probe-field { flex-basis: var(--inspector-label); text-transform: none; letter-spacing: 0; }
+
+/* Service/query controls occupy a compact head above one scrolling result list. */
+.mode-col .online-head { gap: 4px; padding: 5px var(--inspector-inset) 4px; background: var(--workbench-chrome,var(--panel)); }
+.mode-col .online-head-row { gap: 5px; flex-wrap: nowrap; }
+.mode-col .source-label { gap: 5px; min-width: 0; font-size: 11px; }
+.mode-col .source-label > .app-select { min-width: 105px; }
+.mode-col .online-head-row > .app-select:has(#search-format) { min-width: 98px; max-width: 116px; }
+.mode-col .online-head .mask-row { gap: 3px; }
+.mode-col .release-toolbar { gap: 3px 5px; padding: 1px 0; font-size: 10px; }
+.mode-col .release-toolbar .hint { font-size: 10px; }
+.mode-col .release-toolbar .per-page { gap: 3px; }
+.mode-col .online-scroll { padding: 0 var(--inspector-inset) 3px; }
+.mode-col .release-list { gap: 0; }
+
+/* Floating, transparent entries: typography carries the hierarchy. The only
+ * entry separator is this short, faint line; expanded state adds no box. */
+.mode-col .release-card,
+.mode-col .release-card[aria-expanded='true'] {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.mode-col .release-card:not(:last-child)::after {
+  content: '';
+  display: block;
+  width: 40%;
+  height: 1px;
+  margin: 4px auto;
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+.mode-col .release-header-row { padding: 5px 0; gap: 7px; border-radius: 0; background: transparent; }
+.mode-col .release-header-row:hover { background: color-mix(in srgb, var(--text) 2.5%, transparent); }
+body .mode-col button.release-cover {
+  width: 72px;
+  min-width: 72px;
+  height: 72px;
+  min-height: 72px;
+  padding: 0;
+  border-radius: 4px;
+}
+body .mode-col button[data-slot='button'].release-head {
+  height: auto;
+  min-height: 72px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  gap: 4px;
+}
+.mode-col .release-info { gap: 1px; justify-content: center; }
+.mode-col .release-title { order: 0; font-size: 12px; line-height: 15px; font-weight: 600; }
+.mode-col .release-artist { order: 1; font-size: 11px; line-height: 14px; font-weight: 400; color: var(--text); }
+.mode-col .release-facts { order: 2; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 5px; line-height: 14px; }
+.mode-col .release-meta { order: 3; font-size: 10.5px; line-height: 14px; color: var(--muted); }
+.mode-col :is(.release-facts, .rel-badge, .rb-catno, .rb-count, .tk-count) {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 400;
+}
+.mode-col .release-facts .rb-catno { min-width: 0; max-width: 100%; overflow-wrap: anywhere; cursor: pointer; text-decoration: none; }
+.mode-col .release-facts .rb-catno:hover { color: var(--accent-ink); text-decoration: underline; }
+.mode-col .release-facts:has(.rb-catno) .rb-count:not(:empty)::before { content: '·'; margin-right: 5px; color: var(--muted); }
+.mode-col .release-card.tracklist-loaded[aria-expanded='true'] .release-artist { padding-right: 0; }
+.mode-col .release-card.tracklist-loaded[aria-expanded='true'] .release-title { padding-right: 24px; }
+body .mode-col button[data-slot='button'].release-import { top: 5px; right: 0; width: 23px; min-width: 23px; height: 23px; min-height: 23px; padding: 2px; border-radius: 3px; }
+.mode-col .media-badge { padding: 0; border: 0; border-radius: 0; background: transparent; text-shadow: 0 1px 2px #000; }
+.mode-col .media-badge svg { filter: drop-shadow(0 1px 1px #000); }
+.mode-col .media-badge .n { padding-left: 2px; margin-left: 0; border-left: 0; }
+.mode-col :is(.tracklist-actions, .tracklist-label, .tracklist-scroll) { background: transparent; border: 0; border-radius: 0; }
+.mode-col .tracklist-actions { gap: 4px; padding: 3px 0; }
+.mode-col .tracklist-label { padding: 2px 0 4px; font-size: 10.5px; }
+.mode-col .tracklist-label label { display: flex; align-items: center; gap: 5px; }
+.mode-col .tracklist-label .app-select { flex: 1; max-width: none; }
+.mode-col .release-tracklist { padding: 0; border: 0; background: transparent; }
+.mode-col .release-tracklist :is(td, th) { border-inline: 0; border-top: 0; border-bottom: 0; }
+.mode-col .release-tracklist td { padding-block: 2px; }
+.mode-col .release-tracklist .tk-section td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+
+/* Existing scroll owners stay in charge; their action rails remain at the
+ * bottom while only data/fields scroll. Single-job tools fill their pane. */
+.mode-col :is(.editor-actions, .from-name-actions, .release-more) {
+  flex: 0 0 auto;
+  min-height: 34px;
+  margin: 0;
+  padding: 4px var(--inspector-inset);
+  border-radius: 0;
+  background: var(--panel);
+}
+.mode-col .panel-actions { gap: 5px; }
+.mode-col .panel-actions > button { min-width: 76px; }
+.mode-col :is(#panel-renamer, #panel-deduplicator, #panel-exporter) > .panel-block { flex: 1 0 auto; min-height: min-content; }
+.mode-col :is(#panel-renamer, #panel-deduplicator, #panel-exporter) .panel-actions { margin-top: auto; padding-top: 5px; }
+
+@media (max-width: 760px) {
+  .mode-col { --inspector-label: 80px; }
+  .mode-col .online-head-row { flex-wrap: wrap; }
+  .mode-col .source-label { flex: 1 1 auto; }
+}
+@media (pointer: coarse) {
+  .mode-col { --ctl-h: 30px; --ctl-h-sm: 28px; }
+  body .mode-col button[data-slot='button']:not(.fe-lock):not(.release-head):not(.release-cover) { min-height: 30px; }
+  body .mode-col .fe .field-input { height: var(--ctl-h); min-height: var(--ctl-h); }
+  .mode-col .fe-row { min-height: 34px; }
+}
+
+/* Dock width, rather than window width, controls narrow form wrapping. */
+.mode-col { container-type:inline-size; container-name:tag-inspector; }
+@container tag-inspector (max-width:320px) {
+  .mode-col .online-head-row { flex-wrap:wrap; }
+  .mode-col .source-label { flex:1 1 140px; }
+  .mode-col .online-head-row > .app-select:has(#search-format) { flex:1 1 98px; max-width:none; }
+  .mode-col .fe-row { grid-template-columns:3px 88px minmax(0,1fr) 16px; column-gap:3px; }
+}
+body .mode-col .fe-pair .field-input { width:44px; }
+@container tag-inspector (max-width:400px) {
+  .mode-col .fe-row { grid-template-columns:3px 88px minmax(0,1fr) 16px; }
+  body .mode-col .fe-pair .field-input { width:40px; padding-inline:6px; }
+}
+
+/* Inspector content belongs to the same workbench as its header and footer;
+   only fields and the file table are recessed. */
+.mode-col :is(.online-scroll, .editor-scroll, .from-name-scroll, .online-head) { background:var(--workbench-chrome,var(--panel)); }
+body .mode-col button.fe-group-head { gap:5px; padding:3px 2px; font-weight:500; background:transparent; }
+body .mode-col button.fe-group-head:hover { background:color-mix(in srgb,var(--text) 3%,transparent); }
+body .mode-col button.fe-group-head .fe-group-caret { order:-1; margin:0; }
+.mode-col .fe-group-caret .ico { width:12px; height:12px; }
+body .mode-col .fe-group-count { margin-left:auto; opacity:.72; }
+
+.mode-col .fe-group-caret { transition:transform 165ms var(--workbench-ease); }
+@media(prefers-reduced-motion:reduce) { .mode-col .fe-group-caret { transition:none; } }

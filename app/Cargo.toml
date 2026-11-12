@@ -128,5 +128,6 @@ windows-future = "0.3"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 # GUI shell: main.rs is the Tauri entry point (commands forward to the App
-# command layer in lib.rs); the frontend is static HTML/CSS/JS under ui/.
-# Run with `cargo run -p tagrex`; bundle a .app with `cargo tauri build`.
+# command layer in lib.rs); Vite builds the frontend from ui/ into dist/.
+# Run `npm run build` before `cargo run -p tagrex`; `cargo tauri build`
+# runs the frontend build automatically.
