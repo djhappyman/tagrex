@@ -1,3 +1,4 @@
+import { compileQuery, normalizeConditions, conditionLabel, coverState } from "./js/filter-query.js";
 "use strict";
 
 import { TAURI, invoke } from "./js/invoke.js";
@@ -141,6 +142,7 @@ Object.assign(hooks, {
     // drawn again (#476): the table (folder bands), the status line, the release
     // cards and the Library health button.
     syncCssLabels();
+    syncFilterControls();
     renderTracks();
     updateStatus();
     retranslateOnline();
@@ -282,7 +284,10 @@ function tagBlockSummary(track) {
 }
 
 function sortValue(track, key) {
-  if (key === "artwork") return track.unreadable || typeof track.has_cover !== "boolean" ? "2" : track.has_cover ? "1" : "0";
+  if (key === "artwork") {
+    const state = coverState(track);
+    return state === "unknown" ? "2" : state === "embedded" ? "1" : "0";
+  }
   // Length sorts on the seconds, not on "9:59" vs "10:01" as text.
   if (key === "length") return String(track.duration_secs ?? -1).padStart(9, "0");
   // Position sorts by (disc, track) numerically, so A1, A2, … B1 order holds
@@ -313,59 +318,48 @@ function fieldValue(track, key) {
   return track.tags[key] || "";
 }
 
-// Re-derive the parsed filter from the raw text + mode flags (#44). Runs on any
-// change to either, so `matchesFilter` stays a cheap per-row test. A leading
-// `field:` scopes the query to one column when the prefix names a known one;
-// otherwise the colon is treated as part of the query. In regex mode the pattern
-// is compiled once here, inside a try/catch, so an invalid pattern is flagged
-// (`filterError`) and can never throw from the render loop.
+// Compile one immutable query per edit; retain the previous predicate on error.
+// Existing display values and cached free text stay in the table controller.
 const numericCollator = new Intl.Collator(undefined, { numeric: true });
 const trackSearchText = new WeakMap();
 let filterRenderVersion = 0;
+let filterConditions = [];
+let filterConditionMode = 'all';
+let filterPending = false;
+let filterMessage = '';
 
-function recompileFilter() {
-  setFilterError(false);
-  let raw = filterText;
-  let scope = null;
-  const m = raw.match(/^([A-Za-z0-9_]+):(.*)$/);
-  if (m) {
-    const key = m[1].toLowerCase();
-    if (allColumnKeys().includes(key)) {
-      scope = key;
-      raw = m[2];
-    }
-  }
-  let re = null;
-  if (filterRegex && raw) {
-    try {
-      re = new RegExp(raw, filterCase ? "" : "i");
-    } catch (e) {
-      setFilterError(true);
-    }
-  }
-  setFilterQuery({ scope, needle: raw, foldedNeedle: raw.toLowerCase(), re });
+function filterModel() {
+  return { version: 1, text: filterText, regex: filterRegex, caseSensitive: filterCase,
+    conditions: filterConditions, mode: filterConditionMode };
 }
-
+function publishFilterState() {
+  document.dispatchEvent(new CustomEvent('tagrex:filter-state', { detail: {
+    ...filterModel(), pending: filterPending, error: filterMessage,
+    matched: matchingTrackCount, total: tracks.length,
+    hidden: [...selection].filter(path => !viewPathIndex.has(path)).length,
+  } }));
+}
+function recompileFilter() {
+  const compiled = compileQuery(filterModel(), {
+    fields: allColumnKeys(), fieldValue,
+    coverLabel: state => msg(`table.artwork.${state}`),
+    searchText(track, folded) {
+      let cached = trackSearchText.get(track);
+      if (!cached || cached.tags !== track.tags || cached.path !== track.path) {
+        const text = [fileName(track.path), ...Object.values(track.tags)].join(' ');
+        cached = { tags: track.tags, path: track.path, text, lower: text.toLowerCase() };
+        trackSearchText.set(track, cached);
+      }
+      return folded ? cached.lower : cached.text;
+    },
+  });
+  filterMessage = compiled.error;
+  setFilterError(!!compiled.error);
+  // Invalid input retains the previous predicate instead of broadening scope.
+  if (!compiled.error) setFilterQuery(compiled);
+}
 function matchesFilter(track) {
-  // The library health check that is on (#436) narrows the table before the
-  // filter box does.
-  if (!healthAllows(track.path)) return false;
-  const { scope, needle, foldedNeedle, re } = filterQuery;
-  if (!needle) return true;
-  // A broken regex filters nothing (the box shows the error) so the UI never
-  // hangs or empties out mid-keystroke.
-  if (filterRegex && !re) return true;
-  // Scope to one column, or search the file name plus every tag value so a
-  // column the user added (#43) is filterable too.
-  let cached = trackSearchText.get(track);
-  if (!scope && (!cached || cached.tags !== track.tags || cached.path !== track.path)) {
-    const text = [fileName(track.path), ...Object.values(track.tags)].join(" ");
-    cached = { tags: track.tags, path: track.path, text, lower: text.toLowerCase() };
-    trackSearchText.set(track, cached);
-  }
-  const hay = scope ? fieldValue(track, scope) : cached.text;
-  if (re) return re.test(hay);
-  return filterCase ? hay.includes(needle) : (scope ? hay.toLowerCase() : cached.lower).includes(foldedNeedle ?? needle.toLowerCase());
+  return healthAllows(track.path) && (!filterQuery.match || filterQuery.match(track));
 }
 
 function updateSortIndicators() {
@@ -403,26 +397,35 @@ function syncFilterControls() {
   // the red border, and a clear button only when there is text to clear.
   box.parentElement.classList.toggle("has-error", filterError);
   box.parentElement.classList.toggle("is-empty", !box.value);
-  box.title = filterError ? msg("app.invalidRegex") : "";
+  box.title = filterMessage;
+  box.setAttribute('aria-invalid', String(filterError));
+  box.setAttribute('aria-describedby', 'filter-feedback');
+  publishFilterState();
+  updateDiffBar();
 }
 
 // A named preset captures the full view query: filter text + mode flags, the
 // sort column/direction, and the grouping — everything the user tuned by hand.
+// Older UIs must not see a structured preset and silently ignore its conditions.
+const PRESETS_STORAGE_KEY = "tagrex.filterPresets";
+const conditionPresetsKey = `${PRESETS_STORAGE_KEY}.conditions.v1`;
 function loadPresets() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PRESETS_STORAGE_KEY));
-    return Array.isArray(saved) ? saved.filter((p) => p && typeof p.name === "string") : [];
-  } catch (e) {
-    return [];
+  const byName = new Map();
+  for (const key of [PRESETS_STORAGE_KEY, conditionPresetsKey]) {
+    try {
+      const list = JSON.parse(localStorage.getItem(key) || '[]');
+      if (Array.isArray(list)) for (const preset of list) {
+        if (preset && typeof preset.name === 'string') byName.set(preset.name, preset);
+      }
+    } catch { /* A damaged or unavailable optional store does not block the other. */ }
   }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
-
 function savePresets(list) {
   try {
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(list));
-  } catch (e) {
-    /* localStorage unavailable — presets just won't persist */
-  }
+    localStorage.setItem(conditionPresetsKey, JSON.stringify(list.filter(p => p.conditions?.length)));
+    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(list.filter(p => !p.conditions?.length)));
+  } catch { /* Optional persistence; current filtering remains usable. */ }
 }
 
 // Store the current view under `name` (replacing a same-named one).
@@ -432,6 +435,7 @@ function saveCurrentPreset(name) {
   const list = loadPresets().filter((p) => p.name !== name);
   list.push({
     name,
+    queryVersion: 1, conditions: filterConditions, conditionMode: filterConditionMode,
     filter: filterText,
     regex: filterRegex,
     caseSensitive: filterCase,
@@ -447,6 +451,11 @@ function saveCurrentPreset(name) {
 // Re-apply a saved preset: restore the filter text/flags, sort, and grouping,
 // then reflect them onto every control and repaint.
 function applyPreset(p) {
+  try {
+    if ((p.queryVersion != null && p.queryVersion !== 1) || (p.conditionMode != null && !['all', 'any'].includes(p.conditionMode))) throw new Error('Unsupported saved filter version.');
+    filterConditions = normalizeConditions(p.conditions);
+    filterConditionMode = p.conditionMode === 'any' ? 'any' : 'all';
+  } catch (error) { toast(error.message, true); return; }
   setFilterText(p.filter || "");
   setFilterRegex(!!p.regex);
   setFilterCase(!!p.caseSensitive);
@@ -536,6 +545,7 @@ function renderPresetsMenu() {
 // A human-readable one-liner for a preset's tooltip.
 function presetSummary(p) {
   const bits = [];
+  try { bits.push(...normalizeConditions(p.conditions).map(conditionLabel)); } catch { bits.push('Invalid conditions'); }
   if (p.filter) {
     bits.push(
       msg("app.presetFilter", { filter: p.filter }) +
@@ -571,8 +581,7 @@ function decorateTrackArtwork(row, track) {
   if (!file) return row;
   row.querySelector('td.sel')?.setAttribute('aria-colindex', '1');
   file.setAttribute('aria-colindex', String(TABLE_DATA_COLUMN_OFFSET + 1));
-  const known = !track.unreadable && typeof track.has_cover === 'boolean';
-  const state = known ? (track.has_cover ? 'embedded' : 'missing') : 'unknown';
+  const state = coverState(track);
   const indicator = document.createElement('span');
   indicator.className = 'track-artwork';
   indicator.dataset.coverState = state;
@@ -1270,6 +1279,7 @@ document.addEventListener("tagrex:dock-resize-end", () => {
 
 function renderTracks({ preparedFilter = null } = {}) {
   filterRenderVersion++;
+  filterPending = false;
   updateSortIndicators();
   tracksEmpty.hidden = tracks.length > 0;
   headHeight = el("tracks").tHead?.offsetHeight || headHeight;
@@ -1291,6 +1301,7 @@ function renderTracks({ preparedFilter = null } = {}) {
   maybeAutofit();
   scheduleAutomaticTransformPreview();
   updateTransformScope();
+  publishFilterState();
 }
 
 // Selection count in the status bar ("N/M selected"). Uses the checked-row
@@ -1305,11 +1316,12 @@ function updateStatus(selected = selectedPaths().length) {
     return;
   }
   const files =
-    filterText || activeHealthLabel()
+    filterText || filterConditions.length || activeHealthLabel()
       ? `${matchingTrackCount}/${tn("unit.file", total)}`
       : tn("unit.file", total);
   // The active check names itself in the filter field's chip (#559).
   statusSel.textContent = `${files} · ${tn("count.selected", selected)}`;
+  publishFilterState();
 }
 
 function resetEdits() {
@@ -1639,7 +1651,7 @@ function updateDiffBar() {
   const staged = diffByPath.size;
   const n = applySelection.size;
   el("ab-count").textContent = String(n);
-  applyBtn.disabled = n === 0 || (isAutomaticTransformPreview() && automaticTransformScope().busy);
+  applyBtn.disabled = filterPending || filterError || n === 0 || (isAutomaticTransformPreview() && automaticTransformScope().busy);
   if (isAutomaticTransformPreview()) return; // header ticks still select tracks
   selectAll.checked = n > 0 && n === staged;
   selectAll.indeterminate = n > 0 && n < staged;
@@ -2068,6 +2080,8 @@ async function afterOpen(label) {
   setSortKey(null);
   setSortDir(1);
   setManualOrder(false);
+  filterConditions = [];
+  filterConditionMode = "all";
   setFilterText("");
   el("filter").value = "";
   clearHealth(); // a check belongs to the library it was run on (#436)
@@ -2198,6 +2212,7 @@ function remapTransformSelection(paths) {
 }
 
 async function apply() {
+  if (filterPending || filterError) return;
   if (!previewPlan || previewPlan.changes.length === 0) return;
   if (isAutomaticTransformPreview() && automaticTransformScope().busy) return;
   const automaticRename = isAutomaticTransformPreview() && previewPlan.changes.some(change => change.rename_to);
@@ -3304,8 +3319,8 @@ function sortTracks() {
   setManualOrder(false);
   tracks.sort((a, b) => {
     if (sortKey === 'artwork') {
-      const unknownA = a.unreadable || typeof a.has_cover !== 'boolean';
-      const unknownB = b.unreadable || typeof b.has_cover !== 'boolean';
+      const unknownA = coverState(a) === 'unknown';
+      const unknownB = coverState(b) === 'unknown';
       if (unknownA !== unknownB) return Number(unknownA) - Number(unknownB);
     }
     return numericCollator.compare(sortValue(a, sortKey), sortValue(b, sortKey)) * sortDir;
@@ -3407,6 +3422,7 @@ el("toggle-groups").addEventListener("click", () => {
 // usable until a complete latest-generation replacement is ready. Any table
 // mutation, query change or content revision cancels the pending derivation.
 async function renderFilteredTracks() {
+  if (filterError) { filterPending = false; publishFilterState(); updateDiffBar(); return; }
   if (tracks.length < 3000) { renderTracks(); return; }
   const version = ++filterRenderVersion;
   const source = tracks;
@@ -3437,9 +3453,26 @@ el("filter").addEventListener("input", (e) => {
   filterRenderVersion++;
   setFilterText(e.target.value.trim());
   syncFilterControls();
-  clearTimeout(filterTimer);
-  filterTimer = setTimeout(renderFilteredTracks, 120);
+  scheduleFilterRender();
 });
+function scheduleFilterRender() {
+  filterRenderVersion++;
+  filterPending = !filterError;
+  clearTimeout(filterTimer);
+  publishFilterState();
+  updateDiffBar();
+  filterTimer = setTimeout(renderFilteredTracks, 120);
+}
+document.addEventListener('tagrex:filter-conditions', event => {
+  try {
+    const conditions = normalizeConditions(event.detail.conditions);
+    filterConditions = conditions;
+    filterConditionMode = event.detail.mode === 'any' ? 'any' : 'all';
+    syncFilterControls();
+    scheduleFilterRender();
+  } catch (error) { toast(error.message, true); }
+});
+document.addEventListener('tagrex:request-filter-state', publishFilterState);
 // The field's clear button (#547): the same as deleting the text by hand.
 el("filter-clear").addEventListener("click", () => {
   const box = el("filter");

@@ -26,3 +26,27 @@ body .filter-panel .filter-presets > button[data-slot='button'] { height: 26px; 
 @media (prefers-reduced-motion: reduce) {
   .filter-panel-content, .filter-panel-caret { transition: none; }
 }
+
+/* Extend the existing dock: only active conditions add a second compact line. */
+.filter-panel-inner { flex-wrap: wrap; }
+.filter-condition-controls { flex: none; }
+.filter-condition-list { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex-basis: 100%; }
+.filter-condition-chip { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid var(--border); border-radius: 3px; }
+body .filter-condition-chip button[data-slot='button'] { height: 24px; min-height: 24px; padding: 0 5px; font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; }
+.filter-combination { display: flex; gap: 4px; align-items: center; font-size: var(--text-xs); }
+.filter-combination select { width: auto; }
+.filter-feedback { flex-basis: 100%; font-size: var(--text-xs); color: var(--muted); }
+.filter-feedback:empty { display: none; }
+.filter-feedback span { display: block; }
+.filter-error { color: var(--danger, #c33); }
+.filter-builder { max-width: calc(100vw - 16px); }
+.filter-builder form { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.filter-builder label, .filter-hint { font-size: var(--text-xs); }
+.filter-builder select, .filter-builder input { width: 100%; min-height: 30px; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 3px; }
+.filter-builder-actions { display: flex; gap: 5px; justify-content: flex-end; margin-top: 5px; }
+
+.files-col > .diff-actionbar { bottom: calc(var(--filter-dock-height, 29px) + var(--space-5)); }
+.filter-builder .app-select { width: 100%; }
+
+.filter-condition-chip > button:first-child { min-width: 0; flex: 1 1 auto; }
+.filter-condition-chip > button:last-child { flex: none; }

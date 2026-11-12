@@ -3,6 +3,8 @@
   import * as Collapsible from '$lib/components/ui/collapsible/index.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import '../filter-panel.css';
+  import FilterConditions from './FilterConditions.svelte';
+  import { conditionLabel } from '../js/filter-query.js';
 
   let { children }: { children: Snippet } = $props();
   const storageKey = 'tagrex.filterPanelOpen';
@@ -12,6 +14,8 @@
   let open = $state(savedOpen());
   let summary = $state('');
   let active = $derived(Boolean(summary));
+  let conditionSummary = '';
+  let advancedSummary = '';
 
   function changeOpen(value: boolean) {
     open = value;
@@ -22,6 +26,7 @@
     try { localStorage.setItem(storageKey, value ? '1' : '0'); } catch { /* Optional preference. */ }
   }
   function clear() {
+    document.dispatchEvent(new CustomEvent('tagrex:filter-conditions', { detail: { conditions: [], mode: 'all' } }));
     const input = document.getElementById('filter') as HTMLInputElement | null;
     if (input?.value) {
       input.value = '';
@@ -38,7 +43,7 @@
       const query = (root.querySelector<HTMLInputElement>('#filter')?.value || '').trim();
       const check = root.querySelector<HTMLElement>('#filter-check');
       const health = check && !check.hidden ? root.querySelector('#filter-check-name')?.textContent?.trim() : '';
-      summary = [query, health].filter(Boolean).join(' · ');
+      summary = [query, conditionSummary, health, advancedSummary].filter(Boolean).join(' · ');
       placePresets();
     };
     const focus = () => {
@@ -78,6 +83,18 @@
     const clicked = (event: MouseEvent) => {
       if ((event.target as Element).closest('#presets-btn')) requestAnimationFrame(placePresets);
     };
+    const stateChanged = (event: Event) => {
+      const state = (event as CustomEvent).detail;
+      conditionSummary = state.conditions.map(conditionLabel).join(state.mode === 'any' ? ' OR ' : ' · ');
+      advancedSummary = [state.error ? 'Invalid filter; last valid results' : '', state.regex ? 'Regex' : '', state.caseSensitive ? 'Case-sensitive' : ''].filter(Boolean).join(' · ');
+      paint();
+    };
+    document.addEventListener('tagrex:filter-state', stateChanged);
+    const column = root.closest<HTMLElement>('.files-col');
+    const size = new ResizeObserver(() => {
+      column?.style.setProperty('--filter-dock-height', `${root.getBoundingClientRect().height}px`);
+    });
+    size.observe(root);
     const observer = new MutationObserver(paint);
     observer.observe(root, { attributes: true, attributeFilter: ['class', 'hidden', 'aria-pressed'], childList: true, characterData: true, subtree: true });
     root.addEventListener('input', paint);
@@ -87,6 +104,9 @@
     paint();
     return () => {
       observer.disconnect();
+      size.disconnect();
+      column?.style.removeProperty('--filter-dock-height');
+      document.removeEventListener('tagrex:filter-state', stateChanged);
       root.removeEventListener('input', paint);
       root.removeEventListener('click', clicked, true);
       window.removeEventListener('resize', placePresets);
@@ -111,7 +131,7 @@
       {#if active}<Button id="filter-panel-clear" variant="ghost" size="sm" class="filter-panel-clear" onclick={clear} aria-label="Clear all filters">Clear</Button>{/if}
     </div>
     <Collapsible.Content id="filter-panel-content" forceMount class="filter-panel-content" aria-hidden={!open} inert={!open}>
-      <div class="filter-panel-inner">{@render children()}</div>
+      <div class="filter-panel-inner">{@render children()}<FilterConditions /></div>
     </Collapsible.Content>
   </Collapsible.Root>
 </div>
