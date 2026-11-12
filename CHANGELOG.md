@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-12
+
+A release about the file table. A new Cover column shows at a glance which
+files have embedded cover art and which do not, and sorts the ones without
+together; switched on, it stands first, in front of File. Files can now be
+selected by dragging over the table. The app also gets a redrawn icon, which
+no longer sits on a grey plate on macOS 26.
+
 ### Added
 
 - A Cover column for the file table: a glyph for a file with embedded cover art, a red struck-through one for a file without, and sorting that brings the files without a cover together. Turn it on from the Columns menu ([#730](https://github.com/tagrex/tagrex/issues/730)).
