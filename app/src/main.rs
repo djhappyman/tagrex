@@ -1324,12 +1324,23 @@ fn read_settings(app: &tauri::AppHandle) -> SettingsDto {
 ///
 /// A newer release is also looked up in its `latest.json` (#602); when it can be
 /// installed from here, it is kept for [`install_update`] and the answer says so.
+///
+/// TagRex Next (the experimental `next` branch, #732) does not update itself:
+/// the releases it would find are TagRex's, and installing one would replace
+/// this build with that one. See docs/next.md.
+const IN_APP_UPDATES: bool = false;
+
 #[tauri::command]
 async fn check_for_update(
     app: tauri::AppHandle,
     pending: State<'_, update::PendingUpdate>,
     automatic: bool,
 ) -> Result<Option<update::UpdateCheckDto>, ErrorDto> {
+    if !IN_APP_UPDATES {
+        return Err(ErrorDto::plain(
+            "TagRex Next does not update itself. Build it again from the next branch.",
+        ));
+    }
     let settings = read_settings(&app);
     if automatic && !settings.check_updates {
         return Ok(None);

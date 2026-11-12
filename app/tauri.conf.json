@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TagRex",
+  "productName": "TagRex Next",
   "version": "1.3.4",
-  "identifier": "com.tagrex.desktop",
+  "identifier": "com.tagrex.next",
   "build": {
     "frontendDist": "ui"
   },
@@ -11,7 +11,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "TagRex",
+        "title": "TagRex Next",
         "width": 1280,
         "height": 800,
         "minWidth": 1280,

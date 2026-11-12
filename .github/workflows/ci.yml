@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
   # Manual trigger, so CI can be re-run on the current HEAD when a hosted runner
   # fails to pick up the push-triggered job (a GitHub-side runner hiccup) without
