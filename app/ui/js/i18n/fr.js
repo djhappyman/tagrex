@@ -908,6 +908,11 @@ export const fr = {
   "field.position": "Position",
   "field.length": "Durée",
   "field.tagtypes": "Types de tags",
+  "field.cover": "Pochette",
+  // The Cover column's cell, as tooltip and accessible name (#730).
+  "cover.cell.embedded": "Pochette intégrée",
+  "cover.cell.missing": "Pas de pochette",
+  "cover.cell.unknown": "Inconnu : le fichier n'a pas pu être lu",
   // Settings › Online import: which fields an import may write (#422).
   "importField.title": "Titre",
   "importField.artist": "Artiste",

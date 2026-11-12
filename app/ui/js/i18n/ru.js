@@ -908,6 +908,11 @@ export const ru = {
   "field.position": "Позиция",
   "field.length": "Длительность",
   "field.tagtypes": "Блоки тегов",
+  "field.cover": "Обложка",
+  // The Cover column's cell, as tooltip and accessible name (#730).
+  "cover.cell.embedded": "Обложка есть",
+  "cover.cell.missing": "Нет обложки",
+  "cover.cell.unknown": "Неизвестно: файл не удалось прочитать",
   // Settings › Online import: which fields an import may write (#422).
   "importField.title": "Название",
   "importField.artist": "Исполнитель",

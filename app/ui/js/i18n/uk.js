@@ -909,6 +909,11 @@ export const uk = {
   "field.position": "Позиція",
   "field.length": "Тривалість",
   "field.tagtypes": "Блоки тегів",
+  "field.cover": "Обкладинка",
+  // The Cover column's cell, as tooltip and accessible name (#730).
+  "cover.cell.embedded": "Обкладинка є",
+  "cover.cell.missing": "Немає обкладинки",
+  "cover.cell.unknown": "Невідомо: файл не вдалося прочитати",
   // Settings › Online import: which fields an import may write (#422).
   "importField.title": "Назва",
   "importField.artist": "Виконавець",

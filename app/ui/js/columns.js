@@ -125,6 +125,7 @@ function setGroupBy(value, { persist = true, rerender = true } = {}) {
 // name is the widest; short numeric/code fields start narrow.
 function defaultColumnWidth(key) {
   if (key === "file") return 240;
+  if (key === "cover") return 56; // one glyph (#730)
   if (["year", "track", "tracktotal", "disc", "bpm", "key", "length"].includes(key)) return 70;
   if (["artist", "title", "album", "albumartist", "composer"].includes(key)) return 160;
   return 130;
@@ -478,8 +479,8 @@ function renderTableHead() {
       `<span class="sort-ind"></span></span>` +
       `<span class="col-resize" data-key="${escapeHtml(key)}"></span>`;
     // Drag the header itself to reorder (#89) — the direct version of the
-    // Columns popover's grips, over the same order model. File is structural and
-    // stays first, so it is not a handle and not a target.
+    // Columns popover's grips, over the same order model. File is structural, so
+    // it is not a handle; it is a target, which moveColumn keeps in order (#733).
     th.dataset.key = key;
     if (key !== "file") {
       enablePointerReorder(th, th, row, "th.sortable", moveColumn, { axis: "x" });
@@ -541,13 +542,30 @@ function loadColumnWidths() {
   }
 }
 
-// Load the saved column choice; drop unknown keys and force "file" first.
+// The one column allowed in front of File (#733). It goes there when it is
+// switched on, and can be dragged anywhere after that.
+const LEADING_COLUMN = "cover";
+
+// The column order under its one rule: File is always shown, and nothing but
+// the Cover column stands in front of it. A column that would (a drop on File's
+// near half, a stored order from elsewhere) lands just after File instead,
+// keeping its order among the rest.
+function normalizeColumns(cols) {
+  const unique = [...new Set(cols)];
+  if (!unique.includes("file")) unique.unshift("file");
+  const at = unique.indexOf("file");
+  const before = unique.slice(0, at);
+  const lead = before.filter((k) => k === LEADING_COLUMN);
+  const pushed = before.filter((k) => k !== LEADING_COLUMN);
+  return [...lead, "file", ...pushed, ...unique.slice(at + 1)];
+}
+
+// Load the saved column choice; drop unknown keys and put it in order.
 function loadColumns() {
   const saved = readStoredJson(COLUMNS_STORAGE_KEY);
   if (!Array.isArray(saved) || !saved.length) return;
   const known = new Set(allColumnKeys());
-  const cols = saved.filter((k) => known.has(k) && k !== "file");
-  cols.unshift("file");
+  const cols = normalizeColumns(saved.filter((k) => known.has(k)));
   if (cols.length > 1) setVisibleColumns(cols);
 }
 
@@ -556,12 +574,12 @@ function loadColumns() {
 // (#43 in the popover, #89 on the header itself): `past` means the drop landed
 // on the far half of the target, so the dragged column goes after it.
 //
-// File is structural — always shown, always first — so it is neither dragged nor
-// dropped onto, and the order worked on here leaves it out entirely;
-// `applyColumns` puts it back in front.
+// File is structural, always shown, so it is never dragged. It is a drop target:
+// Cover may be dropped in front of it, and any other column dropped there lands
+// just after it (#733), which `applyColumns` sees to.
 function moveColumn(dragged, target, past) {
-  if (target === "file" || !visibleColumns.includes(target)) return;
-  const order = visibleColumns.filter((k) => k !== "file");
+  if (dragged === "file" || !visibleColumns.includes(target)) return;
+  const order = visibleColumns.slice();
   order.splice(order.indexOf(dragged), 1);
   let to = order.indexOf(target);
   if (past) to += 1;
@@ -571,8 +589,7 @@ function moveColumn(dragged, target, past) {
 }
 
 function applyColumns(cols) {
-  const deduped = [...new Set(cols)].filter((k) => k !== "file");
-  setVisibleColumns(["file", ...deduped]);
+  setVisibleColumns(normalizeColumns(cols));
   saveColumns();
   renderTableHead();
   hooks.renderTracks();
@@ -693,9 +710,12 @@ function colMenuRow(key, visible) {
   const box = document.createElement("input");
   box.type = "checkbox";
   box.checked = visible;
-  box.disabled = isFile; // file is structural — always shown, first
+  box.disabled = isFile; // file is structural: always shown
   box.addEventListener("change", () => {
-    applyColumns(box.checked ? [...visibleColumns, key] : visibleColumns.filter((k) => k !== key));
+    // Cover is switched on in front of everything (#733); any other column
+    // joins at the end.
+    const shown = key === LEADING_COLUMN ? [key, ...visibleColumns] : [...visibleColumns, key];
+    applyColumns(box.checked ? shown : visibleColumns.filter((k) => k !== key));
     renderColumnsMenu();
     // A mask column being shown for the first time has nothing cached yet (#150).
     if (box.checked && customColumnOf(key)) refreshCustomColumnCells();

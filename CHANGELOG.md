@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A Cover column for the file table: a glyph for a file with embedded cover art, a red struck-through one for a file without, and sorting that brings the files without a cover together. Turn it on from the Columns menu ([#730](https://github.com/tagrex/tagrex/issues/730)).
+- The Cover column appears first, in front of File, when it is switched on, and can be dragged anywhere from there. It is the only column that may stand in front of File ([#733](https://github.com/tagrex/tagrex/issues/733)).
+- Select files by dragging over the table: press a tag cell and drag to select every row from there to the pointer, with ⌘/Ctrl to add them to the selection. The table scrolls on its own near its edges, and dragging the file name still reorders rows ([#731](https://github.com/tagrex/tagrex/issues/731)).
+
 ## [1.3.4] - 2026-11-10
 
 A security update. The undo journal moves to SQLite 3.54.1, which fixes a flaw

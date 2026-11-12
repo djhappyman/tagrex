@@ -910,6 +910,11 @@ export const en = {
   "field.position": "Position",
   "field.length": "Length",
   "field.tagtypes": "Tag types",
+  "field.cover": "Cover",
+  // The Cover column's cell, as tooltip and accessible name (#730).
+  "cover.cell.embedded": "Cover embedded",
+  "cover.cell.missing": "No cover",
+  "cover.cell.unknown": "Not known: the file could not be read",
   // Settings › Online import: which fields an import may write (#422).
   "importField.title": "Title",
   "importField.artist": "Artist",
