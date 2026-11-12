@@ -227,6 +227,11 @@ fn pin_windows_ancestors(parent: &Path) -> io::Result<Vec<std::fs::File>> {
     use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
     // Windows SDK constants; use std's handle ownership and option APIs so no
     // raw handles or unsafe FFI are needed here.
+    // Metadata-only opens do not participate in Windows sharing checks. Ask
+    // for directory data access too, so omitting FILE_SHARE_DELETE actually
+    // prevents renames until these handles are dropped.
+    // https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/8c0e3f4f-0729-49f4-a14d-7f7add593819
+    const FILE_LIST_DIRECTORY: u32 = 0x1;
     const FILE_READ_ATTRIBUTES: u32 = 0x80;
     const FILE_SHARE_READ_WRITE: u32 = 0x1 | 0x2;
     const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
@@ -241,7 +246,7 @@ fn pin_windows_ancestors(parent: &Path) -> io::Result<Vec<std::fs::File>> {
         }
         let handle = std::fs::OpenOptions::new()
             .read(true)
-            .access_mode(FILE_READ_ATTRIBUTES)
+            .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
             .share_mode(FILE_SHARE_READ_WRITE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(&path)?;
@@ -419,14 +424,32 @@ mod tests {
     fn pinned_windows_ancestors_cannot_be_renamed_until_publication_finishes() {
         let root = root("windows-pins");
         let album = root.join("album");
-        std::fs::create_dir(&album).unwrap();
-        let pinned = Directory::open(&root, &album).unwrap();
+        let disc = album.join("disc");
+        std::fs::create_dir_all(&disc).unwrap();
+        let pinned = Directory::open(&root, &disc).unwrap();
+        assert!(std::fs::rename(&disc, album.join("replacement-disc")).is_err());
         assert!(std::fs::rename(&album, root.join("replacement")).is_err());
         let moved_root = root.with_extension("moved");
         assert!(std::fs::rename(&root, &moved_root).is_err());
+
+        // Pinning names must not prevent publishing files beneath them.
+        let (temporary, mut file) = pinned.temporary().unwrap();
+        file.write_all(b"cover").unwrap();
+        drop(file);
+        pinned
+            .publish(&temporary, std::ffi::OsStr::new("cover.jpg"))
+            .unwrap();
+        pinned.remove(&temporary);
         drop(pinned);
+
+        std::fs::rename(&disc, album.join("replacement-disc")).unwrap();
         std::fs::rename(&album, root.join("replacement")).unwrap();
-        std::fs::remove_dir_all(root).unwrap();
+        std::fs::rename(&root, &moved_root).unwrap();
+        assert_eq!(
+            std::fs::read(moved_root.join("replacement/replacement-disc/cover.jpg")).unwrap(),
+            b"cover"
+        );
+        std::fs::remove_dir_all(moved_root).unwrap();
     }
     #[test]
     fn a_later_invalid_target_leaves_the_entire_batch_untouched() {
