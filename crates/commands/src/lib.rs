@@ -2692,8 +2692,8 @@ impl App {
         let mut pairs = Vec::new();
         for entry in entries.flatten() {
             let path = entry.path();
-            // Never the audio file itself, and only real files.
-            if path == *src || !path.is_file() {
+            // Reject names before querying metadata for unrelated entries.
+            if path == *src {
                 continue;
             }
             let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
@@ -2706,6 +2706,10 @@ impl App {
                 continue; // an extension-less file can't match the set
             };
             if !exts.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
+                continue;
+            }
+            // Keep the same file/symlink check for matching candidates.
+            if !path.is_file() {
                 continue;
             }
             let from = path.to_string_lossy().into_owned();
@@ -9146,6 +9150,49 @@ mod tests {
         app.undo(batch.id).unwrap();
         assert!(lrc.exists() && txt.exists(), "sidecars restored");
         assert!(!dir.0.join(format!("{stem}.lrc")).exists());
+    }
+
+    #[test]
+    fn sidecar_candidates_keep_file_and_extension_rules() {
+        let dir = TempDir::new("sidecar-candidates");
+        let track = dir.tagged_flac("original.flac", "Artist", "Title");
+        let cue = dir.0.join("original.CUE");
+        std::fs::write(&cue, b"cue").unwrap();
+        std::fs::write(dir.0.join("original.zzz"), b"unlisted").unwrap();
+        std::fs::write(dir.0.join("different.lrc"), b"other stem").unwrap();
+        std::fs::write(dir.0.join("original"), b"extensionless").unwrap();
+        std::fs::create_dir(dir.0.join("original.lrc")).unwrap();
+        let app = open_app(&dir);
+        let plan = app
+            .preview_rename("renamed", std::slice::from_ref(&track))
+            .unwrap();
+        assert_eq!(
+            plan.changes[0].sidecar_renames,
+            vec![(
+                cue.to_string_lossy().into_owned(),
+                dir.0.join("renamed.CUE").to_string_lossy().into_owned(),
+            )]
+        );
+        #[cfg(unix)]
+        {
+            let linked = dir.0.join("original.txt");
+            std::os::unix::fs::symlink(&cue, &linked).unwrap();
+            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("original.jpg")).unwrap();
+            let plan = app
+                .preview_rename("renamed", std::slice::from_ref(&track))
+                .unwrap();
+            let froms: Vec<_> = plan.changes[0]
+                .sidecar_renames
+                .iter()
+                .map(|(from, _)| from.as_str())
+                .collect();
+            assert_eq!(
+                froms.len(),
+                2,
+                "file symlink included, broken symlink excluded"
+            );
+            assert!(froms.contains(&linked.to_string_lossy().as_ref()));
+        }
     }
 
     #[test]
