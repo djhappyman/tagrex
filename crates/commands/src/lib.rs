@@ -12,6 +12,8 @@
 //! than core types, so `tagrex-core` stays serialization-agnostic. Tag map
 //! keys use [`TagField`]'s lossless storage-key codec.
 
+mod read_cache;
+
 use std::path::{Component, Path, PathBuf};
 
 use std::cell::{Cell, RefCell};
@@ -2053,6 +2055,7 @@ impl ProviderHub {
 /// [`Executor`] `allowed_root`, so every write is confined to the opened
 /// library.
 pub struct App {
+    read_cache: RefCell<read_cache::ReadCache>,
     library_root: PathBuf,
     /// When set, the session operates on this explicit list of files (a
     /// drag-and-drop of files and/or several folders, #127) instead of scanning
@@ -2130,6 +2133,7 @@ impl App {
         }
         let (journal, journal_set_aside) = SqliteJournal::open_or_recover(journal_path)?;
         Ok(Self {
+            read_cache: RefCell::default(),
             library_root,
             file_filter: None,
             journal,
@@ -2148,6 +2152,51 @@ impl App {
             locked_fields: RefCell::new(HashSet::new()),
             extra_roots: RefCell::new(Vec::new()),
         })
+    }
+
+    fn read_snapshot(
+        &self,
+        path: &Path,
+    ) -> Result<tagrex_core::model::TrackRead, tagrex_core::model::TagIoError> {
+        self.read_cache.borrow_mut().read(path)
+    }
+    fn read_cached(
+        &self,
+        path: &Path,
+    ) -> Result<tagrex_core::model::TrackFile, tagrex_core::model::TagIoError> {
+        self.read_snapshot(path).map(|read| read.file)
+    }
+    fn track_dto(&self, path: &Path) -> TrackDto {
+        match self.read_snapshot(path) {
+            Ok(read) => TrackDto {
+                duration_secs: Some(read.props.duration_secs),
+                tag_blocks: read.blocks.iter().map(TagBlockDto::from).collect(),
+                has_cover: read.has_cover,
+                ..TrackDto::from(read.file)
+            },
+            Err(_) => TrackDto::unreadable(path),
+        }
+    }
+    fn file_context<'a>(
+        &self,
+        mask: &Mask,
+        track: &'a tagrex_core::model::TrackFile,
+    ) -> FileContext<'a> {
+        let metadata = mask
+            .needs_metadata()
+            .then(|| std::fs::metadata(&track.path).ok())
+            .flatten();
+        FileContext {
+            path: Some(&track.path),
+            format: Some(track.format),
+            props: if mask.needs_audio_props() {
+                self.read_snapshot(&track.path).ok().map(|read| read.props)
+            } else {
+                None
+            },
+            size_bytes: metadata.as_ref().map(|m| m.len()),
+            modified: metadata.and_then(|m| m.modified().ok()),
+        }
     }
 
     /// Open a file-set session (#127): the session lists and operates on exactly
@@ -2218,6 +2267,7 @@ impl App {
     /// here — they belong to [`ProviderHub`], which outlives any open library
     /// (#166).
     pub fn apply_settings(&self, settings: &SettingsDto) {
+        self.read_cache.borrow_mut().clear();
         tagrex_core::model::set_write_id3v23(settings.id3_v23);
         tagrex_core::model::set_read_priority(&settings.read_priority);
         tagrex_core::model::set_multi_value_separator(&settings.multi_value_separator);
@@ -2419,18 +2469,7 @@ impl App {
         let mut tracks: Vec<TrackDto> = self
             .source_paths()
             .into_iter()
-            .map(|path| match TagEngine::read_with_props(&path) {
-                // One probe gives the tags, the playing time (#172) and which
-                // tag blocks the file carries (#47); the Length and Tags columns
-                // are free as long as they are taken from here.
-                Ok(read) => TrackDto {
-                    duration_secs: Some(read.props.duration_secs),
-                    tag_blocks: read.blocks.iter().map(TagBlockDto::from).collect(),
-                    has_cover: read.has_cover,
-                    ..TrackDto::from(read.file)
-                },
-                Err(_) => TrackDto::unreadable(&path),
-            })
+            .map(|path| self.track_dto(&path))
             .collect();
         tracks.sort_by(|a, b| natural_cmp(&a.path, &b.path));
         tracks
@@ -2451,7 +2490,7 @@ impl App {
 
         for path in self.source_paths() {
             // One parse for the tags and the audio properties: two read every file twice.
-            let Ok(read) = TagEngine::read_with_props(&path) else {
+            let Ok(read) = self.read_snapshot(&path) else {
                 continue;
             };
             let track = read.file;
@@ -2718,9 +2757,9 @@ impl App {
         path: &Path,
         root: &Path,
     ) -> Result<PathBuf, Option<String>> {
-        let track = TagEngine::read(path).map_err(|_| None)?;
+        let track = self.read_cached(path).map_err(|_| None)?;
         let rendered = mask
-            .render_with(&track.tags, &FileContext::read(mask, &track))
+            .render_with(&track.tags, &self.file_context(mask, &track))
             .map_err(|err| match err {
                 MaskError::MissingTag(field) => Some(field),
                 _ => None,
@@ -2850,7 +2889,7 @@ impl App {
 
         let mut changes = Vec::new();
         for path in paths {
-            let Ok(track) = TagEngine::read(path) else {
+            let Ok(track) = self.read_cached(path) else {
                 continue;
             };
             let Some(subject) = name_subject(path, depth) else {
@@ -2992,7 +3031,7 @@ impl App {
         let (tracks, _) = text_list_tracks(&mask, text)?;
         let mut changes = Vec::new();
         for (path, (_, extracted)) in paths.iter().zip(tracks) {
-            let Ok(track) = TagEngine::read(path) else {
+            let Ok(track) = self.read_cached(path) else {
                 continue;
             };
 
@@ -3147,7 +3186,7 @@ impl App {
         let mut changes = Vec::new();
 
         for path in paths {
-            let Ok(track) = TagEngine::read(path) else {
+            let Ok(track) = self.read_cached(path) else {
                 continue;
             };
 
@@ -3311,7 +3350,7 @@ impl App {
 
         let mut changes = Vec::new();
         for path in paths {
-            let Ok(track) = TagEngine::read(path) else {
+            let Ok(track) = self.read_cached(path) else {
                 continue;
             };
 
@@ -3766,7 +3805,7 @@ impl App {
         let mut changes = Vec::new();
         let mut with_cover = 0;
         for (path, group) in by_path {
-            let track = TagEngine::read(Path::new(path))?;
+            let track = self.read_cached(Path::new(path))?;
             let mut tag_changes = Vec::new();
             for edit in group {
                 let field = TagField::from_storage_key(&edit.field);
@@ -3879,7 +3918,7 @@ impl App {
     pub fn preview_clear_tags(&self, paths: &[PathBuf]) -> Result<PlanDto, AppError> {
         let mut changes = Vec::new();
         for path in paths {
-            let track = TagEngine::read(path)?;
+            let track = self.read_cached(path)?;
             // One clearing change per field the file actually carries, so the
             // preview diff and the undo journal record the real old values.
             let tag_changes: Vec<FieldChangeDto> = track
@@ -3918,7 +3957,7 @@ impl App {
         let floor = self.bpm_floor.get();
         let mut changes = Vec::new();
         for (path, raw) in detected {
-            let Ok(track) = TagEngine::read(path) else {
+            let Ok(track) = self.read_cached(path) else {
                 continue;
             };
             let bpm = bpm_in_range(*raw, floor);
@@ -4278,7 +4317,7 @@ impl App {
                     text_to_unicode: true,
                 }
             } else if TagEngine::has_legacy_id3v1_text_only(path)? {
-                let format = TagEngine::read(path)?.format;
+                let format = self.read_cached(path)?.format;
                 let Some(content) = TagEngine::read_block(path, TagBlockKind::Id3v1)? else {
                     continue;
                 };
@@ -4327,7 +4366,7 @@ impl App {
     pub fn tag_block_targets(&self, paths: &[PathBuf]) -> Result<BlockTargetsDto, AppError> {
         let mut shared: Option<Vec<TagBlockKind>> = None;
         for path in paths {
-            let format = TagEngine::read(path)?.format;
+            let format = self.read_cached(path)?.format;
             let writable = TagBlockKind::writable_for(format);
             shared = Some(match shared {
                 None => writable,
@@ -4392,7 +4431,7 @@ impl App {
             let Some(content) = TagEngine::read_block(path, source)? else {
                 continue;
             };
-            let format = TagEngine::read(path)?.format;
+            let format = self.read_cached(path)?.format;
             if !TagBlockKind::writable_for(format).contains(&target) {
                 return Err(AppError::BlockNotWritable {
                     kind: target.name().to_string(),
@@ -4581,17 +4620,17 @@ impl App {
     pub fn export_playlist(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let root = std::fs::canonicalize(&self.library_root)?;
-        let entries = Self::playlist_entries(&root, paths);
+        let entries = self.playlist_entries(&root, paths);
         std::fs::write(&target, export::m3u(&entries))?;
         Ok(target.to_string_lossy().into_owned())
     }
 
     /// The playlist entries for `paths`, in the order given.
-    fn playlist_entries(root: &Path, paths: &[PathBuf]) -> Vec<PlaylistTrack> {
+    fn playlist_entries(&self, root: &Path, paths: &[PathBuf]) -> Vec<PlaylistTrack> {
         paths
             .iter()
             .filter_map(|path| {
-                let track = TagEngine::read(path).ok()?;
+                let track = self.read_cached(path).ok()?;
                 let duration = TagEngine::read_duration(path).unwrap_or_default();
                 let display = Self::path_from_export(root, path);
                 let file_stem = path
@@ -4653,7 +4692,7 @@ impl App {
         let mut order: Vec<String> = Vec::new();
         let mut groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for path in paths {
-            let Ok(track) = TagEngine::read(path) else {
+            let Ok(track) = self.read_cached(path) else {
                 continue;
             };
             let key = if by_album {
@@ -4679,7 +4718,7 @@ impl App {
             let members = &groups[&key];
             let name = self.playlist_name(&mask, &members[0], &mut taken)?;
             let target = self.export_target(&name)?;
-            let entries = Self::playlist_entries(&root, members);
+            let entries = self.playlist_entries(&root, members);
             std::fs::write(&target, export::m3u(&entries))?;
             written.push(target.to_string_lossy().into_owned());
         }
@@ -4703,7 +4742,7 @@ impl App {
     ) -> Result<String, AppError> {
         let rendered = match TagEngine::read(first) {
             Ok(track) => {
-                let file = FileContext::read(mask, &track);
+                let file = self.file_context(mask, &track);
                 mask.render_with(&export::lenient_tags(&track.tags), &file)
                     .unwrap_or_default()
             }
@@ -4745,7 +4784,7 @@ impl App {
         let entries: Vec<CueTrack> = paths
             .iter()
             .filter_map(|path| {
-                let track = TagEngine::read(path).ok()?;
+                let track = self.read_cached(path).ok()?;
                 Some(CueTrack {
                     path: Self::path_from_export(&root, path),
                     tags: track.tags,
@@ -4863,6 +4902,7 @@ impl App {
 
     /// Apply a previewed plan to disk and record it for undo.
     pub fn apply(&mut self, plan: &PlanDto) -> Result<BatchDto, AppError> {
+        self.read_cache.borrow_mut().clear();
         let change_plan = plan.to_change_plan();
         let roots = self.allowed_roots();
         let batch = Executor::apply(&change_plan, &mut self.journal, &roots)?;
@@ -4878,6 +4918,7 @@ impl App {
         progress: &mut dyn FnMut(&ApplyProgress),
         cancel: &AtomicBool,
     ) -> Result<BatchDto, AppError> {
+        self.read_cache.borrow_mut().clear();
         let change_plan = plan.to_change_plan();
         let roots = self.allowed_roots();
         let batch =
@@ -4919,6 +4960,7 @@ impl App {
         progress: &mut dyn FnMut(&ApplyProgress),
     ) -> Result<UndoReportDto, AppError> {
         let roots = self.allowed_roots();
+        self.read_cache.borrow_mut().clear();
         let report =
             Executor::undo_with_mode(&mut self.journal, BatchId(batch_id), &roots, mode, progress)?;
         Ok(UndoReportDto::from(&report))
@@ -5034,7 +5076,7 @@ impl App {
         let locals: Vec<(String, String, Option<u64>, Option<String>)> = paths
             .iter()
             .map(|path| {
-                let track = TagEngine::read(path).ok();
+                let track = self.read_cached(path).ok();
                 let title = track
                     .as_ref()
                     .and_then(|track| track.tags.get(&TagField::Title).cloned())
@@ -5137,10 +5179,10 @@ impl App {
         Ok(paths
             .iter()
             .map(|path| {
-                let Ok(track) = TagEngine::read(path) else {
+                let Ok(track) = self.read_cached(path) else {
                     return String::new();
                 };
-                let file = FileContext::read(&mask, &track);
+                let file = self.file_context(&mask, &track);
                 mask.render_with(&export::lenient_tags(&track.tags), &file)
                     .unwrap_or_default()
             })
@@ -5170,7 +5212,7 @@ impl App {
         let mut side_track_counters: std::collections::HashMap<u32, u32> =
             std::collections::HashMap::new();
         for (index, path) in paths.iter().enumerate() {
-            let current = TagEngine::read(path)?;
+            let current = self.read_cached(path)?;
 
             // (field, desired new value) — album-level first, then per-track.
             let mut desired: Vec<(TagField, Option<String>)> = vec![
@@ -10380,6 +10422,45 @@ mod tests {
     }
 
     // ---- mask-defined table columns (#150) ----
+
+    #[test]
+    fn cached_reads_refresh_after_external_write_apply_and_undo() {
+        let dir = TempDir::new("cache-invalidation");
+        let path = dir.tagged_flac("track.flac", "Before", "Title");
+        let mut app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["Before"]
+        );
+        let mut track = TagEngine::read(&path).unwrap();
+        track.tags.insert(TagField::Artist, "External".into());
+        TagEngine::write(&track).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["External"]
+        );
+        let plan = app
+            .preview_tag_edits(&[TagEditDto {
+                path: path.to_string_lossy().into_owned(),
+                field: "artist".into(),
+                value: Some("Applied".into()),
+            }])
+            .unwrap();
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["Applied"]
+        );
+        app.undo(batch.id).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["External"]
+        );
+    }
 
     #[test]
     fn render_column_renders_a_pattern_over_a_batch() {
