@@ -138,12 +138,12 @@ function rulesFor(group, context) {
     .filter((r) => contextTakes(context, r.scope));
 }
 
-// The ticked presets as the groups a run takes, cut down to what `context`
-// acts on; a preset with nothing left for it is left out.
-function presetsFor(context) {
+// Normal job chains take only their output scopes. The independent selection
+// preview can explicitly take every scope of the same visibly checked groups.
+function presetsFor(context, { allScopes = false } = {}) {
   return allPresets()
     .filter((g) => isPresetActive(g, context))
-    .map((g) => ({ name: g.name, scope: "tags", rules: rulesFor(g, context) }))
+    .map((g) => ({ name: g.name, scope: "tags", rules: rulesFor(g, allScopes ? 'generator' : context) }))
     .filter((g) => g.rules.length);
 }
 

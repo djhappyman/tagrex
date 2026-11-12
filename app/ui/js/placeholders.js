@@ -1,3 +1,4 @@
+import { upgradeComponentMarkup } from "../lib/component-elements.js";
 // The placeholder reference (#148).
 //
 // Every mask input gets a button that opens this: the full list of what the
@@ -141,6 +142,7 @@ export function renderReference(entries, filter, body = el("ph-body"), direction
         </div>`,
       )
       .join("");
+  upgradeComponentMarkup(body);
 }
 
 // Place the popover against its button. Fixed positioning rather than the

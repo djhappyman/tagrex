@@ -1,3 +1,4 @@
+import { createComponentElement } from "../lib/component-elements.js";
 // Value auto-complete for the table's editable cells (#63).
 //
 // Typing an album artist that eleven other files in the library already carry
@@ -104,16 +105,27 @@ function markMatch(entry, typed) {
   return `${escapeHtml(head)}<b>${escapeHtml(hit)}</b>${escapeHtml(tail)}`;
 }
 
+// Keep the small component pool alive while typing. Updating a match only
+// changes its label and count, rather than mounting a new Button per keypress.
+const suggestionRows = [];
 function paint(typed) {
-  menu.innerHTML = shown
-    .map(
-      (entry, index) => `<button type="button" class="sg-row${index === active ? " active" : ""}"
-        data-index="${index}">
-        <span class="sg-value">${markMatch(entry, typed)}</span>
-        <span class="sg-count">${entry.files}</span>
-      </button>`,
-    )
-    .join("");
+  shown.forEach((entry, index) => {
+    let button = suggestionRows[index];
+    if (!button) {
+      button = createComponentElement('button');
+      button.type = 'button';
+      button.className = 'sg-row';
+      button.dataset.index = String(index);
+      button.innerHTML = '<span class="sg-value"></span><span class="sg-count"></span>';
+      suggestionRows.push(button);
+      menu.append(button);
+    }
+    button.hidden = false;
+    button.classList.toggle('active', index === active);
+    button.querySelector('.sg-value').innerHTML = markMatch(entry, typed);
+    button.querySelector('.sg-count').textContent = String(entry.files);
+  });
+  suggestionRows.slice(shown.length).forEach((button) => { button.hidden = true; });
 }
 
 function place() {
@@ -126,7 +138,8 @@ function place() {
 
 export function closeCellSuggest() {
   menu.hidden = true;
-  menu.innerHTML = "";
+  menu.innerHTML = '';
+  suggestionRows.length = 0;
   shown = [];
   active = -1;
 }

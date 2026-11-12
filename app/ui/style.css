@@ -2021,13 +2021,10 @@ body:not(.show-checkbox) #tracks td.sel {
 }
 
 
-/* Drag handle on the File cell of the main table. WebKit (the macOS Tauri
-   webview) needs `-webkit-user-drag: element` to let a non-anchor/img element
-   start a drag, plus suppressed text selection so the grip drags instead of
-   selecting the filename. */
+/* Filenames participate in row selection, never native browser dragging. */
 td.file {
-  cursor: grab;
-  -webkit-user-drag: element;
+  cursor: default;
+  -webkit-user-drag: none;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -3731,26 +3728,6 @@ td.unreadable-note {
 #tracks tbody td.position-cell {
   color: var(--muted);
 }
-
-/* Cover column (#730): a glyph centred in a narrow cell. Embedded stays quiet;
-   a missing cover is the one to notice, so it takes the problem colour. */
-#tracks tbody td.cover-cell {
-  text-align: center;
-}
-#tracks tbody td.cover-cell .ico {
-  display: inline-block;
-  vertical-align: middle;
-}
-#tracks tbody td.cover-missing {
-  color: var(--del);
-}
-
-/* Selecting by dragging over the table (#731): the plain arrow throughout, so
-   the cells' own text and edit cursors don't flicker under the band. */
-body.band-selecting,
-body.band-selecting * {
-  cursor: default !important;
-}
 .rule-flag:hover {
   color: var(--text);
 }
@@ -3997,6 +3974,10 @@ body.band-selecting * {
    the whole expanded card. */
 .release-header-row {
   position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2);
 }
 /* `button.` prefix so display:none beats the shared `button.icon` display. */
 button.release-import {
@@ -4043,11 +4024,13 @@ button.release-import {
    height (a square driven by the text lines beside it), so the card reads as a
    cover with text rather than a thumbnail floating in padding. */
 .release-head {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: stretch;
   gap: var(--space-3);
   width: 100%;
-  padding: var(--space-2);
+  padding: 0;
   text-align: left;
   border: none;
   border-radius: 0;
@@ -7773,3 +7756,8 @@ input.preset-name {
   width: 15px;
   height: 15px;
 }
+
+/* Tapping the release artwork opens its image browser. */
+button.release-cover { padding: 0; cursor: pointer; }
+button.release-cover:hover { border-color: var(--accent); }
+button.release-cover[aria-busy="true"] { opacity: 0.55; cursor: progress; }

@@ -19,7 +19,7 @@ let mockBpmCancel = false;
 function plan(description, message, changes, notes = []) {
   return { description, message: { args: {}, count: null, ...message }, notes, changes };
 }
-import { parseVinylPosition } from "./vinyl.js";
+import { parseVinylPosition, sideLetterOf } from "./vinyl.js";
 
 // A group as the sequence of scoped chains it runs as, mirroring the backend's
 // `build_segments` (#250): a rule may name its own target, and consecutive rules
@@ -282,6 +282,41 @@ function mockKeyNotation(value, style) {
 // Locked fields (#48), held for the page's life the way the session holds them.
 let mockLockedFields = new Set();
 
+function renderMockColumn(args, tracks) {
+  // The real backend parses the mask first, so an unknown placeholder is an
+  // error before any file is touched — the editor relies on that to reject a
+  // typo once instead of blanking the column on every repaint. Model it, or
+  // the dev path silently accepts patterns the app would refuse.
+  const known = [
+    "artist", "title", "album", "albumartist", "track", "tracktotal", "disc",
+    "disctotal", "year", "genre", "comment", "composer", "publisher", "bpm",
+    "isrc", "key", "catalognumber", "url", "media", "side", "skip",
+    "filename", "fileext", "filenameext", "filepath", "foldername",
+    "foldername2", "foldername3", "_length", "_length_sec", "_bitrate",
+    "_samplerate", "_channels", "_codec", "_filesize", "_filesize_bytes",
+    "_filedate",
+  ];
+  for (const [, name] of String(args.pattern || "").matchAll(/%([a-z_0-9]+?)(?::\d+)?%/gi)) {
+    if (!known.includes(name.toLowerCase())) {
+      return Promise.reject(`unknown placeholder: ${name}`);
+    }
+  }
+  return Promise.resolve(
+    (args.paths || []).map((path) => {
+      const t = (tracks || []).find((x) => x.path === path);
+      return String(args.pattern || "").replace(/%([a-z_]+)(?::(\d+))?%/gi, (_, name, width) => {
+        const key = name.toLowerCase();
+        if (key === "filename") return fileName(path).replace(/\.[^.]*$/, "");
+        if (key === "_codec") return "MP3";
+        if (key === "side") return sideLetterOf(t?.tags.media, t?.tags.disc) || "";
+        const value = (t && t.tags && t.tags[key]) || "";
+        return width && /^\d+$/.test(value) ? String(value).padStart(Number(width), "0") : value;
+      });
+    })
+  );
+
+}
+
 function mockInvoke(cmd, args) {
   mockInvoke.state = mockInvoke.state || {
     tracks: [
@@ -456,6 +491,17 @@ function mockInvoke(cmd, args) {
       if (conflicts.length) return Promise.resolve({ written: [], conflicts });
       names.forEach((n) => s.savedImages.add(n));
       return Promise.resolve({ written: names.map((n) => `/music/${n}`), conflicts: [] });
+    }
+    case "read_track": {
+      const track = findTrack(args.path);
+      return track ? Promise.resolve(structuredClone(track)) : Promise.reject("File not in the open library");
+    }
+    case "read_track_rows": {
+      const indexed = new Map(s.tracks.map(track => [track.path, track]));
+      const selected = args.paths.map(path => indexed.get(path));
+      return selected.every(Boolean)
+        ? Promise.resolve(structuredClone(selected))
+        : Promise.reject("File not in the open library");
     }
     case "list_tracks":
       return Promise.resolve(s.tracks);
@@ -877,7 +923,7 @@ function mockInvoke(cmd, args) {
         path: p,
         rename_to: null,
         tag_changes: [],
-        cover_change: { old: null, new: args.cover },
+        cover_change: { old: [], new: [{ ...args.cover, kind: "front", description: args.cover.description || "" }] },
       }));
       return Promise.resolve(plan("Embed cover art", { code: "plan.embedCover" }, changes));
     }
@@ -938,7 +984,7 @@ function mockInvoke(cmd, args) {
         .map((p) => {
           const t = findTrack(p);
           if (!t || !t.cover) return null;
-          return { path: p, rename_to: null, tag_changes: [], cover_change: { old: { mime: "image/svg+xml", data_base64: "" }, new: null } };
+          return { path: p, rename_to: null, tag_changes: [], cover_change: { old: [mockCoverImage(t.cover, "front")], new: [] } };
         })
         .filter(Boolean);
       return Promise.resolve(plan("Remove cover art", { code: "plan.removeCover" }, changes));
@@ -1186,10 +1232,10 @@ function mockInvoke(cmd, args) {
           // Functions (#73) are written `$name(…)`, not `%name%`, and one that
           // takes several arguments arrives with a slot per argument — both
           // shapes are here so the popover's insertion is exercised.
-          ["upper", "$upper(x) — UPPER CASE", "Functions", true, false, "$upper()"],
+          ["upper", "$upper(x): UPPER CASE", "Functions", true, false, "$upper()"],
           [
             "substr",
-            "$substr(x,from,to) — characters from..to, 1-based",
+            "$substr(x,from,to): characters from..to, counting from 1",
             "Functions",
             true,
             false,
@@ -1197,8 +1243,8 @@ function mockInvoke(cmd, args) {
           ],
           // A group's rows have to stay together: the popover groups by
           // consecutive runs, so splitting them draws the heading twice (#202).
-          ["if2", "$if2(x,fallback) — x, or fallback when x is empty", "Logic", true, false, "$if2(,)"],
-          ["div", "$div(a,b) — a divided by b, empty when b is 0", "Math", true, false, "$div(,)"],
+          ["if2", "$if2(x,fallback): x, or fallback when x is empty", "Logic", true, false, "$if2(,)"],
+          ["div", "$div(a,b): a divided by b, empty when b is 0", "Math", true, false, "$div(,)"],
         ].map(([name, description, group, render, extract, token]) => {
           // The backend sends the catalogue keys beside the English (#268); the
           // mock builds them the same way so the popover's translated path is
@@ -1229,37 +1275,11 @@ function mockInvoke(cmd, args) {
     // Mask-defined columns (#150). The dev mock renders a couple of plain
     // placeholders so the column can be seen filling in; the real grammar is
     // mask.rs and this is not a second implementation of it.
-    case "render_column": {
-      // The real backend parses the mask first, so an unknown placeholder is an
-      // error before any file is touched — the editor relies on that to reject a
-      // typo once instead of blanking the column on every repaint. Model it, or
-      // the dev path silently accepts patterns the app would refuse.
-      const known = [
-        "artist", "title", "album", "albumartist", "track", "tracktotal", "disc",
-        "disctotal", "year", "genre", "comment", "composer", "publisher", "bpm",
-        "isrc", "key", "catalognumber", "url", "media", "side", "skip",
-        "filename", "fileext", "filenameext", "filepath", "foldername",
-        "foldername2", "foldername3", "_length", "_length_sec", "_bitrate",
-        "_samplerate", "_channels", "_codec", "_filesize", "_filesize_bytes",
-        "_filedate",
-      ];
-      for (const [, name] of String(args.pattern || "").matchAll(/%([a-z_0-9]+?)(?::\d+)?%/gi)) {
-        if (!known.includes(name.toLowerCase())) {
-          return Promise.reject(`unknown placeholder: ${name}`);
-        }
-      }
-      return Promise.resolve(
-        (args.paths || []).map((path) => {
-          const t = (s.tracks || []).find((x) => x.path === path);
-          return String(args.pattern || "").replace(/%([a-z_]+)%/gi, (_, name) => {
-            const key = name.toLowerCase();
-            if (key === "filename") return fileName(path).replace(/\.[^.]*$/, "");
-            if (key === "_codec") return "MP3";
-            return (t && t.tags && t.tags[key]) || "";
-          });
-        })
-      );
-    }
+    case "render_columns":
+      return Promise.all((args.patterns || []).map((pattern) =>
+        renderMockColumn({ pattern, paths: args.paths }, s.tracks).catch(() => null)));
+    case "render_column":
+      return renderMockColumn(args, s.tracks);
     case "import_fields":
       return Promise.resolve([
         { keys: ["title"], label: "Title", code: "importField.title" },
@@ -1371,6 +1391,8 @@ function mockInvoke(cmd, args) {
       mockInvoke.state = mockInvoke.state || {};
       mockInvoke.state.settings = args.settings;
       return Promise.resolve();
+    case "open_provider_page":
+      return Promise.resolve();
     case "provider_search":
       // MusicBrainz hits carry no cover in search and use MBID string ids (#33).
       if (args.source === "musicbrainz") {
@@ -1431,6 +1453,7 @@ function mockInvoke(cmd, args) {
       }
       return Promise.resolve({
         id: args.releaseId,
+        links: [ { name: "Various", kind: "artist", id: "194" }, { name: "Antler-Subway", kind: "label", id: "123" } ],
         artist: "Various",
         title: "La Bush - Music From The Temple Of House",
         year: 1996,
