@@ -1,0 +1,59 @@
+/* TagScanner-style file workbench: one flat list, without card or cell frames. */
+body .files-col { border:0; border-radius:0; box-shadow:none; }
+body #files-view { border:0; border-radius:0; }
+body #tracks { border:0; border-spacing:0; }
+body #tracks thead th { padding:4px 8px; height:25px; font-family:var(--font-ui); font-weight:500; letter-spacing:normal; text-transform:none; background:var(--panel); border:0; border-bottom:1px solid var(--border); }
+body #tracks tbody td { padding:2px 8px; border:0; line-height:var(--lh-tight); }
+body #tracks tbody tr[data-path]:not(.selected):not(:hover):is([aria-rowindex$='0'],[aria-rowindex$='2'],[aria-rowindex$='4'],[aria-rowindex$='6'],[aria-rowindex$='8']) td:not(.dirty):not(.error):not(.sheet-range) { background:color-mix(in srgb,var(--text) 4%,var(--bg)); }
+body #tracks tbody tr:hover { background:var(--row-hover); }
+body #tracks td.group-cell { padding:3px 8px; border:0; background:color-mix(in srgb,var(--accent) 7%,var(--bg)); font-weight:500; overflow:visible; }
+body #tracks .group-heading-content { position:sticky; left:8px; display:inline-flex; align-items:center; max-width:calc(var(--table-viewport-width,100vw) - 24px); vertical-align:middle; }
+body #tracks .group-label { font-weight:500; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+body #tracks .group-caret, body #tracks .group-count { flex:none; }
+body #tracks td.sheet-range { background-color:color-mix(in srgb,var(--accent) 12%,var(--bg)); }
+body #tracks tr.selected td.sheet-range { background-color:var(--row-sel); }
+body #tracks tr.selected:hover td.sheet-range { background-color:var(--row-sel-hover); }
+body #tracks td.file { box-shadow:none; }
+/* Row surfaces select tracks. Only an actively edited value gets a text
+   cursor; neither filenames nor other values are draggable objects. */
+body #tracks tbody tr[data-path],
+body #tracks tbody tr[data-path] > td:not(.sel),
+body #tracks tbody tr[data-path] > td:not(.sel) > * { cursor:default; -webkit-user-drag:none; }
+body #tracks tbody tr[data-path] > td[contenteditable='true'],
+body #tracks tbody tr[data-path] > td[contenteditable='true'] * { cursor:text; }
+body #tracks td.sheet-active, body #tracks td.file.sheet-active,
+body #tracks tbody tr:focus-visible td:not(.dirty):not(.error) { outline:none; box-shadow:none; }
+body #tracks td.sheet-active:focus-visible,
+body #tracks td.sheet-active[contenteditable="true"] { outline:none; box-shadow:inset 0 -1px 0 var(--accent); }
+body #tracks td.sheet-active[contenteditable="true"] { background:var(--bg); }
+body.automatic-transform-preview #tracks tbody tr:not(.staged) td.sel input { pointer-events:auto; opacity:1; }
+body.automatic-transform-preview #tracks tbody tr.selected td:not(.dirty):not(.error) { background:var(--row-sel); }
+.sheet-menu-context { max-width:280px; white-space:normal; }
+.sheet-menu-reason { max-width:280px; padding:4px 8px 8px; color:var(--muted); font-size:var(--text-xs); white-space:normal; }
+
+/* Artwork is a fixed structural column between selection and File. Its width
+   is independent of the editable column list and the optional checkbox band. */
+body #tracks :is(th,td).artwork-col { position:sticky; left:var(--sheet-key-offset,0px); width:var(--artwork-column-width,24px); min-width:var(--artwork-column-width,24px); max-width:var(--artwork-column-width,24px); padding:0; text-align:center; background:var(--bg); }
+body #tracks td.artwork-col { z-index:4; }
+body #tracks th.artwork-col { z-index:10; background:var(--panel); }
+body #tracks th.sel { z-index:11; }
+body #tracks :is(th[data-sort='file'],td.file) { left:calc(var(--sheet-key-offset,0px) + var(--sheet-artwork-offset,24px)); padding-left:8px; }
+body:not(.show-checkbox) #tracks :is(th[data-sort='file'],td.file) { padding-left:8px; }
+body #tracks tr.selected td.artwork-col { background:var(--row-sel); }
+body #tracks tr:hover td.artwork-col { background:var(--row-hover); }
+body #tracks tr.selected:hover td.artwork-col { background:var(--row-sel-hover); }
+.track-artwork { position:relative; width:13px; height:13px; display:inline-flex; vertical-align:middle; color:var(--accent-ink); }
+.track-artwork .ico { width:13px; height:13px; }
+.track-artwork[data-cover-state='missing'] { color:var(--muted); opacity:.36; }
+.track-artwork[data-cover-state='unknown'] { color:var(--muted); opacity:.18; }
+.track-artwork[data-cover-state='missing']::after { content:''; position:absolute; inset:6px 0 auto; height:1px; background:currentColor; transform:rotate(-45deg); }
+body #tracks button.artwork-sort { position:relative; display:inline-flex; vertical-align:middle; width:23px; height:23px; min-height:0; padding:4px; border:0; border-radius:2px; background:transparent; color:var(--muted); box-shadow:none; }
+body #tracks .artwork-col .sort-ind { display:none; }
+body #tracks button.artwork-sort[aria-pressed='true'] { color:var(--accent-ink); }
+body #tracks button.artwork-sort:focus-visible { outline:1px solid var(--accent); outline-offset:-1px; }
+
+/* Shared commands live with the app toolbar; column headers lead the file pane. */
+body .topbar-main > .view-tabs { display:flex; flex:0 0 auto; align-items:center; min-height:0; height:28px; padding:0; margin:0 0 0 8px; border:0; background:transparent; gap:3px; }
+body .topbar-main .toolbar-trigger { height:25px; min-height:0; border-radius:3px; font-size:var(--text-xs); padding:0 6px; }
+body .topbar-main .view-tabs .dock-module-chrome { margin-left:2px; }
+@media(max-width:900px) { body .topbar-main > .view-tabs { margin-left:2px; } body .topbar-main .toolbar-trigger > span { display:none; } }
