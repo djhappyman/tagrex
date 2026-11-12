@@ -1,3 +1,5 @@
+import { importedValue, recordLiveField, liveInputChanged } from "./live-preview.js";
+import { attachGenrePicker } from "../lib/genre-picker";
 import { createComponentElement } from "../lib/component-elements.js";
 // The EDITOR field grid (#35, #143 split it out of app.js).
 //
@@ -33,6 +35,8 @@ let stagedFields = new Map();
 function currentFieldValue(path, key) {
   const pending = edits.get(path);
   if (pending && pending.has(key)) return pending.get(key);
+  const imported = importedValue(path, key);
+  if (imported !== undefined) return imported;
   const track = trackAt(path);
   return (track && track.tags[key]) || "";
 }
@@ -67,7 +71,7 @@ function refreshFieldEditor({ force = false, resetDraft = false } = {}) {
     JSON.stringify([...(edits.get(path) || [])])]]));
   const sameContent = sameSubject && editorContent?.size === content.size && [...content].every(([path, entry]) =>
     entry.every((value, at) => value === editorContent.get(path)?.[at]));
-  if (!force && !resetDraft && sameContent && locks === editorLocks && isSelectionCurrent(editorSubject)) return;
+  if (!force && !resetDraft && sameSubject && locks === editorLocks && isSelectionCurrent(editorSubject) && (sameContent || stagedFields.size)) return;
   if (!sameSubject || resetDraft) stagedFields = new Map();
   editorPaths = new Set(paths);
   editorContent = content;
@@ -419,23 +423,22 @@ async function previewConvertTagBlock(from, to, revision) {
 
 // Everyday fields live in Core; the remaining fields and existing custom
 // metadata live in Standard or Advanced.
-const EDITOR_CORE_KEYS = ["artist", "title", "album", "albumartist", "track", "tracktotal", "disc", "disctotal", "year", "genre"];
-// How the Core group lays out: singles, plus the two number/total pairs rendered
-// as one row each — "Track [n] / [total]", "Disc [n] / [total]" — mirroring a
-// reference tagger's combined NN/TT presentation (#136 pass 2).
+const EDITOR_CORE_KEYS = ["artist", "title", "album", "albumartist", "track", "tracktotal", "disc", "disctotal", "year", "genre", "comment", "bpm", "key"];
+// Core follows the tagging workflow: compact number pairs, identity fields,
+// genre and multiline comment, then tempo/key. Labels keep a fixed rail.
 const EDITOR_CORE_LAYOUT = [
-  {
-    duo: [
-      { pair: ["track", "tracktotal"], key: "track" },
-      { pair: ["disc", "disctotal"], key: "disc" },
-    ],
-  },
-  { key: "artist" },
+  { duo: [
+    { pair: ["track", "tracktotal"], key: "track" },
+    { pair: ["disc", "disctotal"], key: "disc" },
+  ] },
   { key: "title" },
+  { key: "artist" },
   { key: "album" },
   { key: "albumartist" },
   { key: "year" },
   { key: "genre" },
+  { key: "comment" },
+  { inline: ["bpm", "key"] },
 ];
 // Numeric/typed fields get a narrow right-aligned input and inline validation
 // mirroring the backend's is_writable_value rule, so a bad value shows as an
@@ -507,6 +510,7 @@ function renderFieldEditor(paths) {
   const coreRows = EDITOR_CORE_LAYOUT.map((r) =>
     r.duo
       ? { duo: r.duo.map((d) => ({ ...d, label: catalogueLabel(d.key) })) }
+      : r.inline ? { inline: r.inline.map(key => ({ key, label: catalogueLabel(key) })) }
       : { key: r.key, label: catalogueLabel(r.key) }
   );
 
@@ -553,7 +557,7 @@ function fieldGroup(title, rows, paths, kind) {
   const count = document.createElement("span");
   count.className = "fe-group-count";
   count.textContent = String(rows.reduce((total, row) =>
-    total + (row.duo ? row.duo.reduce((fields, entry) => fields + entry.pair.length, 0) : 1), 0));
+    total + (row.duo ? row.duo.reduce((fields, entry) => fields + entry.pair.length, 0) : row.inline?.length || 1), 0));
   const caret = document.createElement("span");
   caret.className = "fe-group-caret";
   caret.setAttribute("aria-hidden", "true");
@@ -566,7 +570,12 @@ function fieldGroup(title, rows, paths, kind) {
   grid.id = `editor-group-${kind}`;
   grid.inert = collapsed;
   for (const r of rows) {
-    grid.appendChild(r.duo ? fieldDuoRow(r.duo, paths) : fieldRow(r.key, r.label, paths));
+    if (r.inline) {
+      const shared = document.createElement("div");
+      shared.className = "fe-inline-fields";
+      for (const field of r.inline) shared.append(fieldRow(field.key, field.label, paths));
+      grid.append(shared);
+    } else grid.appendChild(r.duo ? fieldDuoRow(r.duo, paths) : fieldRow(r.key, r.label, paths));
   }
   group.appendChild(grid);
   head.addEventListener("click", () => {
@@ -605,7 +614,7 @@ function fieldRow(key, label, paths) {
   const marker = document.createElement("span");
   marker.className = "fe-marker";
 
-  const labelCell = document.createElement("span");
+  const labelCell = document.createElement("label");
   labelCell.className = "fe-label";
   labelCell.textContent = label;
   labelCell.title = label; // full name on hover — labels wrap, never truncate (#136)
@@ -613,10 +622,13 @@ function fieldRow(key, label, paths) {
   const cell = document.createElement("span");
   cell.className = "fe-cell" + (numeric ? " num" : "");
 
-  const input = createComponentElement("input");
-  input.type = "text";
+  const input = createComponentElement(key === "comment" ? "textarea" : "input");
+  if (key !== "comment") input.type = "text";
+  else { input.rows = 3; row.classList.add("fe-comment"); }
   input.className = "field-input" + (numeric ? " num" : "");
   input.dataset.key = key;
+  input.id = `editor-field-${encodeURIComponent(key)}`;
+  labelCell.htmlFor = input.id;
   input.spellcheck = false;
   if (numeric) input.inputMode = "numeric";
   // A locked field cannot be typed into here either (#48). The backend is what
@@ -655,6 +667,7 @@ function fieldRow(key, label, paths) {
     row.classList.add("dirty");
     input.classList.add("dirty");
     reflect();
+    recordLiveField(paths, key, input.value, validateFieldValue(key, input.value, paths).ok);
   });
 
   // A pre-filled value that's already invalid (rare — the backend guards it)
@@ -663,6 +676,11 @@ function fieldRow(key, label, paths) {
   if (shared || stagedFields.has(key)) reflect();
 
   cell.append(input, hint);
+  if (key === "genre") attachGenrePicker(input,
+    // Suggestions come from saved library values. Including this pending draft
+    // would offer an unfinished token ahead of its completion (Ho before House).
+    () => tracks.map(track => track.tags?.genre ?? ""),
+    () => savedSettings?.multi_value_separator ?? "; ");
   row.append(marker, labelCell, cell, lockButton([key], label, refreshFieldEditor));
   return row;
 }
@@ -679,7 +697,7 @@ function fieldDuoRow(pairs, paths) {
   const marker = document.createElement("span");
   marker.className = "fe-marker";
 
-  const labelCell = document.createElement("span");
+  const labelCell = document.createElement("label");
   labelCell.className = "fe-label";
   labelCell.textContent = pairs[0].label;
   labelCell.title = pairs[0].label;
@@ -706,6 +724,8 @@ function fieldDuoRow(pairs, paths) {
     input.type = "text";
     input.className = "field-input num";
     input.dataset.key = key;
+    input.id = `editor-field-${encodeURIComponent(key)}`;
+    if (!labelCell.htmlFor) labelCell.htmlFor = input.id;
     input.spellcheck = false;
     input.inputMode = "numeric";
     input.setAttribute("aria-label", aria);
@@ -722,6 +742,7 @@ function fieldDuoRow(pairs, paths) {
       input.classList.add("dirty");
       row.classList.add("dirty");
       reflectRow();
+      recordLiveField(paths, key, input.value, validateFieldValue(key, input.value, paths).ok);
     });
     restoreDraft(input, row, key);
     inputs.push(input);
@@ -733,8 +754,9 @@ function fieldDuoRow(pairs, paths) {
     unit.className = "fe-duo-unit";
     // The first pair's label is the row's aligned column label; the rest inline.
     if (i > 0) {
-      const inlineLabel = document.createElement("span");
+      const inlineLabel = document.createElement("label");
       inlineLabel.className = "fe-duo-label";
+      inlineLabel.htmlFor = `editor-field-${encodeURIComponent(p.pair[0])}`;
       inlineLabel.textContent = p.label;
       unit.append(inlineLabel);
     }
@@ -753,11 +775,8 @@ function fieldDuoRow(pairs, paths) {
   });
 
   reflectRow(); // surface a pre-filled invalid value on first render (rare)
-  // One padlock for the whole row, in the same column every other row keeps it
-  // in (#48). Not one per pair: four numbers on one line leave no room for two
-  // more buttons — the second pair wraps onto a line of its own — and the
-  // numbers are one idea anyway. Where a file sits in its release is what a
-  // renumbering rewrites, and it rewrites the disc alongside the track.
+  // One lock for the number/total pair, aligned with the other field locks.
+  // Track and Disc share a compact row; the fixed label rail does not resize.
   const keys = pairs.flatMap((p) => p.pair);
   const label = pairs.map((p) => p.label).join(" / ");
   if (keys.every((key) => isFieldLocked(key))) row.classList.add("locked");
@@ -768,43 +787,9 @@ function fieldDuoRow(pairs, paths) {
 // Push the staged fields into the shared pending-edits buffer for every
 // selected file, then preview them alongside any other pending edits.
 async function applyFieldEditor() {
-  const paths = selectedPaths();
-  if (!isSelectionCurrent(editorSubject)) { refreshFieldEditor(); return; }
-  if (paths.length === 0) {
-    toast(tr("toast.editor.selectFirst"), true);
-    return;
-  }
-  if (stagedFields.size === 0) {
-    toast(tr("toast.editor.nothingToStage"));
-    return;
-  }
-  let changed = 0;
-  for (const path of paths) {
-    if (!edits.has(path)) edits.set(path, new Map());
-    const fields = edits.get(path);
-    for (const [key, value] of stagedFields) {
-      // Skip no-ops so the preview stays honest.
-      const track = trackAt(path);
-      const onDisk = (track && track.tags[key]) || "";
-      if (value === onDisk && !fields.has(key)) continue;
-      fields.set(key, value);
-      changed += 1;
-    }
-    if (fields.size === 0) edits.delete(path);
-  }
-  // Same as the import path (#186): the diff render that `previewEdits` triggers
-  // replaces this one outright.
-  const fieldCount = stagedFields.size;
-  refreshFieldEditor({ resetDraft: true });
+  // Compatibility entry point for tools that formerly staged the Editor.
+  liveInputChanged();
   await hooks.previewEdits();
-  toast(
-    changed
-      ? tr("toast.editor.staged", {
-          fields: tn("unit.field", fieldCount),
-          files: tn("unit.file", paths.length),
-        })
-      : tr("toast.nothingChanged")
-  );
 }
 
 export {

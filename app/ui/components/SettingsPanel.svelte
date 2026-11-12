@@ -59,11 +59,7 @@
               </div>
             </div>
             <p class="settings-hint" data-i18n="settings.accentHint">Colours buttons, selections, links and the focus ring. Text on the accent stays readable. Confirmation green and error red do not change.</p>
-            <div class="settings-row">
-              <label for="set-checkbox-col" data-i18n="settings.checkboxCol">Selection checkbox column</label>
-              <NativeCheckbox id="set-checkbox-col" toggle />
-            </div>
-            <p class="settings-hint" data-i18n="settings.checkboxColHint">Shows a checkbox column in the file table. Off by default. Click a row to select, or Cmd/Shift-click for a range or to toggle.</p>
+            <div hidden><NativeCheckbox id="set-checkbox-col" toggle /></div>
             <div class="settings-row">
               <label for="set-check-updates" data-i18n="settings.checkUpdates">Check for updates</label>
               <div class="settings-inline">
@@ -203,7 +199,7 @@
               </NativeSelect>
             </div>
             <p class="settings-hint" data-i18n="settings.bpmRangeHint">Detected tempo is halved or doubled to fall inside this range. For example, a track at 174 BPM may be stored as 87; with 70-140 selected, the detected value matches it.</p>
-
+          
           </div>
 
           <div class="settings-group" data-icon="i-import" data-reset-group="import">

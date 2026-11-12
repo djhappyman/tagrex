@@ -202,6 +202,7 @@ export const ru = {
   "editor.coverArt": "Обложка",
   "editor.clearTags": "Очистить теги",
   "editor.clearTagsTitle": "Стереть все текстовые теги выбранных файлов и начать с чистого листа (обложка и DJ-метки сохраняются). Обратимо отменой.",
+  "editor.livePreview": "Изменения сразу видны в предпросмотре",
   "editor.stageFields": "Подготовить правки полей",
   "fromName.heading": "Теги из имени файла",
   "fromName.hintSummary": "Как читается маска",
@@ -544,6 +545,7 @@ export const ru = {
   "cover.frontCover": "Лицевая обложка",
   "cover.sharedAcross": "общая для всех ({files})",
   "cover.replace": "Заменить…",
+  "cover.exportSaved": "Экспортировать сохранённую обложку",
   "cover.export": "Выгрузить",
   "cover.multiple": "Разные обложки",
   "cover.withCover": "{with_cover} из {n} с обложкой",
@@ -1212,4 +1214,7 @@ export const ru = {
   "artwork.chosen": "Выбрана обложка {number}",
   "apply.checking": "Проверка файлов…",
   "workspace.transformations": "Преобразования",
+  "session.unavailable": "Не удалось открыть {folder}. Подключите папку и повторите попытку выше или откройте другую.",
+  "session.slow": "Открытие {folder} занимает слишком долго. Повторите попытку выше или откройте другую папку. Предыдущее чтение может ещё выполняться.",
+  "session.interrupted": "Автовосстановление {folder} приостановлено. Повторите попытку выше или откройте другую папку.",
 };

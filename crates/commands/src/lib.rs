@@ -1098,6 +1098,13 @@ pub struct TagEditDto {
     pub value: Option<String>,
 }
 
+/// An import artwork candidate and the files whose pending import owns it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LiveCoverAssignmentDto {
+    pub cover: CoverArtDto,
+    pub paths: Vec<String>,
+}
+
 /// Result of exporting embedded covers to disk: the image files written, and
 /// the audio files skipped because they carried no embedded cover.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -3898,6 +3905,265 @@ impl App {
     pub fn preview_tag_edits(&self, edits: &[TagEditDto]) -> Result<PlanDto, AppError> {
         let _encoding_scope = cover_encoding::Scope::new();
         self.preview_tag_edits_with_cover(edits, None)
+    }
+
+    /// Compose the live Editor/import buffer, then transform its proposed values.
+    ///
+    /// Every request starts from cached, fingerprint-validated disk metadata, never
+    /// the preceding preview. `paths` is the explicit transformation scope; edits
+    /// outside it remain pending without receiving this scope's transformations.
+    /// A captured import cover applies only to `cover_paths`, including files
+    /// whose text tags already match. All effects remain an ordinary preview.
+    pub fn preview_live_edits(
+        &self,
+        edits: &[TagEditDto],
+        paths: &[PathBuf],
+        groups: &[ActionGroupDto],
+        cover: Option<&CoverArtDto>,
+        cover_paths: &[PathBuf],
+    ) -> Result<PlanDto, AppError> {
+        let covers = cover
+            .map(|cover| LiveCoverAssignmentDto {
+                cover: cover.clone(),
+                paths: cover_paths
+                    .iter()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect(),
+            })
+            .into_iter()
+            .collect::<Vec<_>>();
+        self.preview_live_edits_with_covers(edits, paths, groups, &covers)
+    }
+
+    /// The same composition with independent artwork candidates for disjoint
+    /// pending import scopes. Later assignments win for overlapping paths.
+    pub fn preview_live_edits_with_covers(
+        &self,
+        edits: &[TagEditDto],
+        paths: &[PathBuf],
+        groups: &[ActionGroupDto],
+        covers: &[LiveCoverAssignmentDto],
+    ) -> Result<PlanDto, AppError> {
+        self.preview_live_edits_with_base(edits, paths, groups, covers, None)
+    }
+
+    /// Manual artwork is the last artwork choice for each pending file. Its
+    /// pool is resolved independently before joining imported cover assets;
+    /// neither an asset index nor a stale `old` image crosses between pools.
+    pub fn preview_live_edits_with_base(
+        &self,
+        edits: &[TagEditDto],
+        paths: &[PathBuf],
+        groups: &[ActionGroupDto],
+        covers: &[LiveCoverAssignmentDto],
+        base_plan: Option<&PlanDto>,
+    ) -> Result<PlanDto, AppError> {
+        let _encoding_scope = cover_encoding::Scope::new();
+        let mut manual_covers = BTreeMap::new();
+        if let Some(base) = base_plan {
+            base.validate_cover_assets()?;
+            // Validation runs before decoding; each pooled payload is decoded
+            // once, then every assigned file shares the immutable bytes.
+            let decoded: Vec<std::sync::Arc<[u8]>> = base
+                .cover_assets
+                .iter()
+                .map(|data| {
+                    base64::engine::general_purpose::STANDARD
+                        .decode(data.as_bytes())
+                        .map(std::sync::Arc::from)
+                        .map_err(|_| {
+                            AppError::Io(std::io::Error::new(
+                                std::io::ErrorKind::InvalidInput,
+                                "invalid artwork data in plan",
+                            ))
+                        })
+                })
+                .collect::<Result<_, _>>()?;
+            let inline = InlineArtworkPool::default();
+            for change in &base.changes {
+                if let Some(cover) = &change.cover_change {
+                    // Keep explicit empty sets: they suppress an incoming
+                    // import even when the file itself has no artwork yet.
+                    manual_covers.insert(
+                        PathBuf::from(&change.path),
+                        base.resolve_covers(&cover.new, &decoded, &inline),
+                    );
+                }
+            }
+        }
+        let scope: HashSet<PathBuf> = if groups.is_empty() {
+            HashSet::new()
+        } else {
+            paths.iter().cloned().collect()
+        };
+        let mut by_path: BTreeMap<PathBuf, BTreeMap<String, Option<String>>> = BTreeMap::new();
+        for edit in edits {
+            by_path
+                .entry(PathBuf::from(&edit.path))
+                .or_default()
+                .insert(
+                    edit.field.clone(),
+                    edit.value.clone().filter(|value| !value.is_empty()),
+                );
+        }
+        // No-op fields seed the full transformation scope. Without them a
+        // preset could only clean the few fields the user happened to type.
+        if !groups.is_empty() {
+            for path in &scope {
+                by_path.entry(path.clone()).or_default();
+            }
+        }
+        for path in manual_covers.keys() {
+            by_path.entry(path.clone()).or_default();
+        }
+        let mode = self.import_cover.get();
+        let import_art: Vec<Option<CoverArt>> = covers
+            .iter()
+            .map(|assignment| match mode {
+                ImportCover::IfMissing | ImportCover::Always => cover_dto_to_art(&assignment.cover)
+                    .map(|art| {
+                        tagrex_core::cover::resize_cover(
+                            &art,
+                            self.cover_max_px.get(),
+                            self.cover_quality.get(),
+                        )
+                    }),
+                ImportCover::Never => None,
+            })
+            .collect();
+        let mut cover_by_path = HashMap::new();
+        for (index, assignment) in covers.iter().enumerate() {
+            if import_art[index].is_none() {
+                continue;
+            }
+            for path in &assignment.paths {
+                let path = PathBuf::from(path);
+                by_path.entry(path.clone()).or_default();
+                cover_by_path.insert(path, index);
+            }
+        }
+        let mut used_covers = HashSet::new();
+        let mut transformed = Vec::new();
+        let mut untouched = Vec::new();
+        let mut with_cover = 0;
+        for (path, requested) in by_path {
+            let track = self.read_cached(&path)?;
+            let in_scope = !groups.is_empty() && scope.contains(&path);
+            let mut fields: BTreeMap<String, FieldChangeDto> = if in_scope {
+                track
+                    .tags
+                    .iter()
+                    .map(|(field, value)| {
+                        let key = field.to_storage_key();
+                        (
+                            key.clone(),
+                            FieldChangeDto::new(key, Some(value.clone()), Some(value.clone())),
+                        )
+                    })
+                    .collect()
+            } else {
+                BTreeMap::new()
+            };
+            for (key, new) in requested {
+                let old = track.tags.get(&TagField::from_storage_key(&key)).cloned();
+                if in_scope || old != new {
+                    fields.insert(key.clone(), FieldChangeDto::new(key, old, new));
+                }
+            }
+            let cover_change = if let Some(new) = manual_covers.get(&path) {
+                // The current disk set supplies accurate staleness/Undo bytes.
+                // Compare only after choosing the explicit override, otherwise
+                // an empty-to-empty removal could let import artwork back in.
+                let old = TagEngine::read_covers(&path)?;
+                (old != *new).then(|| CoverChangeDto {
+                    old: cover_arts_to_dto(&old),
+                    new: cover_arts_to_dto(new),
+                })
+            } else {
+                match cover_by_path.get(&path) {
+                    Some(index) => {
+                        let change = import_cover_change(
+                            &path,
+                            import_art[*index]
+                                .as_ref()
+                                .expect("assigned artwork was decoded"),
+                            mode,
+                        )?;
+                        if change.is_some() {
+                            used_covers.insert(*index);
+                        }
+                        change
+                    }
+                    None => None,
+                }
+            };
+            with_cover += usize::from(cover_change.is_some());
+            let change = FileChangeDto {
+                path: path.to_string_lossy().into_owned(),
+                rename_to: None,
+                tag_changes: fields.into_values().collect(),
+                cover_change,
+                sidecar_renames: Vec::new(),
+                block_changes: Vec::new(),
+                copy: false,
+                rename_root: None,
+                creates_folder: false,
+                folder_extras: Vec::new(),
+            };
+            if in_scope {
+                transformed.push(change);
+            } else {
+                untouched.push(change);
+            }
+        }
+        let message = if with_cover > 0 {
+            PlanMessage::EditTagsWithCover { files: with_cover }
+        } else {
+            PlanMessage::EditTags
+        };
+        let notes = self.unshrunk_cover_notes(
+            used_covers
+                .iter()
+                .filter_map(|index| import_art[*index].as_ref()),
+        );
+        if groups.is_empty() {
+            return Ok(self.plan(message, notes, untouched, false));
+        }
+        // Do not run the seeded values through plan() first: that would remove
+        // locked requested edits before the final lock accounting and settle
+        // number pairs before transformations have produced their final values.
+        let seed = PlanDto {
+            cover_assets: Vec::new(),
+            description: message.english(),
+            message: Some(MessageDto::from(&message)),
+            notes: Vec::new(),
+            changes: transformed,
+            prune_empty_dirs: false,
+            locked_skipped: Vec::new(),
+            unrendered: Vec::new(),
+        };
+        let cleaned = self.preview_transform_over_plan(&seed, groups)?;
+        untouched.extend(cleaned.changes);
+        let mut plan =
+            self.plan_with_assets(message, notes, untouched, false, cleaned.cover_assets);
+        // The transformed and untouched partitions are disjoint paths, so their
+        // field-lock counts add without reporting one file twice.
+        for skip in cleaned.locked_skipped {
+            if let Some(existing) = plan
+                .locked_skipped
+                .iter_mut()
+                .find(|item| item.field == skip.field)
+            {
+                existing.files += skip.files;
+            } else {
+                plan.locked_skipped.push(skip);
+            }
+        }
+        plan.locked_skipped
+            .sort_by(|a, b| b.files.cmp(&a.files).then_with(|| a.field.cmp(&b.field)));
+        plan.notes.push(MessageDto::from(&PlanMessage::CleanedUp));
+        plan.description = cleaned_up_description(&plan.description);
+        Ok(plan)
     }
 
     /// The same, plus the release cover an online import brought with it (#207).
@@ -7580,16 +7846,12 @@ mod tests {
         use tagrex_core::journal::{AppliedBatch, UndoJournal};
         let db = dir.0.join("capacity.sqlite");
         let mut journal = SqliteJournal::open(&db).unwrap();
-        let mut journal_plan = native.clone();
-        // Inline compatibility deliberately stores one BLOB per snapshot.
-        // Bound this storage portion; the preview/clone portion still uses 1000 files.
-        journal_plan.changes.truncate(4);
         let batch = AppliedBatch {
             id: BatchId(0),
             description: "Capacity probe".into(),
             message: None,
             applied_at: 0,
-            plan: journal_plan,
+            plan: native.clone(),
             created_dirs: Vec::new(),
             removed_dirs: Vec::new(),
             allowed_roots: vec![dir.0.clone()],
@@ -7610,7 +7872,7 @@ mod tests {
             );
         }
         let journal_bytes = std::fs::metadata(&db).unwrap().len();
-        assert!((8 * 1024 * 1024..12 * 1024 * 1024).contains(&journal_bytes));
+        assert!(journal_bytes < 8 * 1024 * 1024);
         let after = high_water_kib();
         if let (Some(before), Some(after)) = (before, after) {
             assert!(
@@ -7620,7 +7882,7 @@ mod tests {
         }
         println!(
             "ARTWORK_MEMORY {}",
-            serde_json::json!({"files":1000,"image_bytes":2097152,"wire_bytes":wire.len(),"unique_native_payloads":1,"unique_loaded_payloads":1,"plan_clones":2,"journal_files":4,"journal_bytes":journal_bytes,"peak_before_kib":before,"peak_after_kib":after})
+            serde_json::json!({"files":1000,"image_bytes":2097152,"wire_bytes":wire.len(),"unique_native_payloads":1,"unique_loaded_payloads":1,"plan_clones":2,"journal_bytes":journal_bytes,"peak_before_kib":before,"peak_after_kib":after})
         );
     }
 
@@ -7884,6 +8146,630 @@ mod tests {
                 .ends_with("Autechre; Gescom - Gantz Graf.flac"),
             "got {:?}",
             plan.changes[0].rename_to
+        );
+    }
+
+    fn live_field<'a>(plan: &'a PlanDto, path: &Path, field: &str) -> Option<&'a FieldChangeDto> {
+        plan.changes
+            .iter()
+            .find(|change| change.path == path.to_string_lossy())
+            .and_then(|change| {
+                change
+                    .tag_changes
+                    .iter()
+                    .find(|change| change.field == field)
+            })
+    }
+
+    #[test]
+    fn live_preview_edits_then_transforms_all_scoped_fields_and_keeps_other_pending_values() {
+        let dir = TempDir::new("live-order");
+        let edited = dir.tagged_flac("one.flac", "Disk Artist", "first_title");
+        let untouched = dir.tagged_flac("two.flac", "Second Artist", "second_title");
+        let outside = dir.tagged_flac("three.flac", "Third Artist", "third_title");
+        let app = open_app(&dir);
+        let edits = [
+            TagEditDto {
+                path: edited.to_string_lossy().into_owned(),
+                field: "artist".into(),
+                value: Some("editor_artist".into()),
+            },
+            TagEditDto {
+                path: outside.to_string_lossy().into_owned(),
+                field: "artist".into(),
+                value: Some("outside_artist".into()),
+            },
+        ];
+        let groups = [
+            ActionGroupDto {
+                name: "spaces".into(),
+                scope: "tags".into(),
+                rules: vec![replace_rule("_", " ")],
+                note: String::new(),
+            },
+            ActionGroupDto {
+                name: "upper".into(),
+                scope: "artist".into(),
+                rules: vec![case_rule("upper")],
+                note: String::new(),
+            },
+        ];
+        let plan = app
+            .preview_live_edits(
+                &edits,
+                &[edited.clone(), untouched.clone()],
+                &groups,
+                None,
+                &[],
+            )
+            .unwrap();
+        let artist = live_field(&plan, &edited, "artist").unwrap();
+        assert_eq!(artist.old.as_deref(), Some("Disk Artist"));
+        assert_eq!(artist.new.as_deref(), Some("EDITOR ARTIST"));
+        assert_eq!(
+            live_field(&plan, &edited, "title").unwrap().new.as_deref(),
+            Some("first title")
+        );
+        assert_eq!(
+            live_field(&plan, &untouched, "title")
+                .unwrap()
+                .new
+                .as_deref(),
+            Some("second title")
+        );
+        assert_eq!(
+            live_field(&plan, &outside, "artist")
+                .unwrap()
+                .new
+                .as_deref(),
+            Some("outside_artist")
+        );
+        assert!(live_field(&plan, &outside, "title").is_none());
+        assert_eq!(
+            TagEngine::read(&edited)
+                .unwrap()
+                .tags
+                .get(&TagField::Artist)
+                .map(String::as_str),
+            Some("Disk Artist")
+        );
+    }
+
+    #[test]
+    fn live_preview_repeated_requests_do_not_compound_and_unchanged_edits_still_transform() {
+        let dir = TempDir::new("live-repeat");
+        let path = dir.tagged_flac("one.flac", "a", "Title");
+        let app = open_app(&dir);
+        let edit = TagEditDto {
+            path: path.to_string_lossy().into_owned(),
+            field: "artist".into(),
+            value: Some("a".into()),
+        };
+        let group = ActionGroupDto {
+            name: "expand".into(),
+            scope: "artist".into(),
+            rules: vec![replace_rule("a", "aa")],
+            note: String::new(),
+        };
+        let preview = || {
+            app.preview_live_edits(
+                std::slice::from_ref(&edit),
+                std::slice::from_ref(&path),
+                std::slice::from_ref(&group),
+                None,
+                &[],
+            )
+            .unwrap()
+        };
+        let first = preview();
+        assert_eq!(first, preview());
+        assert_eq!(
+            live_field(&first, &path, "artist").unwrap().new.as_deref(),
+            Some("aa")
+        );
+        let plain = app
+            .preview_live_edits(&[edit], std::slice::from_ref(&path), &[], None, &[])
+            .unwrap();
+        assert!(plain.changes.is_empty());
+    }
+
+    #[test]
+    fn live_preview_retains_invalid_markers_and_filters_locked_values_once() {
+        let dir = TempDir::new("live-validation");
+        let path = dir.tagged_flac("one.flac", "Old", "Title");
+        let app = open_app(&dir);
+        app.set_locked_fields(&["artist".into()]);
+        let edits = [
+            TagEditDto {
+                path: path.to_string_lossy().into_owned(),
+                field: "artist".into(),
+                value: Some("requested".into()),
+            },
+            TagEditDto {
+                path: path.to_string_lossy().into_owned(),
+                field: "year".into(),
+                value: Some("invalid-year".into()),
+            },
+            TagEditDto {
+                path: path.to_string_lossy().into_owned(),
+                field: "title".into(),
+                value: Some("Requested Title".into()),
+            },
+        ];
+        let group = ActionGroupDto {
+            name: "upper".into(),
+            scope: "tags".into(),
+            rules: vec![case_rule("upper")],
+            note: String::new(),
+        };
+        let plan = app
+            .preview_live_edits(&edits, std::slice::from_ref(&path), &[group], None, &[])
+            .unwrap();
+        assert!(live_field(&plan, &path, "year").unwrap().invalid);
+        assert!(live_field(&plan, &path, "artist").is_none());
+        assert_eq!(
+            plan.locked_skipped
+                .iter()
+                .find(|skip| skip.field == "artist")
+                .unwrap()
+                .files,
+            1
+        );
+        assert_eq!(
+            live_field(&plan, &path, "title").unwrap().new.as_deref(),
+            Some("REQUESTED TITLE")
+        );
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Title)
+                .map(String::as_str),
+            Some("Title")
+        );
+    }
+
+    #[test]
+    fn live_preview_artwork_only_import_uses_its_captured_scope_and_cover_policy() {
+        let dir = TempDir::new("live-cover");
+        let first = dir.tagged_flac("one.flac", "Artist", "Title");
+        let second = dir.tagged_flac("two.flac", "Artist", "Other");
+        let app = open_app(&dir);
+        let cover = cover_art_to_dto(&CoverArt {
+            mime: "image/png".into(),
+            data: vec![0x89, 0x50, 1].into(),
+            ..CoverArt::default()
+        });
+        let paths = [first.clone(), second.clone()];
+        let preview = || {
+            app.preview_live_edits(&[], &paths, &[], Some(&cover), std::slice::from_ref(&first))
+                .unwrap()
+        };
+        let plan = preview();
+        assert_eq!(plan.changes.len(), 1);
+        assert_eq!(plan.changes[0].path, first.to_string_lossy());
+        assert!(plan.changes[0].cover_change.is_some());
+        assert!(plan.changes[0].tag_changes.is_empty());
+        app.import_cover.set(ImportCover::Never);
+        assert!(preview().changes.is_empty());
+        app.import_cover.set(ImportCover::IfMissing);
+        TagEngine::write_covers(
+            &first,
+            &[CoverArt {
+                mime: "image/png".into(),
+                data: vec![2].into(),
+                ..CoverArt::default()
+            }],
+        )
+        .unwrap();
+        assert!(preview().changes.is_empty());
+        let group = ActionGroupDto {
+            name: "upper".into(),
+            scope: "title".into(),
+            rules: vec![case_rule("upper")],
+            note: String::new(),
+        };
+        app.import_cover.set(ImportCover::Always);
+        let transformed = app
+            .preview_live_edits(
+                &[],
+                &paths,
+                &[group],
+                Some(&cover),
+                std::slice::from_ref(&first),
+            )
+            .unwrap();
+        assert_eq!(
+            transformed
+                .changes
+                .iter()
+                .filter(|change| change.cover_change.is_some())
+                .count(),
+            1
+        );
+        assert_eq!(
+            live_field(&transformed, &second, "title")
+                .unwrap()
+                .new
+                .as_deref(),
+            Some("OTHER")
+        );
+    }
+
+    #[test]
+    fn live_preview_retains_disjoint_import_covers_and_latest_overlap_wins() {
+        let dir = TempDir::new("live-multiple-covers");
+        let first = dir.tagged_flac("one.flac", "Artist", "Title");
+        let second = dir.tagged_flac("two.flac", "Artist", "Other");
+        let mut app = open_app(&dir);
+        app.import_cover.set(ImportCover::Always);
+        let image = |byte| CoverArt {
+            mime: "image/png".into(),
+            data: vec![0x89, 0x50, byte].into(),
+            ..CoverArt::default()
+        };
+        let assignments = vec![
+            LiveCoverAssignmentDto {
+                cover: cover_art_to_dto(&image(1)),
+                paths: vec![
+                    first.to_string_lossy().into_owned(),
+                    second.to_string_lossy().into_owned(),
+                ],
+            },
+            LiveCoverAssignmentDto {
+                cover: cover_art_to_dto(&image(2)),
+                paths: vec![second.to_string_lossy().into_owned()],
+            },
+        ];
+        let group = ActionGroupDto {
+            name: "upper".into(),
+            scope: "title".into(),
+            rules: vec![case_rule("upper")],
+            note: String::new(),
+        };
+        let paths = vec![first.clone(), second.clone()];
+        let plan = app
+            .preview_live_edits_with_covers(&[], &paths, &[group], &assignments)
+            .unwrap();
+        assert_eq!(plan.changes.len(), 2);
+        assert_eq!(
+            plan.cover_assets.len(),
+            2,
+            "each distinct image is encoded once"
+        );
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(TagEngine::read_covers(&first).unwrap(), vec![image(1)]);
+        assert_eq!(TagEngine::read_covers(&second).unwrap(), vec![image(2)]);
+        app.undo(batch.id).unwrap();
+        assert!(TagEngine::read_covers(&first).unwrap().is_empty());
+        assert!(TagEngine::read_covers(&second).unwrap().is_empty());
+    }
+
+    #[test]
+    fn live_preview_manual_cover_replaces_import_and_joins_transformed_tags_in_one_undo() {
+        let dir = TempDir::new("live-manual-cover");
+        let path = dir.tagged_flac("one.flac", "Artist", "Old Title");
+        let art = |byte, kind, description: &str| CoverArt {
+            mime: "image/png".into(),
+            data: vec![0x89, 0x50, byte].into(),
+            kind,
+            description: description.into(),
+        };
+        let original = vec![
+            art(1, CoverKind::Front, "Original front"),
+            art(2, CoverKind::Back, "Back sleeve"),
+        ];
+        TagEngine::write_covers(&path, &original).unwrap();
+        let mut app = open_app(&dir);
+        app.import_cover.set(ImportCover::Always);
+        let manual = art(9, CoverKind::Front, "Manual front");
+        let base = app
+            .preview_cover_embed(std::slice::from_ref(&path), &cover_art_to_dto(&manual))
+            .unwrap();
+        let incoming = vec![LiveCoverAssignmentDto {
+            cover: cover_art_to_dto(&art(7, CoverKind::Front, "Imported front")),
+            paths: vec![path.to_string_lossy().into_owned()],
+        }];
+        let edits = [TagEditDto {
+            path: path.to_string_lossy().into_owned(),
+            field: "title".into(),
+            value: Some("editor_title".into()),
+        }];
+        let groups = [ActionGroupDto {
+            name: "spaces".into(),
+            scope: "title".into(),
+            rules: vec![replace_rule("_", " ")],
+            note: String::new(),
+        }];
+        let plan = app
+            .preview_live_edits_with_base(
+                &edits,
+                std::slice::from_ref(&path),
+                &groups,
+                &incoming,
+                Some(&base),
+            )
+            .unwrap();
+        assert_eq!(
+            live_field(&plan, &path, "title").unwrap().new.as_deref(),
+            Some("editor title")
+        );
+        let native = plan.to_change_plan();
+        assert_eq!(
+            native.changes[0].cover_change.as_ref().unwrap().old,
+            original
+        );
+        assert_eq!(
+            native.changes[0].cover_change.as_ref().unwrap().new,
+            vec![manual.clone(), original[1].clone()]
+        );
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(
+            TagEngine::read_covers(&path).unwrap(),
+            vec![manual, original[1].clone()]
+        );
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Title)
+                .map(String::as_str),
+            Some("editor title")
+        );
+        app.undo(batch.id).unwrap();
+        assert_eq!(TagEngine::read_covers(&path).unwrap(), original);
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Title)
+                .map(String::as_str),
+            Some("Old Title")
+        );
+    }
+
+    #[test]
+    fn live_preview_manual_cover_removal_ignores_import_policy_and_uses_fresh_undo_images() {
+        let dir = TempDir::new("live-manual-remove");
+        let path = dir.tagged_flac("one.flac", "Artist", "Old Title");
+        let art = |byte| CoverArt {
+            mime: "image/png".into(),
+            data: vec![0x89, 0x50, byte].into(),
+            kind: CoverKind::Back,
+            description: "Keep exact back artwork".into(),
+        };
+        TagEngine::write_covers(&path, &[art(1)]).unwrap();
+        let mut app = open_app(&dir);
+        let base = app
+            .preview_cover_remove(std::slice::from_ref(&path))
+            .unwrap();
+        // A cached manual candidate must not make Undo restore stale old bytes.
+        TagEngine::write_covers(&path, &[art(2)]).unwrap();
+        app.import_cover.set(ImportCover::Never);
+        let edits = [TagEditDto {
+            path: path.to_string_lossy().into_owned(),
+            field: "title".into(),
+            value: Some("new_title".into()),
+        }];
+        let groups = [ActionGroupDto {
+            name: "spaces".into(),
+            scope: "title".into(),
+            rules: vec![replace_rule("_", " ")],
+            note: String::new(),
+        }];
+        let plan = app
+            .preview_live_edits_with_base(
+                &edits,
+                std::slice::from_ref(&path),
+                &groups,
+                &[],
+                Some(&base),
+            )
+            .unwrap();
+        let native = plan.to_change_plan();
+        assert_eq!(
+            native.changes[0].cover_change.as_ref().unwrap().old,
+            vec![art(2)]
+        );
+        assert!(native.changes[0]
+            .cover_change
+            .as_ref()
+            .unwrap()
+            .new
+            .is_empty());
+        let batch = app.apply(&plan).unwrap();
+        assert!(TagEngine::read_covers(&path).unwrap().is_empty());
+        app.undo(batch.id).unwrap();
+        assert_eq!(TagEngine::read_covers(&path).unwrap(), vec![art(2)]);
+    }
+
+    #[test]
+    fn live_preview_empty_manual_cover_override_suppresses_pending_import_before_noop_filter() {
+        let dir = TempDir::new("live-suppress-import");
+        let path = dir.tagged_flac("one.flac", "Artist", "Old Title");
+        let mut app = open_app(&dir);
+        app.import_cover.set(ImportCover::Always);
+        let mut base = app
+            .preview_cover_remove(std::slice::from_ref(&path))
+            .unwrap();
+        assert!(base.changes.is_empty());
+        base.changes.push(FileChangeDto {
+            path: path.to_string_lossy().into_owned(),
+            rename_to: None,
+            copy: false,
+            tag_changes: Vec::new(),
+            cover_change: Some(CoverChangeDto {
+                old: Vec::new(),
+                new: Vec::new(),
+            }),
+            sidecar_renames: Vec::new(),
+            block_changes: Vec::new(),
+            rename_root: None,
+            creates_folder: false,
+            folder_extras: Vec::new(),
+        });
+        let incoming = [LiveCoverAssignmentDto {
+            cover: cover_art_to_dto(&CoverArt {
+                mime: "image/png".into(),
+                data: vec![9].into(),
+                ..CoverArt::default()
+            }),
+            paths: vec![path.to_string_lossy().into_owned()],
+        }];
+        let edits = [TagEditDto {
+            path: path.to_string_lossy().into_owned(),
+            field: "title".into(),
+            value: Some("new_title".into()),
+        }];
+        let groups = [ActionGroupDto {
+            name: "spaces".into(),
+            scope: "title".into(),
+            rules: vec![replace_rule("_", " ")],
+            note: String::new(),
+        }];
+        let plan = app
+            .preview_live_edits_with_base(
+                &edits,
+                std::slice::from_ref(&path),
+                &groups,
+                &incoming,
+                Some(&base),
+            )
+            .unwrap();
+        assert_eq!(plan.changes.len(), 1);
+        assert!(plan.changes[0].cover_change.is_none());
+        assert!(plan.cover_assets.is_empty());
+        assert_eq!(
+            live_field(&plan, &path, "title").unwrap().new.as_deref(),
+            Some("new title")
+        );
+        app.apply(&plan).unwrap();
+        assert!(TagEngine::read_covers(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn live_preview_manual_and_import_cover_pools_do_not_alias_their_zero_indices() {
+        let dir = TempDir::new("live-independent-cover-pools");
+        let first = dir.tagged_flac("one.flac", "Artist", "One");
+        let second = dir.tagged_flac("two.flac", "Artist", "Two");
+        let mut app = open_app(&dir);
+        app.import_cover.set(ImportCover::Always);
+        let art = |byte| CoverArt {
+            mime: "image/png".into(),
+            data: vec![0x89, 0x50, byte].into(),
+            ..CoverArt::default()
+        };
+        let base = app
+            .preview_cover_embed(std::slice::from_ref(&first), &cover_art_to_dto(&art(1)))
+            .unwrap();
+        assert_eq!(
+            base.changes[0].cover_change.as_ref().unwrap().new[0].data_ref,
+            Some(0)
+        );
+        let imports = [LiveCoverAssignmentDto {
+            cover: cover_art_to_dto(&art(2)),
+            paths: vec![second.to_string_lossy().into_owned()],
+        }];
+        let paths = [first.clone(), second.clone()];
+        let plan = app
+            .preview_live_edits_with_base(&[], &paths, &[], &imports, Some(&base))
+            .unwrap();
+        assert_eq!(plan.cover_assets.len(), 2);
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(TagEngine::read_covers(&first).unwrap(), vec![art(1)]);
+        assert_eq!(TagEngine::read_covers(&second).unwrap(), vec![art(2)]);
+        app.undo(batch.id).unwrap();
+        assert!(TagEngine::read_covers(&first).unwrap().is_empty());
+        assert!(TagEngine::read_covers(&second).unwrap().is_empty());
+    }
+
+    #[test]
+    fn live_preview_manual_cover_pool_is_validated_before_combining_other_assets() {
+        let dir = TempDir::new("live-manual-pool");
+        let path = dir.tagged_flac("one.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        let image = cover_art_to_dto(&CoverArt {
+            mime: "image/png".into(),
+            data: vec![9].into(),
+            ..CoverArt::default()
+        });
+        let mut base = app
+            .preview_cover_embed(std::slice::from_ref(&path), &image)
+            .unwrap();
+        base.changes[0].cover_change.as_mut().unwrap().new[0].data_ref = Some(999);
+        let incoming = [LiveCoverAssignmentDto {
+            cover: image,
+            paths: vec![path.to_string_lossy().into_owned()],
+        }];
+        assert!(app
+            .preview_live_edits_with_base(
+                &[],
+                std::slice::from_ref(&path),
+                &[],
+                &incoming,
+                Some(&base)
+            )
+            .is_err());
+        assert!(TagEngine::read_covers(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn live_preview_apply_is_one_undo_batch_and_stale_files_are_rejected() {
+        let dir = TempDir::new("live-apply");
+        let path = dir.tagged_flac("one.flac", "Old Artist", "Old Title");
+        let mut app = open_app(&dir);
+        let edits = [TagEditDto {
+            path: path.to_string_lossy().into_owned(),
+            field: "title".into(),
+            value: Some("new_title".into()),
+        }];
+        let groups = [ActionGroupDto {
+            name: "spaces".into(),
+            scope: "title".into(),
+            rules: vec![replace_rule("_", " ")],
+            note: String::new(),
+        }];
+        let plan = app
+            .preview_live_edits(&edits, std::slice::from_ref(&path), &groups, None, &[])
+            .unwrap();
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Title)
+                .map(String::as_str),
+            Some("new title")
+        );
+        app.undo(batch.id).unwrap();
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Title)
+                .map(String::as_str),
+            Some("Old Title")
+        );
+        let mut external = TagEngine::read(&path).unwrap();
+        external
+            .tags
+            .insert(TagField::Title, "External Title".into());
+        TagEngine::write(&external).unwrap();
+        assert!(app.apply(&plan).is_err());
+        assert_eq!(
+            TagEngine::read(&path)
+                .unwrap()
+                .tags
+                .get(&TagField::Title)
+                .map(String::as_str),
+            Some("External Title")
+        );
+        let fresh = app
+            .preview_live_edits(&edits, std::slice::from_ref(&path), &groups, None, &[])
+            .unwrap();
+        assert_eq!(
+            live_field(&fresh, &path, "title").unwrap().old.as_deref(),
+            Some("External Title")
         );
     }
 

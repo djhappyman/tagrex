@@ -69,7 +69,8 @@ export function createPlanCodec() {
   let pooled = false;
   return {
     prepare(args) {
-      return pooled && args?.plan ? { ...args, plan: compactPlan(args.plan) } : args;
+      if (!pooled || (!args?.plan && !args?.basePlan)) return args;
+      return { ...args, ...(args.plan ? {plan:compactPlan(args.plan)} : {}), ...(args.basePlan ? {basePlan:compactPlan(args.basePlan)} : {}) };
     },
     accept(result) {
       const plan = Array.isArray(result?.changes) ? result : result?.plan;

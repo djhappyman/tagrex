@@ -697,10 +697,12 @@ fn a_healthy_or_unavailable_journal_is_never_set_aside() {
 }
 
 #[test]
-fn new_artwork_snapshots_remain_inline_and_share_memory_after_loading() {
-    use tagrex_core::model::{CoverArt, CoverKind, TagBlockContent, TagBlockKind};
-    use tagrex_core::plan::{BlockChange, CoverChange};
-    let dir = TempDir::new("inline-compatible");
+fn shared_image_snapshots_are_stored_once_and_legacy_inline_rows_still_load() {
+    use tagrex_core::model::{CoverArt, CoverKind};
+    use tagrex_core::plan::CoverChange;
+    let dir = TempDir::new("image-pool");
+    let a = dir.flac("a.flac");
+    let b = dir.flac("b.flac");
     let art = CoverArt {
         mime: "image/jpeg".into(),
         data: vec![7; 65536].into(),
@@ -708,105 +710,108 @@ fn new_artwork_snapshots_remain_inline_and_share_memory_after_loading() {
         description: "Sleeve".into(),
     };
     let plan = ChangePlan {
-        changes: [dir.flac("a.flac"), dir.flac("b.flac")]
+        changes: [a, b]
             .iter()
-            .map(|path| FileChange {
-                path: path.clone(),
+            .map(|p| FileChange {
+                path: p.clone(),
                 cover_change: Some(CoverChange {
-                    old: vec![],
+                    old: Vec::new(),
                     new: vec![art.clone()],
                 }),
-                ..Default::default()
+                ..FileChange::default()
             })
             .collect(),
-        ..Default::default()
+        ..ChangePlan::default()
     };
     let mut journal = SqliteJournal::open(&dir.db()).unwrap();
     let batch = Executor::apply(&plan, &mut journal, &roots(dir.path())).unwrap();
     drop(journal);
     let connection = rusqlite::Connection::open(dir.db()).unwrap();
-    // The exact stable-reader columns must hold real BLOBs, never sentinels or references.
-    let rows = connection
-        .prepare("SELECT kind, description, mime, data FROM cover_images ORDER BY id")
-        .unwrap()
-        .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Vec<u8>>(3)?,
-            ))
-        })
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
+    let (count, bytes): (i64, i64) = connection
+        .query_row(
+            "SELECT count(*), sum(length(data)) FROM journal_image_blobs",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
-    assert_eq!(rows.len(), 2);
-    for (kind, description, mime, bytes) in rows {
+    assert_eq!((count, bytes), (1, 65536));
+    // A reverted binary's original query must fail closed, never silently
+    // restore empty image bytes from a new pooled row.
+    assert!(connection
+        .query_row("SELECT data FROM cover_images LIMIT 1", [], |row| row
+            .get::<_, Vec<u8>>(0))
+        .is_err());
+    {
+        let mut reopened = SqliteJournal::open(&dir.db()).unwrap();
+        let loaded = reopened.batch(batch.id).unwrap().unwrap();
+        let bytes = &loaded.plan.changes[0].cover_change.as_ref().unwrap().new[0].data;
         assert_eq!(
-            (kind, description, mime),
-            ("back".into(), "Sleeve".into(), "image/jpeg".into())
+            bytes.as_ptr(),
+            loaded.plan.changes[1].cover_change.as_ref().unwrap().new[0]
+                .data
+                .as_ptr()
         );
-        assert_eq!(bytes.as_slice(), art.data.as_ref());
+        assert_eq!(
+            bytes.as_ptr(),
+            loaded.clone().plan.changes[0]
+                .cover_change
+                .as_ref()
+                .unwrap()
+                .new[0]
+                .data
+                .as_ptr()
+        );
+        let mut with_block = batch.clone();
+        with_block.plan.changes[0]
+            .block_changes
+            .push(tagrex_core::plan::BlockChange::removal(
+                tagrex_core::model::TagBlockKind::VorbisComments,
+                tagrex_core::model::TagBlockContent {
+                    covers: vec![art.clone()],
+                    ..Default::default()
+                },
+            ));
+        let id = reopened.record(&with_block).unwrap();
+        let cross_table = reopened.batch(id).unwrap().unwrap();
+        assert_eq!(
+            cross_table.plan.changes[0]
+                .cover_change
+                .as_ref()
+                .unwrap()
+                .new[0]
+                .data
+                .as_ptr(),
+            cross_table.plan.changes[0].block_changes[0]
+                .old
+                .as_ref()
+                .unwrap()
+                .covers[0]
+                .data
+                .as_ptr()
+        );
+        reopened.rollback(id).unwrap();
     }
+    // Simulate a pre-pool inline snapshot in the same migrated database.
+    connection.execute("UPDATE cover_images SET data = ?1, blob_id = NULL WHERE id = (SELECT min(id) FROM cover_images)",rusqlite::params![art.data]).unwrap();
+    drop(connection);
+    let mut journal = SqliteJournal::open(&dir.db()).unwrap();
     assert_eq!(
-        connection
-            .query_row(
-                "SELECT count(*) FROM sqlite_master WHERE name = 'journal_image_blobs'",
-                [],
-                |row| row.get::<_, i64>(0)
-            )
-            .unwrap(),
-        0
-    );
-    let mut reopened = SqliteJournal::open(&dir.db()).unwrap();
-    let loaded = reopened.batch(batch.id).unwrap().unwrap();
-    assert_eq!(
-        loaded.plan.changes[0].cover_change.as_ref().unwrap().new[0]
-            .data
-            .as_ptr(),
-        loaded.plan.changes[1].cover_change.as_ref().unwrap().new[0]
-            .data
-            .as_ptr()
-    );
-    let mut with_block = batch.clone();
-    with_block.plan.changes[0]
-        .block_changes
-        .push(BlockChange::removal(
-            TagBlockKind::VorbisComments,
-            TagBlockContent {
-                covers: vec![art.clone()],
-                ..Default::default()
-            },
-        ));
-    let block_id = reopened.record(&with_block).unwrap();
-    let stored: Vec<u8> = connection
-        .query_row("SELECT data FROM block_change_images LIMIT 1", [], |row| {
-            row.get(0)
-        })
-        .unwrap();
-    assert_eq!(stored.as_slice(), art.data.as_ref());
-    let cross_table = reopened.batch(block_id).unwrap().unwrap();
-    assert_eq!(
-        cross_table.plan.changes[0]
+        journal.batch(batch.id).unwrap().unwrap().plan.changes[0]
             .cover_change
             .as_ref()
             .unwrap()
-            .new[0]
-            .data
-            .as_ptr(),
-        cross_table.plan.changes[0].block_changes[0]
-            .old
-            .as_ref()
-            .unwrap()
-            .covers[0]
-            .data
-            .as_ptr()
+            .new,
+        [art]
     );
-    reopened.rollback(block_id).unwrap();
-    Executor::undo(&mut reopened, batch.id, &roots(dir.path())).unwrap();
-    for change in plan.changes {
-        assert!(TagEngine::read_covers(&change.path).unwrap().is_empty());
-    }
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+    let connection = rusqlite::Connection::open(dir.db()).unwrap();
+    assert_eq!(
+        connection
+            .query_row("SELECT count(*) FROM journal_image_blobs", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }
 
 #[test]
@@ -835,10 +840,13 @@ fn history_headers_never_hydrate_snapshot_tables() {
 }
 
 #[test]
-fn separate_batches_keep_exact_inline_artwork_until_their_own_undo() {
+fn image_pool_checks_bytes_on_hash_collision_and_keeps_other_batch_references() {
+    use std::hash::{Hash, Hasher};
     use tagrex_core::model::{CoverArt, CoverKind};
     use tagrex_core::plan::CoverChange;
-    let dir = TempDir::new("inline-batches");
+    let dir = TempDir::new("image-collision");
+    let a = dir.flac("a.flac");
+    let b = dir.flac("b.flac");
     let art = CoverArt {
         mime: "image/jpeg".into(),
         data: vec![7; 64].into(),
@@ -846,30 +854,28 @@ fn separate_batches_keep_exact_inline_artwork_until_their_own_undo() {
         description: "Back".into(),
     };
     let mut journal = SqliteJournal::open(&dir.db()).unwrap();
-    let make_plan = |path| ChangePlan {
+    let conn = rusqlite::Connection::open(dir.db()).unwrap();
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    art.data.hash(&mut hash);
+    // A deliberately colliding index candidate is not a matching image.
+    conn.execute(
+        "INSERT INTO journal_image_blobs (hash,size,data) VALUES (?1,?2,?3)",
+        rusqlite::params![hash.finish() as i64, 64, vec![9u8; 64]],
+    )
+    .unwrap();
+    let make_plan = |path: PathBuf| ChangePlan {
         changes: vec![FileChange {
             path,
             cover_change: Some(CoverChange {
-                old: vec![],
+                old: Vec::new(),
                 new: vec![art.clone()],
             }),
-            ..Default::default()
+            ..FileChange::default()
         }],
-        ..Default::default()
+        ..ChangePlan::default()
     };
-    let first = Executor::apply(
-        &make_plan(dir.flac("a.flac")),
-        &mut journal,
-        &roots(dir.path()),
-    )
-    .unwrap();
-    let second = Executor::apply(
-        &make_plan(dir.flac("b.flac")),
-        &mut journal,
-        &roots(dir.path()),
-    )
-    .unwrap();
-    Executor::undo(&mut journal, second.id, &roots(dir.path())).unwrap();
+    let first = Executor::apply(&make_plan(a), &mut journal, &roots(dir.path())).unwrap();
+    let second = Executor::apply(&make_plan(b), &mut journal, &roots(dir.path())).unwrap();
     assert_eq!(
         journal.batch(first.id).unwrap().unwrap().plan.changes[0]
             .cover_change
@@ -878,6 +884,25 @@ fn separate_batches_keep_exact_inline_artwork_until_their_own_undo() {
             .new,
         [art]
     );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM journal_image_blobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    Executor::undo(&mut journal, second.id, &roots(dir.path())).unwrap();
+    // One blob is still referenced; only the synthetic collision orphan went.
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM journal_image_blobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
     Executor::undo(&mut journal, first.id, &roots(dir.path())).unwrap();
-    assert!(journal.batches().unwrap().is_empty());
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM journal_image_blobs", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
 }

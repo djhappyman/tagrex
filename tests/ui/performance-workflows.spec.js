@@ -19,7 +19,7 @@ test.beforeEach(async ({ page }) => {
         // Only the served mock is instrumented. Clone its list response to model
         // native IPC ownership, so a write cannot mutate the frontend DTO early.
         source = source.replace(/(case([`"'])list_tracks\2:\s*return Promise\.resolve\()([\w$]+)\.tracks(\))/g, '$1structuredClone($3.tracks)$4');
-        source = source.replace(/case([`"'])(list_tracks|read_track|read_track_rows|preview_tag_edits|apply_plan|render_column|render_columns|probe_tags_from_names)\1:/g,
+        source = source.replace(/case([`"'])(list_tracks|read_track|read_track_rows|preview_tag_edits|preview_live_edits|apply_plan|render_column|render_columns|probe_tags_from_names)\1:/g,
           (match, _quote, command, offset) => {
             let trace = `window.perfCalls['${command}']=(window.perfCalls['${command}']||0)+1;`;
             if (command === 'render_column') {
@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
             if (command === 'render_columns') {
               const parameter = source.slice(offset, offset + 700).match(/([\w$]+)\.patterns/);
               if (!parameter) throw new Error('Could not instrument render_columns mock arguments');
-              trace += `window.perfBatchColumns.push(structuredClone(${parameter[1]}));window.perfColumnBatchDepth=true;`;
+              trace += `window.perfBatchColumns.push(structuredClone(${parameter[1]}));window.perfColumnPaths.push([...${parameter[1]}.paths]);window.perfColumnBatchDepth=true;`;
             }
             return match + trace;
           });
@@ -84,17 +84,22 @@ async function edit(page, field, value) {
   await page.keyboard.press('Control+a');
   await page.keyboard.insertText(value);
   await page.keyboard.press('Enter');
-  await expect.poll(() => page.evaluate(() => window.perfCalls.read_track || 0)).toBe(1);
+  await expect(page.locator('#diff-apply')).toBeEnabled();
+  expect(await page.evaluate(() => window.perfCalls.apply_plan || 0)).toBe(0);
+  expect(await page.evaluate(() => window.perfCalls.read_track_rows || 0)).toBe(0);
+  await page.evaluate(() => { window.perfPaints = 0; });
+  await page.locator('#diff-apply').click();
+  await expect.poll(() => page.evaluate(() => window.perfCalls.read_track_rows || 0)).toBe(1);
   await expect(cell(page, field)).toHaveText(value);
-  await expect.poll(() => page.evaluate(() => window.perfPaints)).toBe(1);
 }
 
-test('one committed cell rereads one DTO and paints once without relisting the library', async ({ page }) => {
+test('one explicitly applied cell refreshes its DTO without relisting the library', async ({ page }) => {
   await open(page);
   const original = await page.evaluate(() => window.tagrex.tracks.slice(1).map(track => structuredClone(track)));
   await edit(page, 'title', 'A single-file edit');
-  expect(await page.evaluate(() => window.perfCalls)).toMatchObject({ preview_tag_edits: 1, apply_plan: 1, read_track: 1 });
+  expect(await page.evaluate(() => window.perfCalls)).toMatchObject({ apply_plan: 1, read_track_rows: 1 });
   expect(await page.evaluate(() => window.perfCalls.list_tracks || 0)).toBe(0);
+  expect(await page.evaluate(() => window.perfCalls.preview_live_edits || 0)).toBeGreaterThan(0);
   expect(await page.evaluate(() => window.tagrex.tracks.slice(1))).toEqual(original);
   await expect(page.locator('#undo')).toBeEnabled();
   await expect(page.locator('#diff-actionbar')).toBeHidden();
@@ -110,14 +115,14 @@ test('affected custom columns refresh only the edited path and preserve other ca
   await expect(customCell(page)).toHaveText('The X Factor — Fresh title');
   await expect(customCell(page, 1)).toHaveText('Wish Mountain — Radio');
   await expect(customCell(page, 0, 1)).toHaveText('La Bush');
-  expect(await page.evaluate(() => window.perfCalls.render_column)).toBe(1);
+  expect(await page.evaluate(() => window.perfCalls.render_columns)).toBe(1);
   expect(await page.evaluate(() => window.perfColumnPaths)).toEqual([['/music/01 - the x factor - desert rain.mp3']]);
 });
 
 test('unrelated custom masks do not refresh after a title edit', async ({ page }) => {
   await open(page, [{ id: 'album', name: 'Album only', pattern: '%album%', align: 'left' }]);
   await edit(page, 'title', 'Unrelated field');
-  expect(await page.evaluate(() => window.perfCalls.render_column || 0)).toBe(0);
+  expect(await page.evaluate(() => (window.perfCalls.render_column || 0)+(window.perfCalls.render_columns || 0))).toBe(0);
   await expect(customCell(page)).toHaveText('La Bush');
 });
 
@@ -205,8 +210,8 @@ test('Apply shows a truthful preparation message until write progress is availab
   });
   await page.locator('.subtab[data-subtab="editor"]').click();
   await page.locator('#fields-body input[data-key="title"]').fill('Prepared edit');
-  await page.locator('#fields-apply').click();
   await expect(page.locator('#diff-actionbar')).toBeVisible();
+  await expect(page.locator('#diff-apply')).toBeEnabled();
   await page.evaluate(() => { window.perfPauseApply = true; });
   await page.locator('#diff-apply').click();
   await expect(page.locator('#ab-file')).toHaveText('Checking files…');

@@ -197,11 +197,11 @@ export function initSpreadsheet(options) {
     refresh();
     if (giveFocus) focus();
   }
-  function clear() {
+  function clear(giveFocus = true, paint = true) {
     const path = active?.path;
     active = anchor = null;
-    refresh();
-    if (path) options.focusRow(path);
+    if (paint) refresh();
+    if (path && giveFocus) options.focusRow(path);
   }
   function refresh() {
     const paths = rows(), keys = columns();
@@ -278,7 +278,7 @@ export function initSpreadsheet(options) {
     if (!r && !reviewing && (!scrollRefresh || changed || !lastSummary)) lastSummary = options.selectionSummary();
     const snapshot = {
       label: reviewing ? 'Review the staged changes, then Apply.' : r ? `${options.label(active.key)} · ${count === 1 ? '1 cell' : `${r.paths.length} × ${r.keys.length} cells`}` : lastSummary,
-      detail: reviewing ? 'Only ticked files will be applied.' : readonlyReason || (r ? (count === 1 ? 'F2 edits · Shift + arrows select' : 'Copy, paste, or fill down') : 'Click a cell to start'),
+      detail: reviewing ? 'Only highlighted files will be applied.' : readonlyReason || (r ? (count === 1 ? 'F2 edits · Shift + arrows select' : 'Copy, paste, or fill down') : 'Click a cell to start'),
       active: !!r, editable, canFill: editable && r.paths.length > 1,
       busy, reviewing,
     };
@@ -418,7 +418,8 @@ export function initSpreadsheet(options) {
   body.addEventListener('click', (event) => {
     if (options.isReviewing() || event.target.isContentEditable) return;
     const point = pointOf(event.target);
-    if (point) choose(point, event.shiftKey);
+    // Mouse modifiers belong to track selection. Cell rectangles use Shift+arrows.
+    if (point && !event.ctrlKey && !event.metaKey && !event.shiftKey) choose(point, false);
   });
   body.addEventListener('contextmenu', (event) => {
     const point = pointOf(event.target);
@@ -431,7 +432,7 @@ export function initSpreadsheet(options) {
     toolbar.openContext(event.clientX, event.clientY);
   });
   table.addEventListener('keydown', (event) => {
-    if (options.isReviewing()) return;
+    if (options.isReviewing() || event.target.closest('tr.group-head')) return;
     if (event.target.isContentEditable) {
       if (event.key !== 'Tab') return; // suggestions/Enter/Escape retain their existing contract
       event.stopImmediatePropagation();
@@ -509,5 +510,5 @@ export function initSpreadsheet(options) {
   new MutationObserver(refresh).observe(wrap, { attributes: true, attributeFilter: ['hidden'] });
   new MutationObserver(refresh).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   refresh();
-  return { refresh, beforePaint, focusActive: focus };
+  return { refresh, beforePaint, focusActive: focus, clearRange: ({refresh = true} = {}) => clear(false, refresh) };
 }

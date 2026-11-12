@@ -9,14 +9,15 @@
 #tracks td.sheet-range { background-color: color-mix(in srgb, var(--accent) 15%, var(--bg)); }
 #tracks tr.selected td.sheet-range { background-color: color-mix(in srgb, var(--accent) 29%, var(--bg)); }
 #tracks td.dirty::after { content: ''; position: absolute; top: 2px; right: 2px; width: 4px; height: 4px; border-radius: 50%; background: var(--accent); pointer-events: none; }
-/* Keep the filename as a visual anchor while metadata scrolls horizontally. */
+/* Only the small selection/artwork bands stay pinned horizontally. */
 #tracks th.sel, #tracks td.sel { position: sticky; left: 0; background-color: var(--bg); z-index: 5; }
 #tracks th.sel { background-color: var(--panel); z-index: 9; }
 #tracks tr.selected td.sel { background-color: var(--row-sel); }
 #tracks tr:hover td.sel { background-color: var(--row-hover); }
 #tracks tr.selected:hover td.sel { background-color: var(--row-sel-hover); }
-#tracks th[data-sort="file"], #tracks td.file { position: sticky; left: var(--sheet-key-offset, 0px); background-color: var(--bg); }
-#tracks td.file { z-index: 3; box-shadow: 7px 0 9px -10px var(--text); }
+#tracks th[data-sort="file"] { position:sticky; left:auto; background-color:var(--panel); }
+#tracks td.file { position:relative; left:auto; background-color:var(--bg); }
+#tracks td.file { z-index:auto; box-shadow:none; }
 #tracks tr.selected td.file { background-color: var(--row-sel); }
 #tracks tr:hover td.file { background-color: var(--row-hover, var(--bg)); }
 #tracks tr.selected:hover td.file { background-color: var(--row-sel-hover); }

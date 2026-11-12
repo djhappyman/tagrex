@@ -65,9 +65,6 @@ const VIRTUAL_COLUMNS = [
   // a file showing values you didn't expect explains itself: "ID3v2.4 + ID3v1"
   // is a file with a second, stale answer in it.
   ["tagtypes", "Tag types"],
-  // Whether the file carries embedded cover art (#730), from the same probe as
-  // the tags (#447): embedded, missing, or not known for a file that was not read.
-  ["cover", "Cover"],
 ];
 
 // The display name for a field or virtual column (#50).

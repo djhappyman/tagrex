@@ -242,11 +242,24 @@ function invalidateCustomColumn(id) {
 
 // With known changed paths preserve the remaining cached rows. A full reread,
 // library switch or rename uses the no-argument form to invalidate everything.
-function invalidateCustomColumns(paths = null) {
+function customColumnAffected(column, fields) {
+  if (!fields) return true; // unknown/block/name changes require fresh values
+  const tokens = [...column.pattern.matchAll(/%([^%]+)%/g)]
+    .map(match => match[1].split(":")[0].toLowerCase());
+  return column.pattern.includes("$") || tokens.some(token => token.startsWith("_")) ||
+    tokens.some(token => fields.has(token)) ||
+    (tokens.some(token => token === "side" || token === "position") && ["disc", "track", "media"].some(field => fields.has(field)));
+}
+function invalidateCustomColumns(paths = null, fieldsByPath = null) {
   customGeneration++;
   if (paths) {
     const changed = new Set(paths);
-    for (const cached of customValues.values()) for (const path of changed) cached.delete(path);
+    for (const [id, cached] of customValues) {
+      const column = customColumns.find(column => column.id === id);
+      for (const path of changed) {
+        if (!column || customColumnAffected(column, fieldsByPath?.get(path))) cached.delete(path);
+      }
+    }
   } else customValues.clear();
   bindCustomSubject();
 }
@@ -531,6 +544,7 @@ function renderTableHead() {
     const th = document.createElement("th");
     th.dataset.sort = key;
     th.className = "sortable";
+    th.tabIndex = 0;
     th.setAttribute('aria-colindex', String(index + TABLE_DATA_COLUMN_OFFSET + 1));
     th.style.width = `${columnWidth(key)}px`;
     // Name the mask placeholder that addresses this column (#148). The column
@@ -688,6 +702,7 @@ function resetColumns() {
 // ---- column picker popover (#43) ----
 
 let columnsMenuSignature = '';
+let columnsMenuFocusFrame = 0;
 function renderColumnsMenu() {
   const menu = el("columns-menu");
   const signature = JSON.stringify([
@@ -697,45 +712,51 @@ function renderColumnsMenu() {
   ]);
   if (signature === columnsMenuSignature && menu.querySelector('.col-menu-actions')) return;
   columnsMenuSignature = signature;
+  cancelAnimationFrame(columnsMenuFocusFrame);
+  const scrollTop = menu.querySelector('.column-options')?.scrollTop || 0;
+  const focusKey = menu.contains(document.activeElement) ? document.activeElement.closest('.col-menu-row')?.dataset.key : null;
   menu.innerHTML = "";
-  for (const key of visibleColumns) menu.appendChild(colMenuRow(key, true));
+  const options = document.createElement("div");
+  options.className = "column-options";
+  let scrollIdle;
+  options.addEventListener('scroll', () => {
+    options.classList.add('is-scrolling');
+    clearTimeout(scrollIdle);
+    scrollIdle = setTimeout(() => options.classList.remove('is-scrolling'), 650);
+  }, {passive:true});
+  for (const key of visibleColumns) options.appendChild(colMenuRow(key, true));
   const hidden = allColumnKeys().filter((k) => !visibleColumns.includes(k));
   if (hidden.length) {
     const sep = document.createElement("div");
     sep.className = "col-menu-sep";
     sep.textContent = t("columns.hidden");
-    menu.appendChild(sep);
-    for (const key of hidden) menu.appendChild(colMenuRow(key, false));
+    options.appendChild(sep);
+    for (const key of hidden) options.appendChild(colMenuRow(key, false));
   }
-  // Everything that is not a column goes into one block that stays put while
-  // the list scrolls above it (#174). With a dozen columns picked, these used to
-  // sit below the fold with nothing to say they were there.
+  // Actions stay outside the scrolling list, inside the same rounded surface.
   const actions = document.createElement("div");
   actions.className = "col-menu-actions";
 
   // Defining a new mask column (#150) belongs with the list of columns, since
   // that is where someone goes looking for one that isn't there.
-  const addFoot = document.createElement("div");
-  addFoot.className = "col-menu-foot";
   const add = createComponentElement("button");
   add.type = "button";
-  add.className = "text-btn";
+  add.className = "column-action";
   add.textContent = t("columns.add");
   add.title = t("columns.addTitle");
   add.addEventListener("click", () => {
     menu.hidden = true;
     openColumnEditor(null);
   });
-  addFoot.appendChild(add);
-  actions.appendChild(addFoot);
+  actions.appendChild(add);
 
-  // Fit-to-content (#151), above the reset row: it acts on the widths, which is
-  // what the rows above configure, while Reset throws the whole set away.
+  // Width options precede column visibility; one-shot Fit and persistent
+  // Autofit keep their distinct action/toggle semantics.
   const fitFoot = document.createElement("div");
-  fitFoot.className = "col-menu-foot col-fit-foot";
+  fitFoot.className = "column-fit-options";
   const fit = createComponentElement("button");
   fit.type = "button";
-  fit.className = "text-btn";
+  fit.className = "text-btn column-fit-action";
   fit.textContent = t("columns.fit");
   fit.title = t("columns.fitTitle");
   fit.addEventListener("click", () => {
@@ -744,8 +765,6 @@ function renderColumnsMenu() {
   });
   fitFoot.appendChild(fit);
 
-  // ...and the sticky version of the same thing, as a row rather than a button:
-  // it is a mode that stays on, not an action.
   const autoRow = document.createElement("label");
   autoRow.className = "col-menu-row col-autofit";
   const autoBox = document.createElement("input");
@@ -758,26 +777,31 @@ function renderColumnsMenu() {
   autoRow.title = t("columns.autofitTitle");
   autoRow.append(autoBox, autoLabel);
   fitFoot.appendChild(autoRow);
-  actions.appendChild(fitFoot);
 
   // Reset-to-default footer (#91): default set, order, visibility, and widths.
-  const foot = document.createElement("div");
-  foot.className = "col-menu-foot";
   const reset = createComponentElement("button");
   reset.type = "button";
-  reset.className = "text-btn";
+  reset.className = "column-action";
   reset.textContent = t("columns.reset");
   reset.title = t("columns.resetTitle");
   reset.addEventListener("click", resetColumns);
-  foot.appendChild(reset);
-  actions.appendChild(foot);
-  menu.appendChild(actions);
+  actions.appendChild(reset);
+  menu.append(fitFoot, options, actions);
+  options.scrollTop = scrollTop;
+  // The native-checkbox bridge mounts during the microtask flush. Restore
+  // focus to its final button after that flush, rather than its hidden proxy.
+  if (focusKey) columnsMenuFocusFrame = requestAnimationFrame(() => {
+    columnsMenuFocusFrame = 0;
+    if (menu.hidden) return;
+    const row = [...options.querySelectorAll('.col-menu-row')].find(row => row.dataset.key === focusKey);
+    row?.querySelector('[role="checkbox"],input[type="checkbox"]')?.focus({preventScroll:true});
+  });
 }
 
 function colMenuRow(key, visible) {
   const isFile = key === "file";
   const row = document.createElement("div");
-  row.className = "col-menu-row";
+  row.className = `col-menu-row${visible ? '' : ' is-hidden'}`;
   row.dataset.key = key;
 
   const grip = document.createElement("span");
@@ -806,6 +830,9 @@ function colMenuRow(key, visible) {
   label.textContent = isFile ? t("column.alwaysShown", { name: columnLabel(key) }) : columnLabel(key);
 
   row.append(grip, box, label);
+  row.addEventListener('click', event => {
+    if (!event.target.closest('input, button, .col-grip') && !box.disabled) box.click();
+  });
 
   // A mask column is defined by the user, so it can be edited and deleted from
   // the same row that shows it (#150). A tag column has nothing to edit.

@@ -203,6 +203,7 @@ export const uk = {
   "editor.coverArt": "Обкладинка",
   "editor.clearTags": "Очистити теги",
   "editor.clearTagsTitle": "Стерти всі текстові теги вибраних файлів і почати з чистого аркуша (обкладинка та DJ-мітки зберігаються). Оборотно скасуванням.",
+  "editor.livePreview": "Зміни одразу видно в попередньому перегляді",
   "editor.stageFields": "Підготувати зміни полів",
   "fromName.heading": "Теги з назви файлу",
   "fromName.hintSummary": "Як читається маска",
@@ -545,6 +546,7 @@ export const uk = {
   "cover.frontCover": "Лицьова обкладинка",
   "cover.sharedAcross": "спільна для всіх ({files})",
   "cover.replace": "Замінити…",
+  "cover.exportSaved": "Експортувати збережену обкладинку",
   "cover.export": "Вивантажити",
   "cover.multiple": "Різні обкладинки",
   "cover.withCover": "{with_cover} з {n} з обкладинкою",
@@ -1213,4 +1215,7 @@ export const uk = {
   "artwork.chosen": "Вибрано обкладинку {number}",
   "apply.checking": "Перевірка файлів…",
   "workspace.transformations": "Перетворення",
+  "session.unavailable": "Не вдалося відкрити {folder}. Підключіть папку й повторіть спробу вище або відкрийте іншу.",
+  "session.slow": "Відкриття {folder} триває надто довго. Повторіть спробу вище або відкрийте іншу папку. Попереднє читання може ще виконуватися.",
+  "session.interrupted": "Автовідновлення {folder} призупинено. Повторіть спробу вище або відкрийте іншу папку.",
 };

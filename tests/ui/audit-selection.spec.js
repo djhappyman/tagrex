@@ -87,33 +87,35 @@ test('filter, sorting and regrouping preserve an unstaged draft and its input', 
 
 test('late artwork cannot replace the current selection or stage its images', async ({ page }) => {
   await page.locator('.subtab[data-subtab="editor"]').click();
-  await expect(page.locator('.cover-row-meta')).toContainText('Current artwork');
+  await expect(page.locator('.cover-main-image img')).toHaveAttribute('alt', 'Current artwork');
   await page.evaluate(() => window.__audit.wait = true);
   await row(page, 1).click();
   await expect.poll(() => page.evaluate(() => window.__audit.pending.length)).toBe(1);
   await row(page, 2).click();
   await expect.poll(() => page.evaluate(() => window.__audit.pending.length)).toBe(2);
   await page.evaluate(() => window.__audit.pending[1].resolve(window.__audit.summary('B artwork')));
-  await expect(page.locator('.cover-row-meta')).toContainText('B artwork');
+  await expect(page.locator('.cover-main-image img')).toHaveAttribute('alt', 'B artwork');
   await page.evaluate(() => window.__audit.pending[0].resolve(window.__audit.summary('A stale artwork')));
   await page.waitForTimeout(40);
-  await expect(page.locator('.cover-row-meta')).toContainText('B artwork');
-  await page.locator('.cover-kind').evaluate(node => { node.value = 'back'; node.dispatchEvent(new Event('change', { bubbles: true })); });
-  await expect.poll(() => page.evaluate(() => window.tagrex.previewPlan?.changes[0]?.cover_change?.new?.[0]?.description)).toBe('B artwork');
+  await expect(page.locator('.cover-main-image img')).toHaveAttribute('alt', 'B artwork');
+  await page.locator('.cover-main-image').click();
+  await expect(page.locator('.cover-lightbox .aw-hero')).toHaveAttribute('alt', 'Cover art');
+  expect(await page.evaluate(() => window.tagrex.previewPlan)).toBeNull();
 });
 
 
-test('deselection invalidates pending artwork and detached strip actions', async ({ page }) => {
+test('deselection invalidates pending artwork and detached edit actions', async ({ page }) => {
   await page.locator('.subtab[data-subtab="editor"]').click();
-  await expect(page.locator('.cover-row-meta')).toContainText('Current artwork');
-  await page.locator('.cover-kind').evaluate(node => window.__oldKind = node);
+  await expect(page.locator('.cover-main-image img')).toHaveAttribute('alt', 'Current artwork');
+  await page.locator('#cover-well .cover-edit').click();
+  await page.locator('[data-cover="remove"]').evaluate(node => window.__oldRemove = node);
+  await page.keyboard.press('Escape');
   await page.evaluate(() => window.__audit.wait = true);
   await row(page, 1).click();
   await expect.poll(() => page.evaluate(() => window.__audit.pending.length)).toBe(1);
   await page.evaluate(() => { window.tagrex.selection.clear(); window.tagrex.renderTracks(); });
   await page.evaluate(() => {
-    window.__oldKind.value = 'back';
-    window.__oldKind.dispatchEvent(new Event('change', { bubbles: true }));
+    window.__oldRemove.click();
     window.__audit.pending[0].resolve(window.__audit.summary('Obsolete artwork'));
   });
   await expect(page.locator('#cover-set')).toBeHidden();
@@ -127,6 +129,7 @@ test('folder artwork responses stay bound to their source selection', async ({ p
   await row(page, 2).click();
   await expect.poll(() => page.evaluate(() => window.__audit.externalPending.length)).toBe(2);
   await page.evaluate(() => window.__audit.externalPending[1](window.__audit.summary('Current folder artwork').samples[0]));
+  await page.locator('#cover-well .cover-edit').click();
   await expect(page.locator('[data-cover="external"]')).toBeVisible();
   await page.evaluate(() => window.__audit.externalPending[0](window.__audit.summary('Obsolete folder artwork').samples[0]));
   await page.locator('[data-cover="external"]').click();
@@ -143,7 +146,7 @@ test('a new selected subject never inherits another files unstaged draft', async
 
 test('rapid Editor selection bounds native reads and keeps only the latest waiting subject', async ({ page }) => {
   await page.locator('.subtab[data-subtab="editor"]').click();
-  await expect(page.locator('.cover-row-meta')).toContainText('Current artwork');
+  await expect(page.locator('.cover-main-image img')).toHaveAttribute('alt', 'Current artwork');
   await page.evaluate(() => window.__audit.wait = true);
   for (const at of [1, 2, 0, 1]) await row(page, at).click();
   expect(await page.evaluate(() => window.__audit.pending.length)).toBe(2);
@@ -153,7 +156,7 @@ test('rapid Editor selection bounds native reads and keeps only the latest waiti
     window.__audit.pending[1].resolve(window.__audit.summary('Old second response'));
     window.__audit.pending[2].resolve(window.__audit.summary('Latest subject artwork'));
   });
-  await expect(page.locator('.cover-row-meta')).toContainText('Latest subject artwork');
+  await expect(page.locator('.cover-main-image img')).toHaveAttribute('alt', 'Latest subject artwork');
   expect(await page.evaluate(() => window.__audit.pending[2].paths)).toEqual(['/music/02 - wish mountain - radio.mp3']);
 });
 
@@ -181,7 +184,7 @@ test('large filter queries reuse normalized metadata and publish the latest comp
 test('Undo reuses the toolbar history head and requests summaries only after completion', async ({ page }) => {
   await page.locator('.subtab[data-subtab="editor"]').click();
   await page.locator('#fields-body input[data-key="title"]').fill('New title');
-  await page.locator('#fields-apply').click();
+  await expect(page.locator('#diff-apply')).toBeEnabled();
   await expect(page.locator('#diff-actionbar')).toBeVisible();
   await page.locator('#diff-apply').click();
   await expect(page.locator('#diff-actionbar')).toBeHidden();
@@ -196,7 +199,7 @@ test('tag-only Apply and Undo read back only changed rows and preserve unrelated
   await page.locator('.subtab[data-subtab="editor"]').click();
   await page.evaluate(() => { window.__untouchedTrack = window.tagrex.tracks[1]; window.__audit.listReads = 0; window.__audit.rowReads = []; });
   await page.locator('#fields-body input[data-key="title"]').fill('Scoped new title');
-  await page.locator('#fields-apply').click();
+  await expect(page.locator('#diff-apply')).toBeEnabled();
   await expect(page.locator('#diff-actionbar')).toBeVisible();
   expect(await page.evaluate(() => window.tagrex.tracks[0].tags.title)).toBe('Desert Rain');
   await page.locator('#diff-apply').click();

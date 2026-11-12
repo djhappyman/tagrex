@@ -22,9 +22,9 @@ use tauri::{Manager, State};
 use tagrex_commands::{
     ActionGroupDto, AlignMatchDto, App, AppError, BatchDto, BlockTargetsDto, CandidateDto,
     CoverArtDto, CoverExportDto, CoverSummaryDto, DropResultDto, DuplicateGroupDto, ErrorDto,
-    ImportFieldDto, ImportSelectionDto, ImportTrackDto, NameProbeDto, NameProbesDto,
-    PlaceholderDto, PlanDto, ProviderHub, ReleaseDto, SaveImagesDto, SearchQueryDto, SettingsDto,
-    TagEditDto, TextLinesDto, TextProbeDto, TrackDto, TransformRuleDto, UndoReportDto,
+    ImportFieldDto, ImportSelectionDto, ImportTrackDto, LiveCoverAssignmentDto, NameProbeDto,
+    NameProbesDto, PlaceholderDto, PlanDto, ProviderHub, ReleaseDto, SaveImagesDto, SearchQueryDto,
+    SettingsDto, TagEditDto, TextLinesDto, TextProbeDto, TrackDto, TransformRuleDto, UndoReportDto,
 };
 use tagrex_core::plan::UndoMode;
 use tagrex_player::{Player, PlayerStatus};
@@ -601,6 +601,50 @@ async fn preview_tag_edits(
             with_app(&state, |app| {
                 app.preview_tag_edits_with_cover(&edits, cover.as_ref())
                     .map_err(ErrorDto::from)
+            })
+        })
+        .await
+}
+
+/// Compose the raw live Editor/import values and checked transformations.
+// The singular pair remains accepted for the first live-preview caller; the
+// optional assignments preserve artwork belonging to other pending selections.
+// Flat legacy and current arguments coexist so older live-preview clients
+// remain compatible while manual cover overrides join the same operation.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+async fn preview_live_edits(
+    state: State<'_, AppState>,
+    edits: Vec<TagEditDto>,
+    paths: Vec<String>,
+    groups: Vec<ActionGroupDto>,
+    cover: Option<CoverArtDto>,
+    cover_paths: Vec<String>,
+    covers: Option<Vec<LiveCoverAssignmentDto>>,
+    base_plan: Option<PlanDto>,
+) -> Result<PlanDto, ErrorDto> {
+    let state = state.inner().clone();
+    SESSION_QUEUE
+        .run(move || {
+            with_app(&state, |app| {
+                let paths: Vec<PathBuf> = paths.into_iter().map(Into::into).collect();
+                let assignments = covers.unwrap_or_else(|| {
+                    cover
+                        .map(|cover| LiveCoverAssignmentDto {
+                            cover,
+                            paths: cover_paths,
+                        })
+                        .into_iter()
+                        .collect()
+                });
+                app.preview_live_edits_with_base(
+                    &edits,
+                    &paths,
+                    &groups,
+                    &assignments,
+                    base_plan.as_ref(),
+                )
+                .map_err(ErrorDto::from)
             })
         })
         .await
@@ -1745,21 +1789,12 @@ fn read_settings(app: &tauri::AppHandle) -> SettingsDto {
 ///
 /// A newer release is also looked up in its `latest.json` (#602); when it can be
 /// installed from here, it is kept for [`install_update`] and the answer says so.
-// Experimental builds use separate state and never install stable updates.
-const IN_APP_UPDATES: bool = false;
-
 #[tauri::command]
 async fn check_for_update(
     app: tauri::AppHandle,
     pending: State<'_, update::PendingUpdate>,
     automatic: bool,
 ) -> Result<Option<update::UpdateCheckDto>, ErrorDto> {
-    if !IN_APP_UPDATES {
-        return Err(ErrorDto::plain(
-            "TagRex Next does not update itself. Build it again from the next branch.",
-        ));
-    }
-
     let handle = app.clone();
     let settings = SETTINGS_QUEUE
         .run(move || Ok(read_settings(&handle)))
@@ -2136,6 +2171,7 @@ fn main() {
             preview_move,
             preview_transform,
             preview_tag_edits,
+            preview_live_edits,
             preview_cover_embed,
             preview_cover_set,
             export_cover,

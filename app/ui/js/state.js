@@ -83,6 +83,7 @@ export const edits = new Map();
 // mode operates on. Kept here (not in the DOM) so a re-render (sort, reorder,
 // auto-match, staging edits) never silently wipes or widens the selection.
 let selectionRevision = 0;
+export function selectionVersion() { return selectionRevision; }
 class SelectionSet extends Set {
   add(path) { if (!this.has(path)) selectionRevision++; return super.add(path); }
   delete(path) { const removed = super.delete(path); if (removed) selectionRevision++; return removed; }

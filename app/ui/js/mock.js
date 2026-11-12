@@ -812,6 +812,34 @@ function mockInvoke(cmd, args) {
         unrendered: tallyMissing(args.mask, args.paths),
       });
     }
+    case "preview_live_edits": {
+      const all = new Set([...(args.paths || []), ...(args.edits || []).map(edit => edit.path), ...(args.coverPaths || []), ...(args.covers || []).flatMap(item => item.paths), ...(args.basePlan?.changes || []).map(change=>change.path)]);
+      const changes = [];
+      const skipped = new Map();
+      for (const path of all) {
+        const track = findTrack(path); if (!track) continue;
+        const tags = {...track.tags};
+        for (const edit of args.edits || []) if (edit.path === path && !mockLockedFields.has(edit.field)) tags[edit.field] = edit.value || '';
+        let name = path.slice(path.lastIndexOf('/')+1,path.lastIndexOf('.'));
+        let ext = path.slice(path.lastIndexOf('.')+1);
+        if ((args.paths || []).includes(path)) for (const group of args.groups || []) for (const segment of mockSegments(group)) {
+          if (segment.scope === 'filename') name = mockApplyRules(name,segment.rules) || name;
+          else if (segment.scope === 'fileext') ext = mockApplyRules(ext,segment.rules) || ext;
+          else for (const field of Object.keys(tags)) {
+            if (segment.scope !== 'tags' && segment.scope !== field) continue;
+            if (mockLockedFields.has(field)) { skipped.set(field,(skipped.get(field)||0)+1); continue; }
+            tags[field] = mockApplyRules(tags[field],segment.rules);
+          }
+        }
+        const tag_changes = Object.entries(tags).filter(([field,value]) => (value||null)!==(track.tags[field]||null)).map(([field,value]) => ({field,old:track.tags[field]||null,new:value||null,invalid:field==='year' && value && !/^\d{4}(?:-|$)/.test(value)}));
+        const next = path.slice(0,path.lastIndexOf('/')+1)+name+'.'+ext;
+        let image = (args.coverPaths || []).includes(path) ? args.cover : null;
+        for (const assignment of args.covers || []) if (assignment.paths.includes(path)) image=assignment.cover;
+        const cover_change = args.basePlan?.changes?.find(change=>change.path===path)?.cover_change ?? (image && !track.cover ? {old:[],new:[image]} : null);
+        if(tag_changes.length || next!==path || cover_change) changes.push({path,rename_to:next!==path?next:null,tag_changes,cover_change});
+      }
+      return Promise.resolve({description:(args.edits || []).length || (args.covers || []).length ? 'Edit tags' : 'Transform',changes,locked_skipped:[...skipped].map(([field,files])=>({field,files}))});
+    }
     case "preview_tag_edits": {
       const byPath = {};
       for (const e of args.edits) {

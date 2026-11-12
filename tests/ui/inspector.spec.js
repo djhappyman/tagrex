@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
 const root = resolve('.test-dist');
@@ -77,17 +77,18 @@ for (const width of [360, 480]) {
     expect(Math.max(...fields.map((box) => box.x)) - Math.min(...fields.map((box) => box.x))).toBeLessThan(1);
     expect(fields.every((box) => box.width >= 150 && box.height === 32)).toBe(true);
     expect(await artist.evaluate(input => parseFloat(getComputedStyle(input).borderRadius))).toBe(6);
-    const pair = await page.locator('#fields-body .fe-row.duo').boundingBox();
-    expect(pair.height).toBeLessThanOrEqual(36);
+    for (const row of await page.locator('#fields-body .fe-row.duo').all()) {
+      expect((await row.boundingBox()).height).toBeLessThanOrEqual(36);
+    }
     const panel = await page.locator('.mode-col').boundingBox();
     for (const input of await page.locator('#fields-body .fe-row.duo input').all()) {
       const box = await input.boundingBox();
       expect(box.x).toBeGreaterThanOrEqual(panel.x);
       expect(box.x + box.width).toBeLessThanOrEqual(panel.x + panel.width + 1);
     }
-    await expect(page.locator('#fields-apply')).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('#fields-clear')).toBeInViewport({ ratio: 1 });
     await artist.fill('Edited artist');
-    await page.locator('#fields-apply').click();
+    await expect(page.locator('#diff-apply')).toBeEnabled();
     await expect(page.locator('#diff-actionbar')).toBeVisible();
     expect(await page.evaluate(() => window.tagrex.tracks[0].tags.artist)).toBe('The X Factor');
     await page.locator('#diff-discard').click();
@@ -188,3 +189,61 @@ for (const theme of ['light', 'dark']) {
     expect(await styles('#set-proxy', padding)).toEqual(editor.padding);
   });
 }
+
+test('editor labels keep a fixed rail while inputs resize, with compact metadata rows', async ({ page }) => {
+  await page.locator('.subtab[data-subtab="editor"]').click();
+  const artist = page.locator('#fields-body input[data-key="artist"]');
+  const disc = page.locator('#fields-body input[data-key="disc"]');
+  const track = page.locator('#fields-body input[data-key="track"]');
+  await artist.fill('Keep this draft');
+  await artist.evaluate(node => { window.retainedEditorField = node; });
+  const metrics = [];
+  for (const width of [320, 440, 580]) {
+    await sizeInspector(page, width);
+    metrics.push(await artist.evaluate(node => {
+      const row = node.closest('.fe-row'), label = row.querySelector('.fe-label');
+      return { rail:label.getBoundingClientRect().width, input:node.getBoundingClientRect().width, offset:node.getBoundingClientRect().left-row.getBoundingClientRect().left };
+    }));
+    await expect(artist).toHaveValue('Keep this draft');
+    expect(await artist.evaluate(node => node === window.retainedEditorField)).toBe(true);
+    for (const row of await page.locator('#fields-body .fe-row').all()) {
+      expect(await row.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    }
+  }
+  expect(Math.max(...metrics.map(value => value.rail))-Math.min(...metrics.map(value => value.rail))).toBeLessThan(1);
+  expect(Math.max(...metrics.map(value => value.offset))-Math.min(...metrics.map(value => value.offset))).toBeLessThan(1);
+  expect(metrics[2].input-metrics[0].input).toBeGreaterThan(150);
+  expect(Math.abs((await disc.boundingBox()).y-(await track.boundingBox()).y)).toBeLessThan(1);
+  await page.locator('label[for="editor-field-artist"]').click();
+  await expect(artist).toBeFocused();
+  for (const field of [track, disc, artist]) expect(await field.evaluate(node => getComputedStyle(node).borderRadius)).toBe('6px');
+  if (process.env.ITERATION_CAPTURE_EVIDENCE === '1') {
+    await mkdir('docs/ui-iteration', { recursive:true });
+    await page.screenshot({path:'docs/ui-iteration/editor-compact-fields.png'});
+  }
+});
+
+
+test('Core keeps long-form comments and compact BPM/Key editable without losing drafts on resize', async ({ page }) => {
+  await page.locator('.subtab[data-subtab="editor"]').click();
+  await sizeInspector(page, 400);
+  const core = page.locator('#editor-group-core');
+  const comment = core.locator('textarea[data-key="comment"]');
+  await expect(comment).toBeVisible();
+  const value = 'First line\nSecond line\nThird line';
+  await comment.fill(value);
+  expect(await comment.evaluate(node => getComputedStyle(node).resize)).toBe('vertical');
+  await comment.evaluate(node => node.style.height='140px');
+  await sizeInspector(page, 360);
+  await expect(comment).toHaveValue(value);
+  expect((await comment.boundingBox()).height).toBe(140);
+  const bpm = core.locator('input[data-key="bpm"]'), key = core.locator('input[data-key="key"]');
+  expect(Math.abs((await bpm.boundingBox()).y-(await key.boundingBox()).y)).toBeLessThan(1);
+  await bpm.fill('145'); await key.fill('Am');
+  await expect(page.locator('#diff-apply')).toBeEnabled();
+  await expect(page.locator('#diff-actionbar')).toBeVisible();
+  const changes = await page.evaluate(() => window.tagrex.previewPlan.changes);
+  expect(JSON.stringify(changes)).toContain('First line');
+  expect(JSON.stringify(changes)).toContain('145');
+  expect(JSON.stringify(changes)).toContain('Am');
+});

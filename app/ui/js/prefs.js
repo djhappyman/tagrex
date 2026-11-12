@@ -50,19 +50,24 @@ function applyValueFont(mode) {
 // optional convenience rather than the primary affordance.
 const CHECKBOX_COL_STORAGE_KEY = "tagrex.checkboxCol";
 function checkboxColEnabled() {
-  try {
-    return localStorage.getItem(CHECKBOX_COL_STORAGE_KEY) === "1";
-  } catch (e) {
-    return false;
-  }
+  return false; // Legacy setting retained for older saved settings; rows use highlight.
 }
 function applyCheckboxCol(on) {
-  document.body.classList.toggle("show-checkbox", on);
+  document.body.classList.remove("show-checkbox");
   try {
-    localStorage.setItem(CHECKBOX_COL_STORAGE_KEY, on ? "1" : "0");
+    localStorage.setItem(CHECKBOX_COL_STORAGE_KEY, "0");
   } catch (e) {
     /* localStorage unavailable — preference just won't persist */
   }
+}
+
+function showOldValues() {
+  try { return localStorage.getItem('tagrex.showOldValues') === '1'; }
+  catch { return false; }
+}
+function saveShowOldValues(on) {
+  try { localStorage.setItem('tagrex.showOldValues', on ? '1' : '0'); }
+  catch { /* View preferences remain optional when storage is unavailable. */ }
 }
 
 // Filter mode prefs (#44): regex on/off and case sensitivity. Pure view choices,
@@ -451,6 +456,8 @@ function saveGroupBy(value) {
 }
 
 export {
+  showOldValues,
+  saveShowOldValues,
   clampTableFont,
   clampTracklistFont,
   valueFont,

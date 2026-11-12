@@ -476,18 +476,15 @@
           </div>
 
           <div class="panel-block">
-            <h2 data-i18n="editor.coverArt">Cover art</h2>
-
             <div id="cover-well"></div>
 
-            <div id="cover-set" class="cover-set" hidden></div>
           </div>
         </div>
 
         <div class="panel-actions editor-actions">
           <Button variant="outline" size="sm" id="fields-clear" data-i18n-title="editor.clearTagsTitle" title="Clears every text tag on the selected files. Cover art and DJ cue points are kept. Undo restores them." data-i18n="editor.clearTags">Clear tags</Button>
           <div class="spacer"></div>
-          <Button variant="default" size="sm" id="fields-apply" class="primary" data-i18n="editor.stageFields">Stage</Button>
+          <span class="hint muted" data-i18n="editor.livePreview">Changes preview automatically</span>
         </div>
       </Tabs.Content>
 

@@ -74,7 +74,7 @@ test('dynamic menu rebuilding preserves popover shell and column controller acti
   await expect(menu.locator('input[type="checkbox"]')).not.toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
-  await page.locator('#view-btn').click();
+  // Closing the child chooser leaves View open.
   await page.locator('#columns-btn').click();
   await expect(menu.locator('[data-slot="popover-content"]')).toHaveCount(1);
   await expect(menu.locator('input[type="checkbox"]')).not.toHaveCount(0);

@@ -14,7 +14,18 @@
     root = nativeRoot || node;
     root.classList.add('controller-popup-root');
     const bridge = connectControllerSurface(root, (value) => { open = value; });
-    return { destroy: bridge.destroy };
+    // This chooser also opens without a Popover.Trigger, from header context
+    // clicks. Its retained shell needs its own Escape route and focus return.
+    const closeColumns = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || root.hidden ||
+          document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')) return;
+      event.preventDefault(); event.stopImmediatePropagation(); root.hidden = true;
+      const saved = (root as HTMLElement & { returnFocusTo?: HTMLElement }).returnFocusTo;
+      const anchor = saved?.isConnected && saved.getClientRects().length ? saved : document.querySelector<HTMLElement>('#tracks th.sortable[tabindex="0"]');
+      anchor?.focus({ preventScroll: true });
+    };
+    if (root.id === 'columns-menu') window.addEventListener('keydown', closeColumns, true);
+    return { destroy() { bridge.destroy(); if (root.id === 'columns-menu') window.removeEventListener('keydown', closeColumns, true); } };
   }
   function content(host: HTMLElement) {
     host.append(...nodes);
@@ -65,6 +76,7 @@
     <Popover.Content forceMount portalProps={{ disabled: true }} class="controller-popover-content"
       data-controller-popup data-i18n-aria-label={labelKey} aria-label={label || nativeRoot?.getAttribute('aria-label') || id || 'Options'}
       trapFocus={false} preventScroll={false}
+      onInteractOutside={(event) => { if (root?.id === 'columns-menu' && event.target instanceof Element && event.target.closest('#columns-btn')) event.preventDefault(); }}
       onOpenAutoFocus={(event) => { if (preserveFocus) event.preventDefault(); }} onCloseAutoFocus={(event) => event.preventDefault()}
       onEscapeKeydown={(event) => event.stopPropagation()}>
       <div class="controller-popover-body" use:content>{@render children?.()}</div>

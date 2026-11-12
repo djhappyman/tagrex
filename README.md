@@ -295,7 +295,8 @@ and Linux.
 
 
 Needs a Rust toolchain, the Tauri CLI and Node.js 22.12 or newer. Vite builds
-`app/ui` into `app/dist`; the app view uses Svelte 5 and shadcn-svelte.
+`app/ui` into `app/dist`; the app view uses Svelte 5 and shadcn-svelte. PaneForge
+is available for the next stage of the workspace migration.
 
 ```bash
 npm ci
@@ -333,9 +334,9 @@ Linux additionally needs the usual WebKitGTK development packages; see the
 
 A Rust core with a [Tauri](https://tauri.app/) shell. Vite compiles the Svelte 5
 workspace, settings and dialogs with locally owned shadcn-svelte components.
-The existing file/tag/provider controllers remain integrated with the new component
-layer. Bits UI supplies accessible behaviour; styling inherits the existing CSS theme
-variables. Responsiveness and further UI refinement are active work. The libraries doing the heavy lifting:
+The existing file/tag/provider controllers keep their native performance and
+workflow behavior. Bits UI supplies accessible behaviour; styling inherits the existing
+CSS theme variables. The libraries doing the heavy lifting:
 
 - [shadcn-svelte](https://www.shadcn-svelte.com/) — reusable Svelte controls,
   dialogs and menus, customised in the repository for TagRex.
