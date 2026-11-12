@@ -155,8 +155,10 @@ bottom of the menu. A footer resets the whole thing — set, order, visibility a
 widths — to the defaults.
 
 **File** is marked *always shown* and its tick is disabled: it is structural
-rather than a tag column, and it stays first. Everything else is yours to
-arrange.
+rather than a tag column, and no tag column goes in front of it. Everything
+else is yours to arrange. The one exception is **Cover**: switched on, it
+appears first, in front of File, and from there it can be dragged anywhere,
+including back in front of File.
 
 A few columns are read from the file rather than from a tag, and can't be edited:
 **Position** (the vinyl side and track, such as `A1`), **Length**, **Tag types**

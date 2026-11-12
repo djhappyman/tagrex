@@ -537,6 +537,24 @@ function presetSummary(p) {
 // can tell which folder it belongs to. Returned rather than appended: the window
 // renderer (#189) decides which rows exist at all, and a single row is also
 // rebuilt in place when only its own contents changed (#186).
+// The columns shown in front of File (#733): only Cover may go there, and it
+// does when it is switched on, until it is dragged elsewhere.
+function leadingColumns() {
+  return visibleColumns.slice(0, Math.max(visibleColumns.indexOf("file"), 0));
+}
+
+// Rows are built File first, then the other columns in order; move the cells of
+// the columns shown in front of File to where their headers are.
+function placeLeadingCells(tr) {
+  const lead = leadingColumns().length;
+  if (!lead) return;
+  const fileTd = tr.querySelector(":scope > td.file");
+  if (!fileTd) return;
+  const cells = [];
+  for (let n = fileTd.nextElementSibling; n && cells.length < lead; n = n.nextElementSibling) cells.push(n);
+  for (const td of cells) fileTd.before(td);
+}
+
 function buildTrackRow(track, groupKey) {
   const pending = edits.get(track.path);
   const tr = document.createElement("tr");
@@ -550,7 +568,17 @@ function buildTrackRow(track, groupKey) {
     tr.innerHTML = `
       <td class="sel"><input type="checkbox" disabled title="${escapeHtml(msg("app.unreadableTags"))}" /></td>
       <td class="file" title="${escapeHtml(msg("app.unreadablePath", { path: track.path }))}">${escapeHtml(fileName(track.path))}</td>
-      <td class="unreadable-note" colspan="${visibleColumns.length - 1}">${escapeHtml(msg("app.unreadableNote"))}</td>`;
+      <td class="unreadable-note" colspan="${visibleColumns.length - 1 - leadingColumns().length}">${escapeHtml(msg("app.unreadableNote"))}</td>`;
+    // A column shown in front of File (#733) still gets its cell, so File stays
+    // under its own header; the note spans the rest.
+    const fileTd = tr.querySelector(":scope > td.file");
+    for (const field of leadingColumns()) {
+      const td = document.createElement("td");
+      td.className = "position-cell";
+      td.textContent = virtualCellText(track, field, pending) ?? "";
+      if (field === "cover") paintCoverCell(td, track);
+      fileTd.before(td);
+    }
     return tr;
   }
   // Diff-state (#117): a staged plan renders its change into this same table in
@@ -558,6 +586,7 @@ function buildTrackRow(track, groupKey) {
   // and the sel column becomes the per-row apply scope; other rows recede.
   if (diffByPath) {
     fillDiffRow(tr, track);
+    placeLeadingCells(tr);
     return tr;
   }
   if (isPlayingPath(track.path)) tr.classList.add("playing");
@@ -569,7 +598,7 @@ function buildTrackRow(track, groupKey) {
       <td class="sel"><input type="checkbox" ${isSel ? "checked" : ""} data-path="${escapeHtml(track.path)}" /></td>
       <td class="file" title="${escapeHtml(track.path)}">${escapeHtml(fileName(track.path))}</td>`;
   for (const field of visibleColumns) {
-    if (field === "file") continue; // rendered above (structural, always first)
+    if (field === "file") continue; // rendered above; placeLeadingCells puts any column ahead of it
     // A mask column (#150): computed, so read-only like Position — and it shows
     // what is on disk, since the backend renders it from the file.
     const custom = customColumnOf(field);
@@ -613,6 +642,7 @@ function buildTrackRow(track, groupKey) {
     if (edited && value !== original) td.classList.add("dirty");
     tr.appendChild(td);
   }
+  placeLeadingCells(tr);
   return tr;
 }
 
