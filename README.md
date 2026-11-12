@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="120" alt="TagRex logo">
+  <img src="assets/logo.svg" width="100" alt="TagRex logo">
 </p>
 
 <p align="center">

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - A redrawn app icon: a tag on the diagonal with an eyelet and an upright note, in soft gradients. On Windows and Linux the tag itself is the icon; on macOS it sits on a rounded tile with the standard margin, so macOS 26 no longer frames it on a grey plate and it is no longer drawn larger than its Dock neighbours. The 16 and 24 px sizes use a simplified drawing so the note stays legible, and `assets/build-icons.py` regenerates every icon file from the SVG masters ([#735](https://github.com/tagrex/tagrex/issues/735)).
+- The logo at the top of the README matches the new app icon: the same diagonal tag, gradient and note, without the shadow so it stays crisp on both the light and the dark theme ([#736](https://github.com/tagrex/tagrex/issues/736)).
 
 ## [1.3.4] - 2026-11-10
 
