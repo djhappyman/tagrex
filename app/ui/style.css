@@ -3731,6 +3731,19 @@ td.unreadable-note {
 #tracks tbody td.position-cell {
   color: var(--muted);
 }
+
+/* Cover column (#730): a glyph centred in a narrow cell. Embedded stays quiet;
+   a missing cover is the one to notice, so it takes the problem colour. */
+#tracks tbody td.cover-cell {
+  text-align: center;
+}
+#tracks tbody td.cover-cell .ico {
+  display: inline-block;
+  vertical-align: middle;
+}
+#tracks tbody td.cover-missing {
+  color: var(--del);
+}
 .rule-flag:hover {
   color: var(--text);
 }

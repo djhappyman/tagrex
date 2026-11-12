@@ -125,6 +125,7 @@ function setGroupBy(value, { persist = true, rerender = true } = {}) {
 // name is the widest; short numeric/code fields start narrow.
 function defaultColumnWidth(key) {
   if (key === "file") return 240;
+  if (key === "cover") return 56; // one glyph (#730)
   if (["year", "track", "tracktotal", "disc", "bpm", "key", "length"].includes(key)) return 70;
   if (["artist", "title", "album", "albumartist", "composer"].includes(key)) return 160;
   return 130;

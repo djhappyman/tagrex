@@ -908,6 +908,11 @@ export const it = {
   "field.position": "Posizione",
   "field.length": "Durata",
   "field.tagtypes": "Tipi tag",
+  "field.cover": "Copertina",
+  // The Cover column's cell, as tooltip and accessible name (#730).
+  "cover.cell.embedded": "Copertina incorporata",
+  "cover.cell.missing": "Nessuna copertina",
+  "cover.cell.unknown": "Sconosciuto: impossibile leggere il file",
   // Settings › Online import: which fields an import may write (#422).
   "importField.title": "Titolo",
   "importField.artist": "Artista",

@@ -242,7 +242,28 @@ function virtualCellText(track, key, pending) {
   if (key === "position") return vinylPositionOf(track, pending);
   if (key === "length") return track.duration_secs == null ? "" : fmtTime(track.duration_secs);
   if (key === "tagtypes") return tagBlockSummary(track);
+  if (key === "cover") return msg(`cover.cell.${coverState(track)}`);
   return null;
+}
+
+// What the Cover column says about a file (#730): "embedded", "missing", or
+// "unknown" for a file whose tags were not read, which must never pass for
+// missing. `has_cover` is only false for a file that was read (#447).
+function coverState(track) {
+  if (track.unreadable) return "unknown";
+  return track.has_cover === false ? "missing" : "embedded";
+}
+
+// The Cover cell shows a glyph rather than the word, which stays in the tooltip,
+// the accessible name, the sort and the filter. A missing cover gets the
+// conspicuous glyph: the gaps are what the column is for.
+function paintCoverCell(td, track) {
+  const state = coverState(track);
+  const label = td.textContent;
+  td.classList.add("cover-cell", `cover-${state}`);
+  td.title = label;
+  td.setAttribute("aria-label", label);
+  td.innerHTML = state === "unknown" ? "?" : ico(state === "missing" ? "image-off" : "image");
 }
 
 // The Tag types cell (#47): every block the file carries, the one being read
@@ -273,6 +294,9 @@ function sortValue(track, key) {
     const blocks = track.tag_blocks || [];
     return String(9 - Math.min(blocks.length, 9)) + tagBlockSummary(track).toLowerCase();
   }
+  // Ascending puts the files without a cover first, then the ones not known,
+  // which is where you would go looking for them (#730).
+  if (key === "cover") return String(["missing", "unknown", "embedded"].indexOf(coverState(track)));
   // A mask column sorts on what it renders, which is what the eye compares.
   if (customColumnOf(key)) return customColumnValue(key, track.path).toLowerCase();
   return (key === "file" ? fileName(track.path) : track.tags[key] || "").toLowerCase();
@@ -563,6 +587,7 @@ function buildTrackRow(track, groupKey) {
       const td = document.createElement("td");
       td.className = "position-cell";
       td.textContent = derived;
+      if (field === "cover") paintCoverCell(td, track);
       tr.appendChild(td);
       continue;
     }
@@ -611,6 +636,7 @@ function fillDiffRow(tr, track) {
       if (derived !== null) {
         td.className = "position-cell";
         td.textContent = derived;
+        if (field === "cover") paintCoverCell(td, track);
       } else {
         td.textContent = tag(track, field);
       }
@@ -630,6 +656,7 @@ function fillDiffRow(tr, track) {
       const td = document.createElement("td");
       td.className = "position-cell";
       td.textContent = derived;
+      if (field === "cover") paintCoverCell(td, track);
       tr.appendChild(td);
       continue;
     }

@@ -157,6 +157,13 @@ widths — to the defaults.
 rather than a tag column, and it stays first. Everything else is yours to
 arrange.
 
+A few columns are read from the file rather than from a tag, and can't be edited:
+**Position** (the vinyl side and track, such as `A1`), **Length**, **Tag types**
+(which tag blocks the file carries) and **Cover**. Cover shows a picture glyph
+for a file with embedded cover art and a struck-through one, in red, for a file
+without; sorting by it puts the files without a cover first. A file whose tags
+could not be read is never counted as missing a cover.
+
 ### A column of your own
 
 **Add column…** at the bottom of the columns menu defines a column whose value is
