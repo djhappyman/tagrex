@@ -15,7 +15,7 @@ tagrex-providers-musicbrainz = { path = "../providers-musicbrainz" }
 tagrex-providers-beatport = { path = "../providers-beatport" }
 tagrex-providers-bandcamp = { path = "../providers-bandcamp" }
 tagrex-providers-soundeo = { path = "../providers-soundeo" }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 thiserror.workspace = true
 base64 = "0.23.1"
