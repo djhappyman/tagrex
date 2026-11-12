@@ -2701,6 +2701,122 @@ function onDragUp() {
   setManualOrder(true);
   renderTracks();
 }
+
+// ---- select by dragging over the table (#731) ----
+// Pressing a tag cell and dragging selects every row from the pressed one to the
+// one under the pointer, the way a file manager's band does; with ⌘/Ctrl the band
+// is added to what was selected. The File cell keeps its own drag, the row
+// reorder above. Rows are counted in the model's order (`viewPaths`), so a band
+// covers rows the windowed table has not drawn and rows in a collapsed folder,
+// exactly like a Shift-range — which is what it is built on.
+const BAND_THRESHOLD = 4; // px before a press counts as a drag, so a click stays a click
+const BAND_EDGE = 32; // px from the table's top or bottom edge where it scrolls itself
+const BAND_MAX_SPEED = 18; // px a frame at (or past) the edge
+let band = null;
+
+tracksBody.addEventListener("mousedown", (e) => {
+  if (e.button !== 0 || e.shiftKey || diffByPath) return;
+  if (e.target.closest("td.file, td.sel, tr.group-head")) return;
+  const cell = e.target.closest("td");
+  if (!cell || cell.isContentEditable) return; // a cell being edited owns the mouse
+  const tr = cell.closest("tr");
+  if (!tr || !tr.dataset.path || tr.classList.contains("unreadable")) return;
+  if (!viewPathIndex.has(tr.dataset.path)) return;
+  band = {
+    start: tr.dataset.path,
+    startY: e.clientY,
+    add: e.metaKey || e.ctrlKey,
+    active: false,
+    index: viewPathIndex.get(tr.dataset.path),
+    pointer: { x: e.clientX, y: e.clientY },
+    frame: 0,
+  };
+  document.addEventListener("mousemove", onBandMove);
+  document.addEventListener("mouseup", onBandUp);
+});
+
+// The index in `viewPaths` of the row under the pointer, clamped into the table
+// so a pointer held above or below it still names the edge row. Null over a
+// group header or the empty area past the last row, which keeps the band as is.
+function bandIndexAt(x, y) {
+  const box = tableWrap.getBoundingClientRect();
+  const head = tableWrap.querySelector("thead");
+  const top = box.top + (head ? head.getBoundingClientRect().height : 0) + 1;
+  const row = rowUnder(Math.min(Math.max(x, box.left + 1), box.right - 1), Math.min(Math.max(y, top), box.bottom - 1));
+  if (!row || !row.dataset.path || !viewPathIndex.has(row.dataset.path)) return null;
+  return viewPathIndex.get(row.dataset.path);
+}
+
+function onBandMove(e) {
+  if (!band) return;
+  band.pointer = { x: e.clientX, y: e.clientY };
+  if (!band.active) {
+    if (Math.abs(e.clientY - band.startY) < BAND_THRESHOLD) return;
+    band.active = true;
+    document.body.classList.add("band-selecting");
+    window.getSelection()?.removeAllRanges();
+    // Start from the pressed row alone, on top of the selection when adding.
+    if (!band.add) selection.clear();
+    anchorSelection(band.start);
+    selectRangeFromAnchor(band.index, band.index);
+    syncSelectionUI();
+    band.frame = requestAnimationFrame(bandTick);
+  }
+  e.preventDefault();
+  fitBand();
+}
+
+// Fit the band to the row under the pointer. Called on every pointer move, and
+// on every frame of an auto-scroll, which moves rows under a pointer held still.
+function fitBand() {
+  const index = bandIndexAt(band.pointer.x, band.pointer.y);
+  if (index === null || index === band.index) return;
+  band.index = index;
+  selectRangeFromAnchor(viewPathIndex.get(band.start), index);
+  syncSelectionUI();
+}
+
+// One frame of the drag: scroll when the pointer is near an edge. Runs every
+// frame while the drag lasts, because a pointer held still at the edge keeps
+// scrolling new rows under itself.
+function bandTick() {
+  if (!band || !band.active) return;
+  const box = tableWrap.getBoundingClientRect();
+  const y = band.pointer.y;
+  let speed = 0;
+  if (y < box.top + BAND_EDGE) speed = -Math.min(BAND_MAX_SPEED, ((box.top + BAND_EDGE - y) / BAND_EDGE) * BAND_MAX_SPEED);
+  else if (y > box.bottom - BAND_EDGE)
+    speed = Math.min(BAND_MAX_SPEED, ((y - (box.bottom - BAND_EDGE)) / BAND_EDGE) * BAND_MAX_SPEED);
+  if (speed) {
+    tableWrap.scrollTop += Math.round(speed) || Math.sign(speed);
+    // The windowed table draws the rows that just scrolled in on its own scroll
+    // handler; draw them now so the row under the pointer exists this frame.
+    renderWindow();
+    fitBand();
+  }
+  band.frame = requestAnimationFrame(bandTick);
+}
+
+function onBandUp() {
+  document.removeEventListener("mousemove", onBandMove);
+  document.removeEventListener("mouseup", onBandUp);
+  const finished = band;
+  band = null;
+  if (!finished || !finished.active) return; // a plain click: the click handler selects
+  cancelAnimationFrame(finished.frame);
+  document.body.classList.remove("band-selecting");
+  // The browser still fires a click where the button came up — on a row it would
+  // reselect that row alone, on the empty area it would clear the selection.
+  // That click comes straight after this mouseup, before any timer; released
+  // outside the window there is none, so the swallow must not outlive the turn.
+  const swallow = (e) => e.stopPropagation();
+  window.addEventListener("click", swallow, { capture: true, once: true });
+  setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 0);
+  // The pressed row stays the anchor, so a following Shift-click extends the band.
+  const last = viewPaths[finished.index];
+  if (last) setActiveRowByPath(last, true);
+}
+
 rootInput.addEventListener("input", updateLibAction);
 rootInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter") openLibrary();

@@ -11,6 +11,7 @@ picking rows; what the modes then *do* with them is on their own pages.
 | Click a row | Select just that row |
 | ⌘/Ctrl-click | Add or remove one row, keeping the rest |
 | Shift-click | Select the range from the last-clicked row, keeping what a ⌘/Ctrl-click left selected |
+| Drag over the tag cells | Select every row from the one you pressed to the one under the pointer; with ⌘/Ctrl held, add them to the selection. Near the top or bottom edge the table scrolls on its own |
 | ⌘/Ctrl-A | Select every row the table lists |
 | Click below the rows | Clear the selection |
 | ↑ / ↓ | Move to the previous/next row |

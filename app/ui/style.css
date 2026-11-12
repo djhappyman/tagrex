@@ -3744,6 +3744,13 @@ td.unreadable-note {
 #tracks tbody td.cover-missing {
   color: var(--del);
 }
+
+/* Selecting by dragging over the table (#731): the plain arrow throughout, so
+   the cells' own text and edit cursors don't flicker under the band. */
+body.band-selecting,
+body.band-selecting * {
+  cursor: default !important;
+}
 .rule-flag:hover {
   color: var(--text);
 }
