@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Cover column appears first, in front of File, when it is switched on, and can be dragged anywhere from there. It is the only column that may stand in front of File ([#733](https://github.com/tagrex/tagrex/issues/733)).
 - Select files by dragging over the table: press a tag cell and drag to select every row from there to the pointer, with ⌘/Ctrl to add them to the selection. The table scrolls on its own near its edges, and dragging the file name still reorders rows ([#731](https://github.com/tagrex/tagrex/issues/731)).
 
+### Changed
+
+- A redrawn app icon: a tag on the diagonal with an eyelet and an upright note, in soft gradients. On Windows and Linux the tag itself is the icon; on macOS it sits on a rounded tile with the standard margin, so macOS 26 no longer frames it on a grey plate and it is no longer drawn larger than its Dock neighbours. The 16 and 24 px sizes use a simplified drawing so the note stays legible, and `assets/build-icons.py` regenerates every icon file from the SVG masters ([#735](https://github.com/tagrex/tagrex/issues/735)).
+
 ## [1.3.4] - 2026-11-10
 
 A security update. The undo journal moves to SQLite 3.54.1, which fixes a flaw
