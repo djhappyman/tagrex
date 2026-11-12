@@ -1,3 +1,4 @@
+import { createComponentElement, upgradeComponentMarkup } from "../lib/component-elements.js";
 // Cover art (#41, #102, #133, #143 split it out of app.js).
 //
 // The cover well in EDITOR — what the selection currently carries, embedding a
@@ -15,7 +16,7 @@ import { t, tn } from "./i18n.js";
 import { invoke } from "./invoke.js";
 import { hooks } from "./hooks.js";
 import { enablePointerReorder } from "./reorder.js";
-import { previewPlan, selectedPaths, setPreviewPlan, setPreviewSource } from "./state.js";
+import { previewPlan, selectedPaths, captureSelection, isSelectionCurrent, setPreviewPlan, setPreviewSource } from "./state.js";
 
 const coverWell = el("cover-well");
 const coverSetBox = el("cover-set");
@@ -37,6 +38,32 @@ const COVER_KINDS = [
 // The set the strip is editing — the one every selected file carries. Replaced
 // on every refresh, so it is never stale against the disk.
 let coverSet = [];
+let coverSubject = null;
+let pickSubject = null;
+let coverRequest = 0;
+let coverReadsActive = 0;
+let queuedCoverRead = null;
+
+// Keep at most two native reads outstanding; replace any waiting job with the
+// newest subject. Freshness checks still protect reverse completion order.
+async function readCurrentCoverSummary(subject) {
+  if (coverReadsActive >= 2) {
+    const proceed = await new Promise(resolve => {
+      queuedCoverRead?.(false);
+      queuedCoverRead = resolve;
+    });
+    if (!proceed || !isSelectionCurrent(subject)) return null;
+  }
+  if (!isSelectionCurrent(subject)) return null;
+  coverReadsActive++;
+  try { return await invoke("read_cover_summary", { paths: subject.paths }); }
+  finally {
+    coverReadsActive--;
+    const next = queuedCoverRead;
+    queuedCoverRead = null;
+    next?.(true);
+  }
+}
 // Whether the next picked file joins the set rather than becoming the front
 // cover. Set by "Add image…", cleared as soon as the picker answers.
 let pickAppends = false;
@@ -47,6 +74,7 @@ function chooseCover() {
     toast(t("toast.cover.selectEmbed"), true);
     return;
   }
+  pickSubject = captureSelection();
   coverFileInput.value = ""; // allow re-picking the same file
   coverFileInput.click();
 }
@@ -55,9 +83,9 @@ async function onCoverChosen() {
   const file = coverFileInput.files[0];
   const appending = pickAppends;
   pickAppends = false;
-  if (!file) return;
-  if (appending) await addCoverFile(file);
-  else await embedCoverFile(file);
+  if (!file || !isSelectionCurrent(pickSubject)) return;
+  if (appending) await addCoverFile(file, pickSubject);
+  else await embedCoverFile(file, pickSubject);
 }
 
 // Read an image File into a cover DTO ({ mime, data_base64 }).
@@ -80,7 +108,7 @@ async function readImageFile(file) {
 // cover of the selection. Used by the file picker and the well's HTML5 drop
 // (browser-dev). In the packaged app a dropped cover arrives as a path instead
 // — see embedCoverFromPath (#133).
-async function embedCoverFile(file) {
+async function embedCoverFile(file, subject = captureSelection()) {
   if (!file.type.startsWith("image/")) {
     toast(t("toast.cover.dropImage"), true);
     return;
@@ -89,31 +117,36 @@ async function embedCoverFile(file) {
     toast(t("toast.cover.selectEmbed"), true);
     return;
   }
-  await embedCoverDto(await readImageFile(file));
+  await embedCoverDto(await readImageFile(file), subject);
 }
 
 // Add a picked image to the set rather than replacing the front cover (#56).
 // New images join as "other": the front one is what the well is for, and
 // guessing a type from a file name would be worse than asking.
-async function addCoverFile(file) {
+async function addCoverFile(file, subject = coverSubject) {
   if (!file.type.startsWith("image/")) {
     toast(t("toast.cover.pickImage"), true);
     return;
   }
+  if (!isSelectionCurrent(subject) || subject !== coverSubject) return;
+  const existing = coverSet.slice();
   const image = await readImageFile(file);
-  await previewCoverSet([...coverSet, { ...image, kind: "other", description: "" }]);
+  await previewCoverSet([...existing, { ...image, kind: "other", description: "" }], subject);
 }
 
 // Stage a whole image set onto the selection (#56) — the one call behind add,
 // remove, reorder and retype.
-async function previewCoverSet(covers) {
-  const paths = selectedPaths();
+async function previewCoverSet(covers, subject = coverSubject) {
+  if (!isSelectionCurrent(subject) || subject !== coverSubject) return;
+  const paths = subject.paths;
   if (paths.length === 0) {
     toast(t("toast.cover.selectImages"), true);
     return;
   }
   try {
-    setPreviewPlan(await invoke("preview_cover_set", { paths, covers }));
+    const plan = await invoke("preview_cover_set", { paths, covers });
+    if (!isSelectionCurrent(subject) || subject !== coverSubject) return;
+    setPreviewPlan(plan);
     setPreviewSource("cover");
     hooks.renderPreview(previewPlan);
     toast(
@@ -132,13 +165,14 @@ async function previewCoverSet(covers) {
 // Embed an image dropped onto the cover well in the packaged app (#133): the
 // drag-drop event gives a path, which the backend reads into a cover DTO.
 async function embedCoverFromPath(path) {
+  const subject = captureSelection();
   if (selectedPaths().length === 0) {
     toast(t("toast.cover.selectEmbed"), true);
     return;
   }
   try {
     const cover = await invoke("read_cover_image", { path });
-    await embedCoverDto(cover);
+    await embedCoverDto(cover, subject);
   } catch (e) {
     toast(String(e), true);
   }
@@ -147,14 +181,17 @@ async function embedCoverFromPath(path) {
 // Preview embedding a cover DTO ({ mime, data_base64 }) as the front cover of
 // the current selection — the shared tail of every cover-embed source (picker,
 // HTML5 drop, native drop, and the release card).
-async function embedCoverDto(cover) {
-  const paths = selectedPaths();
+async function embedCoverDto(cover, subject = captureSelection()) {
+  if (!isSelectionCurrent(subject)) return;
+  const paths = subject.paths;
   if (paths.length === 0) {
     toast(t("toast.cover.selectEmbed"), true);
     return;
   }
   try {
-    setPreviewPlan(await invoke("preview_cover_embed", { paths, cover }));
+    const plan = await invoke("preview_cover_embed", { paths, cover });
+    if (!isSelectionCurrent(subject)) return;
+    setPreviewPlan(plan);
     setPreviewSource("cover");
     hooks.renderPreview(previewPlan);
     toast(
@@ -170,13 +207,16 @@ async function embedCoverDto(cover) {
 // Preview removing the embedded cover from the selection, through the normal
 // preview/apply/undo path.
 async function previewCoverRemove() {
-  const paths = selectedPaths();
+  const subject = captureSelection();
+  const paths = subject.paths;
   if (paths.length === 0) {
     toast(t("toast.cover.selectRemove"), true);
     return;
   }
   try {
-    setPreviewPlan(await invoke("preview_cover_remove", { paths }));
+    const plan = await invoke("preview_cover_remove", { paths });
+    if (!isSelectionCurrent(subject)) return;
+    setPreviewPlan(plan);
     setPreviewSource("cover");
     hooks.renderPreview(previewPlan);
     toast(
@@ -193,13 +233,16 @@ async function previewCoverRemove() {
 // through the normal preview/apply/undo path. The cover and DJ cue points are
 // kept; the diff is the review, and undo reverses it.
 async function previewClearTags() {
-  const paths = selectedPaths();
+  const subject = captureSelection();
+  const paths = subject.paths;
   if (paths.length === 0) {
     toast(t("toast.cover.selectClear"), true);
     return;
   }
   try {
-    setPreviewPlan(await invoke("preview_clear_tags", { paths }));
+    const plan = await invoke("preview_clear_tags", { paths });
+    if (!isSelectionCurrent(subject)) return;
+    setPreviewPlan(plan);
     setPreviewSource("clear");
     hooks.renderPreview(previewPlan);
     toast(
@@ -216,7 +259,16 @@ async function previewClearTags() {
 // A thumbnail + state + actions that replaces the two bare Embed/Export buttons.
 // Reflects the selection's cover state: none / one shared / mixed.
 async function refreshCoverWell() {
-  const paths = selectedPaths();
+  const subject = captureSelection();
+  const request = ++coverRequest;
+  const paths = subject.paths;
+  coverSubject = null;
+  coverSet = [];
+  externalCover = null;
+  coverSetBox.hidden = true;
+  coverSetBox.replaceChildren();
+  coverWell.setAttribute("aria-busy", "true");
+  for (const button of coverWell.querySelectorAll('button')) button.disabled = true;
   if (paths.length === 0) {
     coverWell.className = "cover-well empty";
     coverWell.innerHTML = `<div class="cover-thumb inert"></div>
@@ -224,14 +276,20 @@ async function refreshCoverWell() {
       <div class="cover-hint">${escapeHtml(t("cover.selectToEdit"))}</div></div>`;
     coverSetBox.hidden = true;
     coverSet = [];
+    coverWell.removeAttribute("aria-busy");
     return;
   }
   try {
-    const summary = await invoke("read_cover_summary", { paths });
+    const summary = await readCurrentCoverSummary(subject);
+    if (!summary || request !== coverRequest || !isSelectionCurrent(subject)) return;
+    coverSubject = subject;
     renderCoverWell(summary);
-    renderCoverSet(summary);
-    await showExternalCoverAction(paths);
+    renderCoverSet(summary, subject);
+    coverWell.removeAttribute("aria-busy");
+    await showExternalCoverAction(subject, request);
   } catch (e) {
+    if (request !== coverRequest || !isSelectionCurrent(subject)) return;
+    coverWell.removeAttribute("aria-busy");
     toast(String(e), true);
   }
 }
@@ -240,7 +298,8 @@ async function refreshCoverWell() {
 // offered as a one-click embed under the well (#41).
 let externalCover = null;
 
-async function showExternalCoverAction(paths) {
+async function showExternalCoverAction(subject, request) {
+  const paths = subject.paths;
   externalCover = null;
   let found;
   try {
@@ -248,14 +307,14 @@ async function showExternalCoverAction(paths) {
   } catch (e) {
     return; // best-effort; the well already rendered
   }
-  if (!found) return;
-  externalCover = found;
+  if (!found || request !== coverRequest || !isSelectionCurrent(subject)) return;
+  externalCover = { image: found, subject };
   // Join the action row so it flows with Replace…/Remove/Export as an equal
   // button (#134), not a full-width slab. Falls back to the body in the no-cover
   // state, which has no action row.
   const host = coverWell.querySelector(".cover-actions") || coverWell.querySelector(".cover-body");
   if (!host) return;
-  const note = document.createElement("button");
+  const note = createComponentElement("button");
   note.className = "btn cover-external";
   note.dataset.cover = "external";
   note.textContent = t("cover.useFolder");
@@ -266,26 +325,9 @@ async function showExternalCoverAction(paths) {
 // Embed the external cover file (folder.jpg/cover.jpg) into the selection (#41),
 // through the same preview/apply/undo path as any other cover.
 async function embedExternalCover() {
-  if (!externalCover) return;
-  const paths = selectedPaths();
-  if (paths.length === 0) {
-    toast(t("toast.cover.selectEmbed"), true);
-    return;
-  }
-  try {
-    setPreviewPlan(await invoke("preview_cover_embed", { paths, cover: externalCover }));
-    setPreviewSource("cover");
-    hooks.renderPreview(previewPlan);
-    toast(
-      previewPlan.changes.length
-        ? t("toast.cover.previewFolderImage", {
-            files: tn("unit.file", previewPlan.changes.length),
-          })
-        : t("toast.cover.sameCover"),
-    );
-  } catch (e) {
-    toast(String(e), true);
-  }
+  const current = externalCover;
+  if (!current || !isSelectionCurrent(current.subject) || current.subject !== coverSubject) return;
+  await embedCoverDto(current.image, current.subject);
 }
 
 function coverThumbImg(cover, cls) {
@@ -325,6 +367,7 @@ function renderCoverWell(summary) {
           <button class="btn" data-cover="export">${escapeHtml(t("cover.export"))}</button>
         </div>
       </div>`;
+    upgradeComponentMarkup(coverWell);
     return;
   }
 
@@ -343,6 +386,7 @@ function renderCoverWell(summary) {
         <button class="btn" data-cover="export">${escapeHtml(t("cover.export"))}</button>
       </div>
     </div>`;
+  upgradeComponentMarkup(coverWell);
 }
 
 // ---- the image set (#56) ----
@@ -350,7 +394,7 @@ function renderCoverWell(summary) {
 // Only shown when every selected file carries the SAME set — with nothing
 // shared there is no single set to edit, and the well's mixed state already
 // says so. Each edit sends the whole revised set.
-function renderCoverSet(summary) {
+function renderCoverSet(summary, subject) {
   coverSet = summary.distinct ? [] : summary.shared_set.map((image) => ({ ...image }));
   // Nothing to manage until there is at least one image; the well's own
   // "Embed cover…" is the way in, and Add image… appears once there is a set.
@@ -382,7 +426,7 @@ function renderCoverSet(summary) {
       if (from < to) to -= 1;
       if (below) to += 1;
       next.splice(Math.max(0, Math.min(next.length, to)), 0, moved);
-      previewCoverSet(next);
+      previewCoverSet(next, subject);
     });
 
     const thumb = document.createElement("img");
@@ -402,33 +446,35 @@ function renderCoverSet(summary) {
     }
     kind.addEventListener("change", () => {
       const next = coverSet.map((c, at) => (at === index ? { ...c, kind: kind.value } : c));
-      previewCoverSet(next);
+      previewCoverSet(next, subject);
     });
 
     const meta = document.createElement("span");
     meta.className = "cover-row-meta";
     meta.textContent = image.description || image.mime.replace("image/", "");
 
-    const remove = document.createElement("button");
+    const remove = createComponentElement("button");
     remove.className = "icon cover-row-rm";
     remove.type = "button";
     remove.innerHTML = ico("close");
     remove.title = t("cover.removeImage");
     remove.setAttribute("aria-label", t("cover.removeImage"));
     remove.addEventListener("click", () =>
-      previewCoverSet(coverSet.filter((_, at) => at !== index))
+      previewCoverSet(coverSet.filter((_, at) => at !== index), subject)
     );
 
     row.append(grip, thumb, kind, meta, remove);
     coverSetBox.appendChild(row);
   });
 
-  const add = document.createElement("button");
+  const add = createComponentElement("button");
   add.className = "btn cover-add";
   add.type = "button";
   add.textContent = t("cover.addImage");
   add.title = t("cover.addImageTitle");
   add.addEventListener("click", () => {
+    if (!isSelectionCurrent(subject) || subject !== coverSubject) return;
+    pickSubject = subject;
     pickAppends = true;
     coverFileInput.value = ""; // allow re-picking the same file
     coverFileInput.click();
