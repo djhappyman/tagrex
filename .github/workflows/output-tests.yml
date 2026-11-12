@@ -1,0 +1,51 @@
+name: Guarded output runtime tests
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  output-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Exercise output publication and platform directory guards
+        run: cargo test -p tagrex-commands output::tests -- --nocapture
+      - name: Exercise fetched-image batch validation
+        run: cargo test -p tagrex-commands fetched_image_batch_refuses_special_targets_without_partial_outputs
+  windows-exfat:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Exercise publication on an exFAT virtual disk
+        shell: pwsh
+        run: |
+          if (Test-Path 'Z:\') { throw 'Z: is already in use; refusing to touch it' }
+          $disk = Join-Path $env:RUNNER_TEMP 'tagrex-output-tests.vhd'
+          if (Test-Path $disk) { throw 'Test VHD already exists' }
+          try {
+            @"
+          create vdisk file="$disk" maximum=128 type=expandable
+          select vdisk file="$disk"
+          attach vdisk
+          create partition primary
+          format fs=exfat quick label=TagRexOutputs
+          assign letter=Z
+          "@ | diskpart
+            if ((Get-Volume -DriveLetter Z).FileSystem -ne 'exFAT') {
+              throw 'The disposable exFAT test volume was not created'
+            }
+            $env:TAGREX_OUTPUT_TEST_ROOT = 'Z:\'
+            cargo test -p tagrex-commands output::tests -- --nocapture
+            if ($LASTEXITCODE -ne 0) { throw 'Output tests failed on exFAT' }
+          } finally {
+            Remove-Item Env:TAGREX_OUTPUT_TEST_ROOT -ErrorAction SilentlyContinue
+            @"
+          select vdisk file="$disk"
+          detach vdisk
+          "@ | diskpart
+            Remove-Item $disk -ErrorAction SilentlyContinue
+          }

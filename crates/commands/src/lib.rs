@@ -12,6 +12,8 @@
 //! than core types, so `tagrex-core` stays serialization-agnostic. Tag map
 //! keys use [`TagField`]'s lossless storage-key codec.
 
+mod output;
+
 use std::path::{Component, Path, PathBuf};
 
 use std::cell::{Cell, RefCell};
@@ -4522,7 +4524,7 @@ impl App {
                     if !seen_targets.insert(canonical_target) {
                         continue;
                     }
-                    std::fs::write(&target, &cover.data)?;
+                    self.write_output(&target, &cover.data)?;
                     written.push(target.to_string_lossy().into_owned());
                 }
                 None => skipped_no_cover.push(path.to_string_lossy().into_owned()),
@@ -4543,6 +4545,15 @@ impl App {
             return Err(AppError::InvalidFileName(file_name.to_string()));
         }
         Ok(self.library_root.join(name))
+    }
+
+    fn write_output(&self, target: &Path, bytes: &[u8]) -> Result<(), AppError> {
+        output::write_batch(
+            &self.library_root,
+            &[(target.to_path_buf(), bytes.to_vec())],
+            true,
+        )?;
+        Ok(())
     }
 
     /// How an exported file refers to a track: relative to the library root when
@@ -4582,7 +4593,7 @@ impl App {
         let target = self.export_target(file_name)?;
         let root = std::fs::canonicalize(&self.library_root)?;
         let entries = Self::playlist_entries(&root, paths);
-        std::fs::write(&target, export::m3u(&entries))?;
+        self.write_output(&target, export::m3u(&entries).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4680,7 +4691,7 @@ impl App {
             let name = self.playlist_name(&mask, &members[0], &mut taken)?;
             let target = self.export_target(&name)?;
             let entries = Self::playlist_entries(&root, members);
-            std::fs::write(&target, export::m3u(&entries))?;
+            self.write_output(&target, export::m3u(&entries).as_bytes())?;
             written.push(target.to_string_lossy().into_owned());
         }
         Ok(written)
@@ -4752,7 +4763,7 @@ impl App {
                 })
             })
             .collect();
-        std::fs::write(&target, export::cue(&entries))?;
+        self.write_output(&target, export::cue(&entries).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4760,7 +4771,7 @@ impl App {
     pub fn export_csv(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::csv(&tracks))?;
+        self.write_output(&target, export::csv(&tracks).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4768,7 +4779,7 @@ impl App {
     pub fn export_html(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::html(&tracks))?;
+        self.write_output(&target, export::html(&tracks).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4776,7 +4787,7 @@ impl App {
     pub fn export_xml(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::xml(&tracks))?;
+        self.write_output(&target, export::xml(&tracks).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4791,7 +4802,7 @@ impl App {
         let target = self.export_target(file_name)?;
         let mask = Mask::parse(mask_pattern)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::report(&tracks, &mask))?;
+        self.write_output(&target, export::report(&tracks, &mask).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4981,38 +4992,75 @@ impl App {
         urls: &[String],
         overwrite: bool,
     ) -> Result<SaveImagesDto, AppError> {
+        self.validate_image_target(track)?;
+        let images = urls
+            .iter()
+            .map(|url| providers.fetch_image_bytes(source, token, url))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.save_fetched_release_images(track, &images, overwrite)
+    }
+
+    /// Validate the destination before starting network work. Repeated when
+    /// publishing downloaded images; callers must also preserve session identity.
+    pub fn validate_image_target(&self, track: &Path) -> Result<PathBuf, AppError> {
         let root = std::fs::canonicalize(&self.library_root)?;
         let dir = track.parent().unwrap_or(Path::new("."));
-        let canonical_dir = std::fs::canonicalize(dir)?;
-        if !canonical_dir.starts_with(&root) {
+        let canonical = std::fs::canonicalize(dir)?;
+        if !canonical.starts_with(&root) {
             return Err(AppError::OutsideRoot(track.to_string_lossy().into_owned()));
         }
-        let mut planned: Vec<(PathBuf, Vec<u8>)> = Vec::new();
-        for (index, url) in urls.iter().enumerate() {
-            let image = providers.fetch_image_bytes(source, token, url)?;
-            let ext = extension_for_mime(&image.mime);
-            let name = format!("{}.{ext}", image_basename(index));
-            planned.push((canonical_dir.join(name), image.data));
-        }
-        let conflicts: Vec<String> = planned
+        Ok(canonical)
+    }
+
+    /// Publish already-fetched images without holding the session during HTTP.
+    pub fn save_fetched_release_images(
+        &self,
+        track: &Path,
+        images: &[FetchedImage],
+        overwrite: bool,
+    ) -> Result<SaveImagesDto, AppError> {
+        let dir = self.validate_image_target(track)?;
+        let planned: Vec<_> = images
             .iter()
-            .filter(|(target, _)| target.exists())
-            .filter_map(|(target, _)| target.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
+            .enumerate()
+            .map(|(index, image)| {
+                let name = format!(
+                    "{}.{}",
+                    image_basename(index),
+                    extension_for_mime(&image.mime)
+                );
+                (dir.join(name), image.data.clone())
+            })
             .collect();
+        let mut conflicts = Vec::new();
+        for (target, _) in &planned {
+            match std::fs::symlink_metadata(target) {
+                Ok(metadata) => {
+                    if !metadata.is_file() || metadata.file_type().is_symlink() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "image output target is not a regular file",
+                        )
+                        .into());
+                    }
+                    conflicts.push(target.file_name().unwrap().to_string_lossy().into_owned());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
         if !conflicts.is_empty() && !overwrite {
             return Ok(SaveImagesDto {
                 written: Vec::new(),
                 conflicts,
             });
         }
-        let mut written = Vec::new();
-        for (target, data) in &planned {
-            std::fs::write(target, data)?;
-            written.push(target.to_string_lossy().into_owned());
-        }
+        output::write_batch(&self.library_root, &planned, overwrite)?;
         Ok(SaveImagesDto {
-            written,
+            written: planned
+                .iter()
+                .map(|(p, _)| p.to_string_lossy().into_owned())
+                .collect(),
             conflicts: Vec::new(),
         })
     }
@@ -11249,6 +11297,44 @@ mod tests {
 
         let plan = app.preview_rename("%album% - %title%", &[track]).unwrap();
         assert!(plan.changes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confined_exports_never_follow_existing_or_dangling_links() {
+        let dir = TempDir::new("confined-exports");
+        let library = dir.0.join("library");
+        std::fs::create_dir(&library).unwrap();
+        let outside = dir.0.join("outside.txt");
+        std::fs::write(&outside, b"original").unwrap();
+        let app = App::open(&library, &dir.0.join("journal.sqlite")).unwrap();
+        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
+        assert!(app.export_playlist(&[], "list.m3u").is_err());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"original");
+        std::fs::remove_file(library.join("list.m3u")).unwrap();
+        std::fs::remove_file(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
+        assert!(app.export_playlist(&[], "list.m3u").is_err());
+        assert!(!outside.exists());
+    }
+
+    #[test]
+    fn fetched_image_batch_refuses_special_targets_without_partial_outputs() {
+        let dir = TempDir::new("images-atomic");
+        let app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
+        std::fs::write(dir.0.join("folder.jpg"), b"original").unwrap();
+        std::fs::create_dir(dir.0.join("cover.jpg")).unwrap();
+        let image = || FetchedImage {
+            mime: "image/jpeg".into(),
+            data: vec![1, 2, 3],
+        };
+        assert!(app
+            .save_fetched_release_images(&dir.0.join("track.flac"), &[image(), image()], true)
+            .is_err());
+        assert_eq!(
+            std::fs::read(dir.0.join("folder.jpg")).unwrap(),
+            b"original"
+        );
     }
 
     #[test]
