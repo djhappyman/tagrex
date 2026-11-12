@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A cover image larger than 10 MB downloads instead of failing with "the response body is larger than request limit". Cover Art Archive originals are often bigger, so such a MusicBrainz release card showed no cover and the image could not be embedded or saved. Images are now accepted up to 64 MB ([#746](https://github.com/tagrex/tagrex/issues/746)).
+- A search, release or cover request that a provider turns away with a short rate-limit wait is tried once more after that wait, instead of failing at once. MusicBrainz does this whenever it is shedding load, answering part of its requests with a refusal that the same request a second later gets past. A longer stated wait, such as a minute from Discogs, is still reported straight away ([#747](https://github.com/tagrex/tagrex/issues/747)).
 
 ## [1.4.0] - 2026-11-12
 
