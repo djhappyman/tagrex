@@ -64,7 +64,8 @@ export function hydratePlanResponse(result) {
 
 // Older backends ignore unknown JSON fields. Never send them an empty inline
 // image plus a reference they cannot resolve. New backends advertise the pool
-// on preview responses (including an empty pool on tag-only previews).
+// on artwork previews with a nonempty pool. Tag-only previews omit the pool,
+// so keep sending inline data until an artwork preview advertises support.
 export function createPlanCodec() {
   let pooled = false;
   return {

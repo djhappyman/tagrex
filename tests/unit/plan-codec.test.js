@@ -15,7 +15,9 @@ test('older backends receive complete inline images until pool support is advert
   assert.equal(codec.prepare(request), request);
   codec.accept(plan());
   assert.equal(codec.prepare(request).plan.changes[0].cover_change.new[0].data_base64, art.data_base64);
-  codec.accept({ changes: [], cover_assets: [] });
+  codec.accept({ changes: [] });
+  assert.equal(codec.prepare(request), request, "tag-only previews do not advertise pooling");
+  codec.accept(compactPlan(plan()));
   assert.deepEqual(codec.prepare(request).plan.cover_assets, [art.data_base64]);
   assert.equal(codec.prepare(request).plan.changes[0].cover_change.new[0].data_ref, 0);
   const nested = createPlanCodec();
