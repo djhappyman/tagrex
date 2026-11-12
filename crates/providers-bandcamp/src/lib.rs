@@ -45,6 +45,7 @@ const USER_AGENT: &str =
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) \
      Chrome/124.0.0.0 Safari/537.36";
 
+#[derive(Clone)]
 pub struct BandcampProvider {
     agent: ureq::Agent,
 }
@@ -320,6 +321,7 @@ fn parse_release(html: &str, url: &str) -> Result<Release, ProviderError> {
     let release_url = str_field(&tralbum, "url").unwrap_or_else(|| url.to_string());
 
     Ok(Release {
+        links: Vec::new(),
         id: ReleaseId(url.to_string()),
         artist,
         title,
