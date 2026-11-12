@@ -320,10 +320,8 @@ function accentColor() {
 // stored colour) just clears the override so the stylesheet's own palette shows.
 function applyAccent() {
   stampAccent();
-  // Anything that paints with a theme colour outside CSS — the player's
-  // waveform reads --accent at draw time — repaints on this, so it does not sit
-  // on the old colour until its next tick (#433). Also fires on a theme change,
-  // since that re-derives the accent.
+  // Notify theme-aware integrations after updating the CSS colour tokens.
+  // A theme change also re-derives the accent.
   document.dispatchEvent(new CustomEvent("tagrex:appearance"));
 }
 function stampAccent() {

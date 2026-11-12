@@ -344,7 +344,7 @@ CSS theme variables. The libraries doing the heavy lifting:
   the supported formats.
 - [rodio](https://github.com/RustAudio/rodio) with
   [Symphonia](https://github.com/pdeljanov/Symphonia) — the preview player and
-  the waveform.
+  the seek bar.
 - ["Beat This!"](https://github.com/CPJKU/beat_this) through
   [beat-this-rs](https://github.com/danigb/beat-this-rs) on the
   [rten](https://github.com/robertknight/rten) runtime: BPM detection. The

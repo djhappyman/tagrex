@@ -1,3 +1,4 @@
+import { connectWorkspaceController, publishWorkspaceMode, publishWorkspaceSubtab } from './lib/workspace-state';
 import { createGroupMotion } from "./js/group-motion.js";
 import { clearLiveInputs, hasLiveInputs, liveInputChanged, recordLiveField, hasInvalidLiveFields, hasInvalidPreview, removeAppliedLiveInputs, undoLiveImport } from "./js/live-preview.js";
 "use strict";
@@ -98,7 +99,7 @@ import { initPlaceholderReference } from "./js/placeholders.js";
 import { initMaskPresets } from "./js/maskpresets.js";
 import { initTooltips } from "./js/tooltip.js";
 import { comboOf, formatCombo, initShortcuts } from "./js/shortcuts.js";
-import { bpmRunning, retranslateBpm, stopBpm } from "./js/bpm.js";
+import { bpmRunning, invalidateBpm, retranslateBpm, stopBpm } from "./js/bpm.js";
 import { isFieldLocked, loadFieldLocks, pushFieldLocks } from "./js/locks.js";
 import {
   cellSuggestKey,
@@ -1979,6 +1980,7 @@ async function openLibrary(options = {}) {
     toast(msg("app.enterPath"), true);
     return;
   }
+  invalidateBpm();
   flushSessionView();
   const version = ++openVersion;
   resumableRoot = "";
@@ -2153,6 +2155,7 @@ async function afterOpen(label, version = openVersion, savedView = null) {
 // drives the table's drop-origin grouping, and is null for library mode.
 async function openDrop(paths) {
   if (!paths || !paths.length) return;
+  invalidateBpm();
   flushSessionView();
   const version = ++openVersion;
   resumableRoot = "";
@@ -2427,6 +2430,7 @@ const MODE_REFRESH = {
 // this in sync with the tab/panel marked active/visible there.
 
 function setMode(name) {
+  publishWorkspaceMode(name);
   setCurrentMode(name);
   // The dock borrows the GENERATOR panel's chain block (#149, #233); this puts
   // it wherever the new mode says it belongs — back in that panel on the way
@@ -2473,9 +2477,7 @@ function refreshTagger() {
   scheduleTextProbe(); // the same for FROM TEXT, whose counts follow the selection
 }
 
-document.querySelectorAll(".mode-tab").forEach((tab) => {
-  tab.addEventListener("click", () => setMode(tab.dataset.mode));
-});
+
 
 // Collapse/expand the mode panel to give the table the full width.
 el("panel-toggle").addEventListener("click", () => {
@@ -2777,6 +2779,7 @@ el("export-kind").addEventListener("click", (e) => {
 // TAGGER sub-tabs: ONLINE (a metadata source), EDITOR (tag fields + cover),
 // FROM NAME (the file's own name, #139) — three ways to the same outcome.
 function setSubtab(name) {
+  publishWorkspaceSubtab(name);
   document.querySelectorAll(".subtab").forEach((t) => t.classList.toggle("active", t.dataset.subtab === name));
   document.querySelectorAll(".subtab-panel").forEach((p) => {
     p.hidden = p.id !== `subtab-${name}`;
@@ -2790,9 +2793,7 @@ function setSubtab(name) {
   // EDITOR deliberately has none (#236).
   syncTransformPlacement();
 }
-document.querySelectorAll(".subtab").forEach((tab) => {
-  tab.addEventListener("click", () => setSubtab(tab.dataset.subtab));
-});
+connectWorkspaceController({ setMode, setSubtab });
 
 
 document.addEventListener("keydown", (e) => {
@@ -2824,7 +2825,6 @@ const ESC_POPUPS = [
   "edit-ctx",
   "group-menu",
   "columns-menu",
-  "pl-volume-pop",
   "ph-menu",
   "preset-menu",
   "query-preset-menu",

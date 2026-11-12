@@ -1006,66 +1006,6 @@ fn player_seek(player: State<Player>, secs: f64) {
     player.seek(secs);
 }
 
-/// Waveforms already computed, newest last (#101): the file's path, the mtime
-/// it was decoded at, and the buckets.
-///
-/// Keyed by mtime as well as path because a file whose tags were just rewritten
-/// is a different file on disk, and a stale picture beside a track that has
-/// changed is exactly the kind of small lie that makes a display untrustworthy.
-/// Bounded, and a kilobyte an entry — the cache exists so replaying a track
-/// costs nothing, not so a whole library can be held.
-type WaveformState = Mutex<Vec<(String, u64, Vec<u8>)>>;
-
-/// How many waveforms are kept. Sixty-four kilobytes of pictures, which is more
-/// than anybody plays through in a sitting.
-const WAVEFORM_CACHE_ENTRIES: usize = 64;
-
-/// The amplitude envelope of a file, for the player's seek bar (#101).
-///
-/// `async` and off on a blocking thread, both deliberately: decoding an
-/// hour-long mix takes seconds, a *synchronous* command would run it on the main
-/// thread and freeze the whole webview, and an async one that blocked would sit
-/// on a runtime worker that provider requests also want.
-#[tauri::command]
-async fn waveform(cache: State<'_, WaveformState>, path: String) -> Result<Vec<u8>, ErrorDto> {
-    let target = path.clone();
-    let stamp = IMAGE_READ_QUEUE
-        .run(move || {
-            Ok({
-                std::fs::metadata(&target)
-                    .and_then(|meta| meta.modified())
-                    .ok()
-                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|since| since.as_secs())
-                    .unwrap_or(0)
-            })
-        })
-        .await?;
-
-    // Scoped so no guard is alive across the await below.
-    {
-        let entries = cache.lock().unwrap();
-        if let Some((_, _, peaks)) = entries
-            .iter()
-            .find(|(cached, at, _)| cached == &path && *at == stamp)
-        {
-            return Ok(peaks.clone());
-        }
-    }
-    let target = PathBuf::from(&path);
-    let peaks = tauri::async_runtime::spawn_blocking(move || tagrex_player::waveform(&target))
-        .await
-        .map_err(shell_error)?
-        .map_err(shell_error)?;
-    let mut entries = cache.lock().unwrap();
-    entries.retain(|(cached, _, _)| cached != &path);
-    entries.push((path, stamp, peaks.clone()));
-    if entries.len() > WAVEFORM_CACHE_ENTRIES {
-        entries.remove(0);
-    }
-    Ok(peaks)
-}
-
 #[tauri::command]
 fn player_set_volume(player: State<Player>, level: f64) {
     player.set_volume(level as f32);
@@ -1168,6 +1108,21 @@ struct BpmDetectionDto {
     cancelled: bool,
 }
 
+fn preview_detected_bpm(
+    state: &AppState,
+    generation: u64,
+    detected: &[(PathBuf, f64)],
+) -> Result<PlanDto, ErrorDto> {
+    if LIBRARY_GENERATION.load(Ordering::SeqCst) != generation {
+        return Err(shell_error(
+            "Library changed while detecting BPM; outdated results discarded",
+        ));
+    }
+    with_app(state, |app| {
+        app.preview_bpm(detected).map_err(ErrorDto::from)
+    })
+}
+
 /// Measure the tempo of each file and stage the BPM field (#536).
 ///
 /// The measuring runs on a blocking thread and outside the session lock: it
@@ -1185,8 +1140,15 @@ async fn detect_bpm(
     control.0.store(false, Ordering::SeqCst);
     let cancel = control.0.clone();
     let session = state.inner().clone();
-    let limit = SESSION_QUEUE
-        .run(move || with_app(&session, |app| Ok(app.bpm_max_length())))
+    let (limit, generation) = SESSION_QUEUE
+        .run(move || {
+            with_app(&session, |app| {
+                Ok((
+                    app.bpm_max_length(),
+                    LIBRARY_GENERATION.load(Ordering::SeqCst),
+                ))
+            })
+        })
         .await?;
     let measured = tauri::async_runtime::spawn_blocking(move || {
         let mut detector = tagrex_player::tempo::TempoDetector::new().map_err(shell_error)?;
@@ -1230,11 +1192,7 @@ async fn detect_bpm(
     let (detected, analysed, no_tempo, too_long, failed, cancelled) = measured;
     let session = state.inner().clone();
     let plan = SESSION_QUEUE
-        .run(move || {
-            with_app(&session, |app| {
-                app.preview_bpm(&detected).map_err(ErrorDto::from)
-            })
-        })
+        .run(move || preview_detected_bpm(&session, generation, &detected))
         .await?;
     Ok(BpmDetectionDto {
         plan,
@@ -2143,7 +2101,6 @@ fn main() {
             Ok(())
         })
         .manage(Player::new())
-        .manage(WaveformState::default())
         .invoke_handler(tauri::generate_handler![
             open_library,
             open_drop,
@@ -2222,7 +2179,6 @@ fn main() {
             player_stop,
             player_seek,
             player_set_volume,
-            waveform,
             builtin_action_groups,
             transform_sample,
             mask_placeholders,
@@ -2256,6 +2212,36 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{paths_from_args, provider_page_url, release_url};
+
+    #[test]
+    fn bpm_results_from_a_replaced_library_are_rejected_before_accessing_the_session() {
+        let state: super::AppState = Default::default();
+        let earlier = super::LIBRARY_GENERATION
+            .load(std::sync::atomic::Ordering::SeqCst)
+            .wrapping_sub(1);
+        let error = super::preview_detected_bpm(&state, earlier, &[]).unwrap_err();
+        assert!(error.text.contains("Library changed while detecting BPM"));
+    }
+
+    #[test]
+    fn bpm_results_for_the_current_library_use_the_session() {
+        let root = std::env::temp_dir().join(format!(
+            "tagrex-bpm-current-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let app = super::App::open(&root, &root.join("journal.sqlite")).unwrap();
+        let state: super::AppState = std::sync::Arc::new(std::sync::Mutex::new(Some(app)));
+        let current = super::LIBRARY_GENERATION.load(std::sync::atomic::Ordering::SeqCst);
+        let plan = super::preview_detected_bpm(&state, current, &[]).unwrap();
+        assert!(plan.changes.is_empty());
+        drop(state);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn saved_preferences_reach_a_library_that_is_still_opening() {

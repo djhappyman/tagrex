@@ -7,7 +7,8 @@
     "check": "svelte-check --threshold warning",
     "test:unit": "node --test tests/unit/*.test.js",
     "test:ui": "vite build --config tests/ui/vite.config.js && playwright test",
-    "dev": "vite"
+    "dev": "vite",
+    "desktop:dev": "tauri dev --config app/tauri.dev.conf.json"
   },
   "dependencies": {
     "@lucide/svelte": "^1.72.0",
@@ -24,6 +25,7 @@
     "@playwright/test": "^1.56.0",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tailwindcss/vite": "^4.3.5",
+    "@tauri-apps/cli": "2.12.4",
     "mode-watcher": "^1.1.0",
     "svelte-check": "^4.3.0",
     "svelte-sonner": "^1.2.3",

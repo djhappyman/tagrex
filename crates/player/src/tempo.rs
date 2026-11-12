@@ -8,7 +8,7 @@
 //! tracker's 20 ms frames quantise: on 120 real files the median gave a tempo
 //! within 1 BPM of the reference 34% of the time, the fit 82%.
 //!
-//! The audio is decoded through the same path playback and the waveform use, so
+//! The audio is decoded through the same path playback uses, so
 //! a file the player can play is a file whose tempo can be measured.
 
 use std::collections::HashMap;

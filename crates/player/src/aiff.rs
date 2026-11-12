@@ -4,7 +4,7 @@
 //! `offset` field skips that many bytes of padding first, and `blockSize` hints
 //! at an alignment. The format allows both; Symphonia 0.5 refuses any file that
 //! uses either ("No support for AIFF block-aligned data"), so such a file could
-//! neither play nor draw its waveform. It is not rare: whole rips come out of
+//! not play. It is not rare: whole rips come out of
 //! some tools as AIFF-C `sowt` with 2280 bytes of padding on every track.
 //!
 //! [`AudioFile`] hands the decoder a view of the file in which the padding is
