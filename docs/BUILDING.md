@@ -4,7 +4,7 @@
 
 Push a feature branch and open a PR against this fork's `main`. GitHub Actions checks Linux, Windows and macOS, runs the frontend tests and audits dependencies. Exact-head results matter: a new push invalidates an older green result.
 
-A push to `main` runs those checks and then packages the same commit into development artifacts. Download them from the successful CI run's **Artifacts** section. These are development builds, not published releases.
+A push to `main` runs those same reusable CI checks through **Build and release**, then packages the same commit into development artifacts. PR validation contains only applicable checks; packaging is a dependent job in the separate build workflow. Download them from the successful **Build and release** run's **Artifacts** section. These are development builds, not published releases.
 
 ## Publish a personal pre-release
 

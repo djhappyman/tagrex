@@ -2,11 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main, next]
-    tags: ["personal-v*"]
+    branches: [next]
   pull_request:
-  release:
-    types: [published]
+  # Main/tag/release builds reuse these exact validation jobs before packaging.
+  workflow_call:
   # Manual trigger, so CI can be re-run on the current HEAD when a hosted runner
   # fails to pick up the push-triggered job (a GitHub-side runner hiccup) without
   # needing an empty commit.
@@ -153,10 +152,3 @@ jobs:
     uses: ./.github/workflows/audit.yml
     permissions:
       contents: read
-
-  packages:
-    needs: [check, windows, macos, advisories]
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/personal-v'))
-    uses: ./.github/workflows/release.yml
-    permissions:
-      contents: write
