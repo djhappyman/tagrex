@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - File and library commands no longer run on the interface thread: they go to a background worker, so the window keeps responding while a long one runs. Each online source keeps its own queue, and quick successive clicks on field locks are applied in the order they were made ([#737](https://github.com/tagrex/tagrex/pull/737)).
 - The Undo history list reads only each batch's description and file paths, not the full tag, artwork and block snapshots behind it, so it opens quickly even with a long history. The snapshots are loaded when a batch is actually undone ([#739](https://github.com/tagrex/tagrex/pull/739)).
+- The README's screenshots and demo animation show the mode switcher as the segmented pill the app now opens with, in both the light and the dark theme ([#754](https://github.com/tagrex/tagrex/issues/754)).
 - Online sources reuse their connection between requests instead of building a new client for each one; a changed token or proxy setting still takes effect at once. Finding duplicates by content reads each file through a small buffer instead of loading the whole file into memory ([#740](https://github.com/tagrex/tagrex/pull/740)).
 
 ### Fixed
