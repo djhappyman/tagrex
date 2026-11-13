@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-13
+
+A release about the online sources and the top bar. MusicBrainz release
+cards now show their cover without being expanded, large Cover Art Archive
+originals download instead of failing, covers no longer hold up searches,
+and a short rate-limit refusal is retried once instead of failing the
+request. The mode tabs become one segmented pill, and the earlier
+underlined tabs stay one click away in Settings.
+
 ### Added
 
 - A setting for how the mode switcher in the top bar looks, in Settings › General: the segmented pill or the earlier underlined tabs, each shown as a small drawing beside its radio button. The top bar follows the choice at once, and resetting the group brings back the pill ([#753](https://github.com/tagrex/tagrex/issues/753)).
