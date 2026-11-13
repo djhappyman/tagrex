@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Ignore macOS AppleDouble companion files when scanning audio on removable drives (upstream #755).
+
 ### Changed
 
 - Redesign transformation presets with clearer rule explanations, inline editing,
