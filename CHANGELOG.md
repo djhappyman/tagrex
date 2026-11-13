@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.4.0-personal.2] - Unreleased
+
+- Integrate progressive filter conditions while retaining preview validity and pending-filter Apply guards.
+- Establish the personal fork README, preliminary roadmap and contribution ledger.
+- Validate commits on Linux, Windows and macOS; package successful main commits as artifacts and publish matching personal tags only after all packages succeed.
+
+## [1.4.0-personal.1] - 2026-11-13
+
+Personal-fork release with the measured performance checkpoint, interaction fixes, and upstream provider improvements. Uses a separate application identity and version line; original-project update checks and installation are disabled.
+
+### Fixed
+
+- Accept provider artwork up to a bounded 64 MiB, including large Cover Art Archive originals (upstream #746).
+
+- Retry a provider request once after a short rate-limit refusal, preserving longer pause handling (upstream #747).
+
+- Show confirmed MusicBrainz cover thumbnails on collapsed release cards and avoid known-missing cover requests (upstream #748).
+
 ## [1.3.4] - 2026-11-10
 
 A security update. The undo journal moves to SQLite 3.54.1, which fixes a flaw

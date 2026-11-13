@@ -1,3 +1,5 @@
+import { createComponentElement } from "../lib/component-elements.js";
+import { positionControllerToast } from "../lib/controller-surfaces.js";
 // Small DOM helpers shared by every part of the frontend (#143 split them out
 // of app.js). Nothing here knows about the library, the selection or any
 // command — they take arguments and touch the document, so any module can use
@@ -34,16 +36,7 @@ function barShown() {
 // bar is centred on the table, not the window, so CSS alone can't line them up.
 function placeToast() {
   const box = el("toast");
-  if (box.hidden || !barShown()) {
-    box.style.left = box.style.bottom = box.style.width = box.style.maxWidth = "";
-    return;
-  }
-  const bar = el("diff-actionbar").getBoundingClientRect();
-  box.style.left = `${bar.left + bar.width / 2}px`;
-  box.style.bottom = `${window.innerHeight - bar.top + 8}px`;
-  const isReport = !el("toast-parts").hidden;
-  box.style.width = isReport ? `${Math.max(bar.width, 320)}px` : "";
-  box.style.maxWidth = isReport ? "none" : "";
+  positionControllerToast(!box.hidden && barShown() ? el("diff-actionbar").getBoundingClientRect() : null);
 }
 window.addEventListener("resize", placeToast);
 
@@ -238,7 +231,7 @@ export function choiceDialog(message, { subject = "", detail = "", primary, seco
     const actions = okBtn.parentElement;
     const okText = okBtn.textContent;
     const cancelText = cancelBtn.textContent;
-    const altBtn = document.createElement("button");
+    const altBtn = createComponentElement("button", { variant: "destructive" });
     altBtn.className = "danger";
     altBtn.textContent = secondary;
     actions.prepend(okBtn);

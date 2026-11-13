@@ -14,8 +14,7 @@
 //! Every format we handle decodes through rodio/Symphonia, including OGG, which
 //! the previous WebView `<audio>` player couldn't play.
 //!
-//! The same decoder feeds the two analyses of the audio: the waveform drawn in
-//! the player bar, and the tempo detection in [`tempo`] (#536).
+//! The same decoder also feeds tempo detection in [`tempo`] (#536).
 
 mod aiff;
 mod mp4;
@@ -115,82 +114,12 @@ impl Default for Player {
     }
 }
 
-/// How many buckets a waveform is reduced to (#101). Wide enough that a
-/// three-minute track shows its structure at any window width the player bar
-/// ever has, small enough that the whole thing is a kilobyte of JSON.
-const WAVEFORM_BUCKETS: usize = 1000;
-
-/// Samples per coarse peak while decoding. The pass does not know how long the
-/// file will turn out to be — a duration read from tags can be wrong, and some
-/// formats do not state one at all — so it collects peaks at a fixed
-/// granularity and reduces that to [`WAVEFORM_BUCKETS`] afterwards. An hour of
-/// 44.1 kHz stereo is about 310k coarse peaks, a megabyte held for the length
-/// of one call.
-const WAVEFORM_WINDOW: usize = 1024;
-
-/// The quietest peak a waveform is scaled against (#101). Normalising to the
-/// loudest sample is what makes a quiet recording legible, but a track that is
-/// nearly silent would be amplified into a wall of noise — so the divisor never
-/// goes below this, which caps the amplification at 20x.
-const WAVEFORM_FLOOR: f32 = 0.05;
-
-/// The amplitude envelope of `path`, as [`WAVEFORM_BUCKETS`] values of 0..=255
-/// (#101).
-///
-/// Decoded through the same rodio/Symphonia path playback uses, deliberately:
-/// anything the player can play is then something the bar can draw, and there
-/// is no second decoder configuration to drift out of step with the first.
-///
-/// **RMS, not peak.** The obvious envelope — the loudest sample in each
-/// bucket — draws a solid block for anything mastered in the last thirty years:
-/// measured on a real track it averaged 216 of 255 with almost every bucket at
-/// the ceiling, which tells you nothing about where the intro ends. RMS follows
-/// how loud a passage actually *is*, so an intro, a breakdown and a drop are
-/// three different heights. The result is normalised to the file's own loudest
-/// passage, so the picture fills the bar whatever the recording level.
-///
-/// Blocking and slow — seconds for an hour-long mix. The caller must keep it off
-/// the main thread.
-pub fn waveform(path: &std::path::Path) -> Result<Vec<u8>, String> {
-    let decoder = open_decoder(path)?;
-
-    let mut coarse: Vec<f32> = Vec::new();
-    let mut sum_squares = 0.0f64;
-    let mut in_window = 0usize;
-    for sample in decoder {
-        sum_squares += (sample as f64) * (sample as f64);
-        in_window += 1;
-        if in_window == WAVEFORM_WINDOW {
-            coarse.push((sum_squares / WAVEFORM_WINDOW as f64).sqrt() as f32);
-            sum_squares = 0.0;
-            in_window = 0;
-        }
-    }
-    // The tail of the file is a window like any other, however short.
-    if in_window > 0 {
-        coarse.push((sum_squares / in_window as f64).sqrt() as f32);
-    }
-    if coarse.is_empty() {
-        return Err("nothing decoded".to_string());
-    }
-
-    let loudest = coarse.iter().copied().fold(0.0f32, f32::max);
-    // Loudest PASSAGE, not loudest sample — see above; the floor below is what
-    // keeps a near-silent file from being amplified into a wall of noise.
-    let scale = 1.0 / loudest.max(WAVEFORM_FLOOR);
-    let mut buckets = Vec::with_capacity(WAVEFORM_BUCKETS);
-    for index in 0..WAVEFORM_BUCKETS {
-        // Ranges are computed from the index rather than stepped, so the
-        // rounding error cannot accumulate and leave the last bucket empty.
-        let from = index * coarse.len() / WAVEFORM_BUCKETS;
-        let to = ((index + 1) * coarse.len() / WAVEFORM_BUCKETS).max(from + 1);
-        let loudest_here = coarse[from..to.min(coarse.len())]
-            .iter()
-            .copied()
-            .fold(0.0f32, f32::max);
-        buckets.push(((loudest_here * scale).clamp(0.0, 1.0) * 255.0).round() as u8);
-    }
-    Ok(buckets)
+/// Exercise the complete playback decoder for the separate fuzz workspace.
+/// Normal app builds do not expose or call this probe.
+#[cfg(feature = "fuzzing")]
+pub fn fuzz_decode(path: &std::path::Path) -> Result<(), String> {
+    for _ in open_decoder(path)? {}
+    Ok(())
 }
 
 /// One queued track: its path and total duration (from lofty, since rodio's
@@ -374,8 +303,7 @@ fn enqueue(sink: &Sink, queue: &mut VecDeque<Track>, path: PathBuf) -> bool {
     true
 }
 
-/// Open `path` for decoding — the one way playback, the waveform and the tempo
-/// detection all do it.
+/// Open `path` for decoding — shared by playback and tempo detection.
 ///
 /// Through [`aiff::AudioFile`], which reads every file as it is except an AIFF
 /// with padding before its samples, which Symphonia would refuse (#525). The
@@ -415,8 +343,8 @@ fn open_decoder(
 /// Symphonia also panics part-way through some damaged files, not only on
 /// their headers: a broken AAC frame indexes past one of its tables. Playback
 /// pulls samples on the audio output thread, where nothing of ours could catch
-/// that, so one such file could take the app down mid-track; the waveform and
-/// the tempo detection only lost their result. A panic now ends the track at
+/// that, so one such file could take the app down mid-track; tempo detection
+/// only lost its result. A panic now ends the track at
 /// that point, as if the file stopped there.
 struct PanicSafe<S> {
     inner: S,
@@ -621,7 +549,7 @@ mod tests {
     use super::*;
 
     // #525: an AIFF with padding before its samples decodes — and to the same
-    // audio as the file without it, so playback and the waveform see the same
+    // audio as the file without it, so playback and tempo detection see the same
     // thing either way. Symphonia alone refuses the padded one.
     #[test]
     fn a_padded_aiff_decodes_like_the_same_file_without_padding() {
@@ -647,7 +575,6 @@ mod tests {
         let read = samples(&padded);
         assert!(read.len() >= 44_100 * 2);
         assert_eq!(read, samples(&plain));
-        assert_eq!(waveform(&padded).unwrap(), waveform(&plain).unwrap());
 
         // Seeking into the middle lands on the frame the plain file has there.
         use rodio::Source;
@@ -677,7 +604,6 @@ mod tests {
         use rodio::Source;
         assert_eq!(decoder.current_span_len(), Some(0));
         assert!(decoder.try_seek(Duration::ZERO).is_err());
-        let _ = waveform(&path);
     }
 
     // #721: headers the decoder panics on, minimized from fuzz inputs, come
@@ -688,7 +614,6 @@ mod tests {
         for name in ["zero-sample-rate.aiff", "zero-channels.mp3"] {
             let path = fixtures.join(name);
             assert!(open_decoder(&path).is_err(), "{name} opened");
-            assert!(waveform(&path).is_err(), "{name} drew a waveform");
         }
     }
 
@@ -704,7 +629,6 @@ mod tests {
             err.contains("sample tables"),
             "refused for another reason: {err}"
         );
-        assert!(waveform(&path).is_err());
     }
 
     #[test]
