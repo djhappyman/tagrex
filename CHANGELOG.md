@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.4.0-personal.2] - Unreleased
+## [1.4.1] - Unreleased
+
+- Use a numeric personal app version so Linux RPM packages can be generated.
+  Personal tags and app identity remain independent of upstream.
 
 - Download provider images outside the source queue/lock with a six-download cap, preserving queue-based preparation and source spacing.
 - Integrate progressive filter conditions while retaining preview validity and pending-filter Apply guards.
