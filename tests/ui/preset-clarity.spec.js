@@ -253,7 +253,7 @@ test('rule menus anchor at the pointer and fit inside narrow windows',async({pag
   const preset=await page.locator('#pe-preset-menu').boundingBox(); expect(preset.x+preset.width).toBeLessThanOrEqual(375); expect(preset.y+preset.height).toBeLessThanOrEqual(667);
 });
 
-test('preset menu opens at the actual pointer inside a centred desktop dialog',async({page})=>{
+test('preset menu opens at the actual pointer inside a centred desktop dialog',async({page},testInfo)=>{
   await create(page); const trigger=page.locator('.pe-list-item:has(.pe-list-row.active) .pe-preset-more');
   await trigger.evaluate(e=>e.addEventListener('click',event=>{window.morePoint={x:event.clientX,y:event.clientY};},{once:true,capture:true}));
   await trigger.click({timeout:5000}); await expect(page.locator('#pe-preset-menu')).toBeVisible();
@@ -262,7 +262,7 @@ test('preset menu opens at the actual pointer inside a centred desktop dialog',a
   expect(Math.abs(menu.x-x)).toBeLessThan(2); expect(Math.abs(menu.y-y)).toBeLessThan(2);
   expect(menu.width).toBeLessThanOrEqual(160);
   await expect(page.locator('#pe-preset-menu [data-cmd=rename]')).toHaveCSS('justify-content','flex-start');
-  await page.screenshot({path:'/mnt/Games/Development/tagrex/contribution-delivery/transformations-menu-browser-fixed.png',animations:'disabled',timeout:5000});
+  await page.screenshot({path:testInfo.outputPath('preset-menu.png'),animations:'disabled',timeout:5000});
 });
 
 test('delete is reversible and Undo restores saved rules', async ({ page }) => {
@@ -290,7 +290,7 @@ test('reordering keeps the focused action attached to the same rule', async ({ p
   await expect(page.locator('.is-expanded .pe-rule-open')).toBeFocused();
 });
 
-for (const theme of ['light','dark']) for (const [width,height] of [[1280,800],[375,667],[844,390]]) test(`aligned pinned preview and themed inline rules: ${theme} ${width}x${height}`, async ({ page }) => {
+for (const theme of ['light','dark']) for (const [width,height] of [[1280,800],[375,667],[844,390]]) test(`aligned pinned preview and themed inline rules: ${theme} ${width}x${height}`, async ({ page }, testInfo) => {
   await page.setViewportSize({width,height}); await page.evaluate(theme=>{document.documentElement.dataset.theme=theme;},theme);
   await page.locator('#pe-editor').evaluate(async e=>{await Promise.all(e.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));});
   const before=await page.locator('.pe-sample').boundingBox();
@@ -303,5 +303,5 @@ for (const theme of ['light','dark']) for (const [width,height] of [[1280,800],[
   await page.locator('.pe-rules-panel').evaluate(e=>{e.scrollTop=0;});
   await expect(page.locator('#pe-sample-out')).not.toHaveAttribute('aria-busy','true');
   await page.locator('#pe-editor').evaluate(async e=>{await Promise.all(e.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));});
-  await page.screenshot({path:`/mnt/Games/Development/tagrex/contribution-delivery/transformations-inline-${theme}-${width}.png`});
+  await page.screenshot({path:testInfo.outputPath(`preset-${theme}-${width}.png`)});
 });
