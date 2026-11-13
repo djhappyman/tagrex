@@ -9402,7 +9402,14 @@ mod tests {
         let batch = app.apply(&cleaned).unwrap();
         assert!(track.exists());
         assert!(dir.0.join("original.lrc").exists());
-        assert!(!dir.0.join("ORIGINAL.lrc").exists());
+        // Case-insensitive filesystems resolve ORIGINAL.lrc to original.lrc.
+        // Inspect directory-entry spelling to prove no case-only rename occurred.
+        let names: Vec<_> = std::fs::read_dir(&dir.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert!(names.iter().any(|name| name == "original.lrc"));
+        assert!(!names.iter().any(|name| name == "ORIGINAL.lrc"));
         let title = || {
             TagEngine::read(&track)
                 .unwrap()
@@ -11443,19 +11450,20 @@ mod tests {
         let dir = TempDir::new("sidecar-per-folder");
         let first = dir.tagged_flac_at("a/x.flac", "Artist", "First");
         let second = dir.tagged_flac_at("b/x.flac", "Artist", "Second");
-        std::fs::write(dir.0.join("a/x.lrc"), b"a lyrics").unwrap();
-        std::fs::write(dir.0.join("b/x.lrc"), b"b lyrics").unwrap();
+        std::fs::write(dir.0.join("a").join("x.lrc"), b"a lyrics").unwrap();
+        std::fs::write(dir.0.join("b").join("x.lrc"), b"b lyrics").unwrap();
         // A same-stem sidecar below the file's own folder is not the folder's.
-        std::fs::create_dir_all(dir.0.join("a/Nested")).unwrap();
-        std::fs::write(dir.0.join("a/Nested/x.lrc"), b"nested").unwrap();
+        std::fs::create_dir_all(dir.0.join("a").join("Nested")).unwrap();
+        std::fs::write(dir.0.join("a").join("Nested/x.lrc"), b"nested").unwrap();
         // A directory that looks like a sidecar is not a file.
-        std::fs::create_dir(dir.0.join("a/x.cue")).unwrap();
+        std::fs::create_dir(dir.0.join("a").join("x.cue")).unwrap();
         // A live symlink to a file travels; a dangling one does not.
         std::fs::write(dir.0.join("outside.txt"), b"outside").unwrap();
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink("../outside.txt", dir.0.join("a/x.txt")).unwrap();
-            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("a/x.jpg")).unwrap();
+            std::os::unix::fs::symlink("../outside.txt", dir.0.join("a").join("x.txt")).unwrap();
+            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("a").join("x.jpg"))
+                .unwrap();
         }
         let mut app = open_app(&dir);
 
@@ -11472,13 +11480,21 @@ mod tests {
         let first_change = &plan.changes[position(&first)];
         #[allow(unused_mut)]
         let mut expected = vec![(
-            dir.0.join("a/x.lrc").to_string_lossy().into_owned(),
-            dir.0.join("a/First.lrc").to_string_lossy().into_owned(),
+            dir.0.join("a").join("x.lrc").to_string_lossy().into_owned(),
+            dir.0
+                .join("a")
+                .join("First.lrc")
+                .to_string_lossy()
+                .into_owned(),
         )];
         #[cfg(unix)]
         expected.push((
-            dir.0.join("a/x.txt").to_string_lossy().into_owned(),
-            dir.0.join("a/First.txt").to_string_lossy().into_owned(),
+            dir.0.join("a").join("x.txt").to_string_lossy().into_owned(),
+            dir.0
+                .join("a")
+                .join("First.txt")
+                .to_string_lossy()
+                .into_owned(),
         ));
         expected.sort();
         assert_eq!(first_change.sidecar_renames, expected);
@@ -11486,33 +11502,41 @@ mod tests {
         assert_eq!(
             plan.changes[position(&second)].sidecar_renames,
             vec![(
-                dir.0.join("b/x.lrc").to_string_lossy().into_owned(),
-                dir.0.join("b/Second.lrc").to_string_lossy().into_owned(),
+                dir.0.join("b").join("x.lrc").to_string_lossy().into_owned(),
+                dir.0
+                    .join("b")
+                    .join("Second.lrc")
+                    .to_string_lossy()
+                    .into_owned(),
             )]
         );
 
         let batch = app.apply(&plan).unwrap();
-        assert!(dir.0.join("a/First.flac").exists());
-        assert!(dir.0.join("a/First.lrc").exists());
-        assert!(!dir.0.join("a/x.lrc").exists());
-        assert!(dir.0.join("b/Second.flac").exists());
-        assert!(dir.0.join("b/Second.lrc").exists());
+        assert!(dir.0.join("a").join("First.flac").exists());
+        assert!(dir.0.join("a").join("First.lrc").exists());
+        assert!(!dir.0.join("a").join("x.lrc").exists());
+        assert!(dir.0.join("b").join("Second.flac").exists());
+        assert!(dir.0.join("b").join("Second.lrc").exists());
         assert!(
-            dir.0.join("a/Nested/x.lrc").exists(),
+            dir.0.join("a").join("Nested/x.lrc").exists(),
             "a subfolder's file never travels"
         );
-        assert!(dir.0.join("a/x.cue").is_dir(), "a directory is not carried");
+        assert!(
+            dir.0.join("a").join("x.cue").is_dir(),
+            "a directory is not carried"
+        );
         #[cfg(unix)]
         assert!(
-            std::fs::read_link(dir.0.join("a/First.txt")).unwrap() == Path::new("../outside.txt"),
+            std::fs::read_link(dir.0.join("a").join("First.txt")).unwrap()
+                == Path::new("../outside.txt"),
             "the live symlink travelled as itself"
         );
 
         app.undo(batch.id).unwrap();
-        assert!(dir.0.join("a/x.flac").exists());
-        assert!(dir.0.join("a/x.lrc").exists());
-        assert!(dir.0.join("b/x.lrc").exists());
-        assert!(!dir.0.join("a/First.lrc").exists());
+        assert!(dir.0.join("a").join("x.flac").exists());
+        assert!(dir.0.join("a").join("x.lrc").exists());
+        assert!(dir.0.join("b").join("x.lrc").exists());
+        assert!(!dir.0.join("a").join("First.lrc").exists());
     }
 
     // #58: the listing is the preview's, not the session's — each new preview
