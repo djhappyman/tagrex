@@ -2,12 +2,22 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
+    tags: ["personal-v*"]
   pull_request:
+  release:
+    types: [published]
   # Manual trigger, so CI can be re-run on the current HEAD when a hosted runner
   # fails to pick up the push-triggered job (a GitHub-side runner hiccup) without
   # needing an empty commit.
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:unit
+      - run: npm run build
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -41,6 +60,11 @@ jobs:
             libasound2-dev \
             patchelf \
             dbus
+
+      - name: Install browser for UI tests
+        run: npx playwright install --with-deps chromium
+      - name: Artwork picker UI tests
+        run: npm run test:ui
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -72,6 +96,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -91,9 +123,17 @@ jobs:
   # tag. It is also the one job on APFS, which treats the NFC and NFD spellings
   # of a name as one file.
   macos:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -108,3 +148,15 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+  advisories:
+    uses: ./.github/workflows/audit.yml
+    permissions:
+      contents: read
+
+  packages:
+    needs: [check, windows, macos, advisories]
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/personal-v'))
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write

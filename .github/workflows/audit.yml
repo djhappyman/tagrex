@@ -2,23 +2,12 @@ name: Audit
 
 # Checks the lockfile against the RustSec advisory database (#712). An advisory
 # is published without any change in this repository, so this runs on a schedule
-# as well as when the dependencies change. It is a workflow of its own so that a
-# new advisory does not turn CI red on an unrelated commit.
+# and is reused by CI for exact-head validation before packaging.
 on:
   schedule:
     - cron: "17 6 * * 1"
-  push:
-    branches: [main]
-    paths:
-      - "Cargo.lock"
-      - "**/Cargo.toml"
-      - ".github/workflows/audit.yml"
-  pull_request:
-    paths:
-      - "Cargo.lock"
-      - "**/Cargo.toml"
-      - ".github/workflows/audit.yml"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
