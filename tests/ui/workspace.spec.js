@@ -236,26 +236,21 @@ test('narrow preset editor provides usable fields and separate rule actions', as
   await openApp(page);
   await openLibrary(page);
   await page.locator('.mode-tab[data-mode="generator"]').click();
-  await page.getByRole('tab', { name: 'Transformations', exact: true }).click();
+  await page.locator('#gen-job-transform').click();
   await page.locator('#presets-edit').click();
   await expect(page.locator('#pe-editor')).toBeVisible();
   await page.locator('#pe-new').click();
   await page.locator('#pe-name').fill('Mobile case change');
-  await page.locator('#pe-kind').selectOption('case');
-  await page.locator('#pe-add').click();
-  for (const id of ['pe-name', 'pe-kind', 'pe-sample-input']) {
-    const field = page.locator(`#${id}`);
+  await page.locator('#pe-name').press('Enter');
+  await page.locator('#pe-empty-add').click();
+  await page.locator('#pe-rule-picker [data-cmd="case"]').click();
+  for (const field of [page.locator('#pe-sample-input'), page.locator('.is-expanded .pe-case-style').locator('..')]) {
     await field.scrollIntoViewIfNeeded();
     await expect(field).toBeInViewport({ ratio: 1 });
-    // A native field a few pixels wide technically fits, but cannot show a value.
     expect((await field.boundingBox()).width).toBeGreaterThanOrEqual(120);
   }
-  await page.locator('#pe-add').scrollIntoViewIfNeeded();
-  const add = await page.locator('#pe-add').boundingBox();
-  const clear = await page.locator('#pe-clear').boundingBox();
-  const overlapWidth = Math.max(0, Math.min(add.x + add.width, clear.x + clear.width) - Math.max(add.x, clear.x));
-  const overlapHeight = Math.max(0, Math.min(add.y + add.height, clear.y + clear.height) - Math.max(add.y, clear.y));
-  expect(overlapWidth * overlapHeight).toBe(0);
+  await page.locator('#pe-open-add').scrollIntoViewIfNeeded();
+  await expect(page.locator('#pe-open-add')).toBeInViewport({ ratio: 1 });
   await page.locator('#pe-editor-close').click();
   await expect(page.locator('#pe-editor')).toBeHidden();
 });

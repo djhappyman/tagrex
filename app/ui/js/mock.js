@@ -218,9 +218,16 @@ function mockApplyRules(value, rules) {
   for (const rule of rules || []) {
     if (rule.enabled === false) continue; // disabled step (#57)
     if (rule.kind === "replace" && rule.from) {
-      out = rule.regex
-        ? out.replace(new RegExp(rule.from, rule.case_sensitive ? "g" : "gi"), rule.to)
-        : out.split(rule.from).join(rule.to);
+      if (rule.regex) {
+        out = out.replace(new RegExp(rule.from, rule.case_sensitive ? "g" : "gi"), rule.to);
+      } else {
+        const escaped = rule.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const flags = rule.case_sensitive ? "gu" : "giu";
+        if (rule.whole_word) {
+          const pattern = "(^|[^\\p{L}\\p{N}_])(" + escaped + ")(?=$|[^\\p{L}\\p{N}_])";
+          out = out.replace(new RegExp(pattern, flags), (_, prefix) => prefix + rule.to);
+        } else out = out.replace(new RegExp(escaped, flags), () => rule.to);
+      }
     } else if (rule.kind === "case" && rule.style === "title") {
       const small = new Set(rule.small_words || []);
       const words = [...out.matchAll(/[\p{L}\p{N}']+/gu)];
