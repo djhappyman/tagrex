@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- File and library commands no longer run on the interface thread: they go to a background worker, so the window keeps responding while a long one runs. Each online source keeps its own queue, and quick successive clicks on field locks are applied in the order they were made ([#737](https://github.com/tagrex/tagrex/pull/737)).
+- The Undo history list reads only each batch's description and file paths, not the full tag, artwork and block snapshots behind it, so it opens quickly even with a long history. The snapshots are loaded when a batch is actually undone ([#739](https://github.com/tagrex/tagrex/pull/739)).
+- Online sources reuse their connection between requests instead of building a new client for each one; a changed token or proxy setting still takes effect at once. Finding duplicates by content reads each file through a small buffer instead of loading the whole file into memory ([#740](https://github.com/tagrex/tagrex/pull/740)).
+
+### Fixed
+
+- When a write fails and the rollback cannot restore every file, the batch's record is kept, marked as interrupted, instead of being deleted, so the files that were changed can still be found and undone. The check that runs before a write also reports its progress and can be cancelled ([#738](https://github.com/tagrex/tagrex/pull/738)).
+
 ## [1.5.0] - 2026-11-13
 
 A release about the online sources and the top bar. MusicBrainz release
