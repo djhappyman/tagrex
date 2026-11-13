@@ -956,10 +956,16 @@ async fn provider_fetch_image(
     token: String,
     url: String,
 ) -> Result<CoverArtDto, ErrorDto> {
-    with_providers(&providers, |hub| {
-        hub.provider_fetch_image(&source, &token, &url)
-            .map_err(ErrorDto::from)
-    })
+    // The provider lock is held only to build the fetcher; the download runs
+    // on a blocking worker without it, so a slow image (a Cover Art Archive
+    // front can take tens of seconds) no longer holds up every search, lookup
+    // and other image behind it (#749).
+    let fetch = with_providers(&providers, |hub| {
+        hub.image_fetch(&source, &token).map_err(ErrorDto::from)
+    })?;
+    tauri::async_runtime::spawn_blocking(move || fetch.fetch_cover(&url).map_err(ErrorDto::from))
+        .await
+        .map_err(shell_error)?
 }
 
 /// Save a release's images to disk next to the selected tracks (#102). Async:
