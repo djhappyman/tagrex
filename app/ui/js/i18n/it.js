@@ -851,6 +851,7 @@ export const it = {
   "settings.extensionsHint": "Quali file con lo stesso nome seguono una traccia rinominata o spostata. Separate da spazio o virgola, senza punto, insensibile a maiuscole/minuscole. Se seguirla o no è una casella nel pannello RENAMER.",
   "settings.portableNames": "Nomi di file sicuri",
   "settings.portableNamesHint": "I nomi creati da una rinomina o una trasformazione funzionano anche su Windows e su chiavette USB e schede SD: \":\" diventa \" -\", \"?\" e \"*\" vengono omessi, \" < > | diventano _, e un punto o uno spazio finale viene tolto. Disattivato mantiene questi caratteri dove questo sistema li consente. Su Windows vengono sempre sostituiti.",
+  "settings.appearance": "Aspetto",
   "settings.theme": "Tema",
   "settings.theme.light": "Chiaro",
   "settings.theme.dark": "Scuro",

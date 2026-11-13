@@ -471,21 +471,90 @@ body button[data-slot="button"].seg-btn.active { background: var(--accent); colo
 .modal-head { gap: 10px; }
 .modal-head h2 { letter-spacing: 0; }
 .modal-actions { gap: 8px; flex-wrap: wrap; }
-.settings-sheet { border-radius: 22px; width: min(960px, calc(100vw - 32px)); height: min(760px, calc(100dvh - 32px)); }
+.settings-sheet { background: var(--panel); border-color: color-mix(in srgb, var(--border) 65%, transparent); border-radius: 22px; width: min(960px, calc(100vw - 32px)); height: min(760px, calc(100dvh - 32px)); }
 .settings-head, .settings-foot { background: var(--workbench-surface); padding: 12px 16px; }
-.settings-nav { width: 210px; background: var(--workbench-surface); }
+.settings-main { gap: 8px; }
+.settings-nav { width: 210px; background: transparent; border-right: 0; }
 .settings-nav-list { gap: 3px; padding: 0 8px 10px; }
 body button[data-slot="button"].settings-nav-item { min-height: 34px; border-radius: 999px; padding: 8px 11px; justify-content: flex-start; }
-.settings-body { padding: 20px; }
-.settings-group { row-gap: 10px; column-gap: 15px; }
-.settings-group > h3 { font-size: var(--text-sm); letter-spacing: 0; text-transform: none; color: var(--text); }
+/* Settings stay on one flat surface: hierarchy comes from type and spacing. */
+.settings-body {
+  padding: 26px 28px; margin: 0 14px 8px 0; min-width: 0;
+  background: var(--bg); border-radius: 14px; overscroll-behavior: contain;
+}
+.settings-group { gap: 0; min-width: 0; }
+.settings-group > h3 {
+  margin: 0 0 24px; padding-right: 110px;
+  font-size: 22px; line-height: var(--lh-tight); font-weight: var(--fw-medium);
+  letter-spacing: -.02em; text-transform: none; color: var(--text);
+}
+.settings-group > h4.settings-sub {
+  margin: 28px 0 14px; padding-top: 22px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-lg); font-weight: var(--fw-medium); color: var(--text);
+}
+.settings-group > h3 + h4.settings-sub { margin-top: 0; padding-top: 0; border-top: 0; }
+.settings-field {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 280px);
+  grid-template-rows: auto auto; gap: 5px 28px;
+  padding-block: 12px; min-width: 0;
+}
+.settings-field > .settings-row { display: contents; }
+.settings-field > .settings-row > :first-child {
+  grid-column: 1; grid-row: 1; align-self: center;
+  display: flex; align-items: center; min-height: var(--ctl-h);
+}
+.settings-field > .settings-row > :last-child {
+  grid-column: 2; grid-row: 1; justify-self: end; align-self: center;
+  max-inline-size: 100%; min-width: 0;
+}
+.settings-field > .settings-row > :is(label, .settings-label) {
+  font-size: var(--text-sm); font-weight: var(--fw-medium); color: var(--text);
+}
+.settings-field > .settings-hint { grid-column: 1; max-width: 48ch; }
+.settings-help { display: grid; gap: 5px; }
+.settings-field > .settings-detail { grid-column: 1 / -1; max-width: 74ch; margin-top: 3px; }
+.settings-field:has(> .settings-detail) > .settings-row > :last-child { grid-row: 1; }
+.settings-field > .settings-row > .compat-native { display: inline-flex; }
+.settings-field > .settings-row > :is(input, select) { width: min(100%, 240px); }
+.settings-field:has(> .settings-row.col) { display: flex; flex-direction: column; gap: 7px; }
+.settings-field > .settings-row.col { display: flex; flex-direction: column; align-items: stretch; gap: 9px; }
+.settings-field > .settings-row.col > :first-child { align-self: stretch; }
+.settings-field > .settings-row.col > :last-child { align-self: stretch; width: 100%; }
+.settings-field .row-head > .settings-label { font-weight: var(--fw-medium); }
 .settings-row { min-width: 0; }
-.settings-row > .settings-label { font-size: var(--text-xs); color: var(--muted); }
 .settings-row > :is(input, select), .settings-inline { min-width: 0; }
 .settings-row input:is([type="text"], [type="password"], [type="number"]) { border-radius: var(--input-radius, 6px); padding-inline: 11px; }
-.settings-hint { line-height: 1.5; }
+.settings-row .seg { flex-wrap: wrap; }
+.settings-field .accent-picker { justify-content: flex-end; padding: 3px; }
+.settings-hint { font-size: var(--text-xs); line-height: 1.5; }
+.settings-group > .settings-hint { margin-block: 0 16px; max-width: 74ch; }
+.settings-group > .group-reset { top: 5px; font-size: var(--text-xs); }
+.settings-title { font-size: var(--text-lg); }
+.settings-foot .settings-hint { font-size: var(--text-xs); }
+@media (max-width: 760px) {
+  .settings-body { padding: 20px; }
+  .settings-field { grid-template-columns: minmax(0, 1fr); gap: 7px; padding-block: 13px; }
+  .settings-field > .settings-row > :last-child {
+    grid-column: 1; grid-row: auto; justify-self: start; margin-top: 5px;
+  }
+  .settings-field > .settings-row > :first-child { grid-row: auto; }
+  .settings-field > .settings-hint { grid-row: 2; max-width: 100%; }
+  .settings-field:has(> .settings-detail) > .settings-row > :last-child { grid-row: auto; }
+  .settings-field .accent-picker { justify-content: flex-start; }
+}
 .settings-search input { border-radius: var(--input-radius, 6px); min-height: 32px; }
-.prio-item { border-radius: 12px; }
+/* Reorderable rows are a list, without a separate outlined box per item. */
+.settings-field .prio-list { gap: 2px; }
+.settings-field .prio-item { border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; }
+.settings-field .prio-item:is(:hover, :focus-within) { background: var(--row-hover); }
+.settings-body .import-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 4px 16px; margin-block: 8px;
+}
+.settings-body .import-field { min-height: var(--ctl-h); font-size: var(--text-sm); }
+.settings-body .import-fields-actions { margin-bottom: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
+
 .col-menu, .ctx-menu, .ph-menu, .sg-menu { border-radius: 15px; padding: 6px; }
 body button[data-slot="button"].ctx-item { border-radius: 9px; justify-content: flex-start; }
 .ph-row, .preset-row, .col-menu button, .sg-item { border-radius: 9px; }
@@ -546,11 +615,11 @@ body button[data-slot="button"]:is(.ph-row, .pe-list-row) {
   #player { gap: 5px; }
   .settings-sheet { width: calc(100vw - 16px); height: calc(100dvh - 16px); border-radius: 18px; }
   .settings-main { flex-direction: column; }
-  .settings-nav { width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  .settings-nav { width: auto; border: 0; }
   .settings-nav-list { flex-direction: row; overflow-x: auto; overflow-y: hidden; flex: none; padding-bottom: 8px; }
   body button[data-slot="button"].settings-nav-item { flex: none; }
   .settings-nav .settings-search { padding-block: 8px; }
-  .settings-body { padding: 14px; }
+  .settings-body { padding: 14px; margin: 0 10px 6px; }
   .settings-foot { gap: 6px; flex-wrap: wrap; padding: 10px 12px; }
   .settings-foot > .settings-hint { flex-basis: 100%; }
   .modal.mask-builder, .modal.pe-editor {

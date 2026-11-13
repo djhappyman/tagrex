@@ -849,6 +849,7 @@ export const es = {
   "settings.extensionsHint": "Qué archivos del mismo nombre viajan con una pista renombrada o movida. Separadas por espacios o comas, sin el punto, sin distinguir mayúsculas. Si viajan o no lo decide una casilla del panel RENAMER.",
   "settings.portableNames": "Nombres de archivo seguros",
   "settings.portableNamesHint": "Los nombres que crea un renombrado o una transformación también funcionan en Windows y en memorias USB y tarjetas SD: \":\" pasa a \" -\", \"?\" y \"*\" se omiten, \" < > | pasan a _, y se quita un punto o espacio final. Desactivado conserva estos caracteres donde este sistema los admite. En Windows siempre se sustituyen.",
+  "settings.appearance": "Apariencia",
   "settings.theme": "Tema",
   "settings.theme.light": "Claro",
   "settings.theme.dark": "Oscuro",

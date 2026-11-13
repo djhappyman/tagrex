@@ -2,7 +2,7 @@
  * Critique: reduce repeated rules and nested outlines; retain selection, focus and table structure.
  * Scope: dense desktop editor, existing content and workflows preserved. */
 :root {
-  --ui-menu-shadow: 0 12px 36px color-mix(in srgb, var(--text) 14%, transparent);
+  --ui-menu-shadow: 0 8px 24px rgb(0 0 0 / .24);
   --ui-muted-border: color-mix(in srgb, var(--border) 65%, transparent);
 }
 html, body { overflow-x: clip; }
@@ -14,9 +14,6 @@ body .release-tracklist :is(tr, td, th), .release-import-row { border-bottom:0; 
 .release-tracklist tbody tr:hover { background:var(--row-hover); }
 .release-card { border-color:var(--ui-muted-border); }
 body :is(.mode-tab, .subtab, .panel-block h2, .settings-group h3, #tracks th, .settings-sub, .field-group-head) { text-transform:none; letter-spacing:normal; }
-body .settings-row:has([role='switch']) { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; }
-body .settings-row:has([role='switch']) > .compat-native { display:contents; }
-body .settings-row [role='switch'] { justify-self:end; }
 body :is(.app-select-menu, [data-slot='dropdown-menu-content'], [data-slot='context-menu-content'], [data-slot='popover-content']) { box-shadow:var(--ui-menu-shadow); }
 body :is(.app-select-menu, [data-slot='dropdown-menu-content'], [data-slot='context-menu-content']) [role='separator'] { background:var(--ui-muted-border); margin-block:5px; }
 body :is([data-slot='select-content'], [data-slot='dropdown-menu-content'], [data-slot='context-menu-content'], [data-slot='popover-content']) { transition-property:opacity,transform; }
