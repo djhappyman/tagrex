@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Redesign transformation presets with clearer rule explanations, inline editing,
+  collapsible preset groups and consistent themed controls.
+- Keep field-specific Before/After samples visible while editing rules, with
+  selection-based examples, labelled matching options and inline pattern errors.
+- Manage presets through sidebar rename/copy/delete menus, with Undo for deletion
+  and built-in presets kept read-only.
+- Provide the new preset-editor messages in German, Spanish, French, Italian,
+  Russian and Ukrainian, with catalogue and placeholder checks in the unit suite.
+
 ## [1.4.2] - Unreleased
 
 - Requested builds publish a complete personal prerelease after validation and
