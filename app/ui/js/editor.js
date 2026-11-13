@@ -1,3 +1,6 @@
+import { importedValue, recordLiveField, liveInputChanged } from "./live-preview.js";
+import { attachGenrePicker } from "../lib/genre-picker";
+import { createComponentElement } from "../lib/component-elements.js";
 // The EDITOR field grid (#35, #143 split it out of app.js).
 //
 // The table only edits four columns, but every field the model knows is already
@@ -9,9 +12,11 @@ import { list, planText, t as tr, tn } from "./i18n.js";
 import { invoke } from "./invoke.js";
 import {
   edits,
+  contentRevision,
+  captureSelection,
+  isSelectionCurrent,
   previewPlan,
   savedSettings,
-  selection,
   selectedPaths,
   setPreviewPlan,
   setPreviewSource,
@@ -19,7 +24,7 @@ import {
   tracks,
 } from "./state.js";
 import { EXTENDED_FIELDS, customLabel, fieldLabel as catalogueLabel } from "./fields.js";
-import { isFieldLocked, lockButton } from "./locks.js";
+import { isFieldLocked, lockButton, lockedFieldKeys } from "./locks.js";
 import { hooks } from "./hooks.js";
 
 // Fields the user actually touched in the dialog, staged until they confirm.
@@ -30,21 +35,50 @@ let stagedFields = new Map();
 function currentFieldValue(path, key) {
   const pending = edits.get(path);
   if (pending && pending.has(key)) return pending.get(key);
+  const imported = importedValue(path, key);
+  if (imported !== undefined) return imported;
   const track = trackAt(path);
   return (track && track.tags[key]) || "";
 }
 
-// Refresh the field-editor section of the TAGGER panel for the current
-// selection (called on entering the mode). Staged-but-unapplied field changes
-// are dropped on refresh — they only make sense against the selection they were
-// typed for.
-function refreshFieldEditor() {
+// Preserve drafts and native input identity across table-only repaints. Hidden
+// editors derive nothing; opening the tab catches up to the latest subject once.
+let editorSubject = null;
+let editorContent = null;
+let editorPaths = new Set();
+let editorLocks = "";
+function hasEditorDraft() {
   const paths = selectedPaths();
-  stagedFields = new Map();
-  el("fields-count").textContent = paths.length ? `— ${tn("unit.file", paths.length)}` : "";
+  return stagedFields.size > 0 && paths.length === editorPaths.size && paths.every(path => editorPaths.has(path));
+}
+function resetFieldEditor() {
+  stagedFields.clear();
+  editorSubject = null;
+  editorContent = null;
+  editorPaths.clear();
+  for (const input of el("fields-body").querySelectorAll('.field-input.dirty')) input.classList.remove('dirty');
+}
+function refreshFieldEditor({ force = false, resetDraft = false } = {}) {
+  const paths = selectedPaths();
+  const sameSubject = paths.length === editorPaths.size && paths.every(path => editorPaths.has(path));
+  if (!sameSubject || resetDraft) {
+    stagedFields.clear();
+    for (const input of el("fields-body").querySelectorAll('.field-input.dirty')) input.classList.remove('dirty');
+  }
+  if (el("panel-tagger").hidden || el("subtab-editor").hidden) return;
+  const locks = JSON.stringify(lockedFieldKeys().sort());
+  const content = new Map(paths.map(path => [path, [trackAt(path)?.tags, trackAt(path)?.tag_blocks,
+    JSON.stringify([...(edits.get(path) || [])])]]));
+  const sameContent = sameSubject && editorContent?.size === content.size && [...content].every(([path, entry]) =>
+    entry.every((value, at) => value === editorContent.get(path)?.[at]));
+  if (!force && !resetDraft && sameSubject && locks === editorLocks && isSelectionCurrent(editorSubject) && (sameContent || stagedFields.size)) return;
+  if (!sameSubject || resetDraft) stagedFields = new Map();
+  editorPaths = new Set(paths);
+  editorContent = content;
+  editorLocks = locks;
+  editorSubject = captureSelection();
+  el("fields-count").textContent = paths.length ? `· ${tn("unit.file", paths.length)}` : "";
   renderTagBlocks(paths);
-  closeAddField(); // collapse the add-field row back to its idle affordance
-  populateKnownFields();
   renderFieldEditor(paths);
   hooks.refreshCoverWell();
 }
@@ -128,7 +162,7 @@ function renderTagBlocks(paths) {
 // reads as anything but what the standard says, so there is nothing to fix.
 function renderFixEncodingButton(line) {
   if (!savedSettings.legacy_code_page) return;
-  const button = document.createElement("button");
+  const button = createComponentElement("button");
   button.type = "button";
   button.className = "text-btn";
   button.textContent = tr("blocks.fixEncoding");
@@ -168,7 +202,7 @@ async function previewFixEncoding() {
 // it here beside "Reading ID3v2" would read as the opposite of what it does.
 function renderBlockStrippers(line, strippable) {
   for (const [kind, { label, files }] of strippable) {
-    const button = document.createElement("button");
+    const button = createComponentElement("button");
     button.type = "button";
     button.className = "text-btn";
     button.textContent = tr("blocks.remove", { block: label });
@@ -230,7 +264,7 @@ async function previewRemoveTagBlock(kind, label) {
 // different ones has no single source. Offering it anyway would convert half
 // the files from somewhere the user didn't look at.
 function renderConvertButton(line, readKinds) {
-  const button = document.createElement("button");
+  const button = createComponentElement("button");
   button.type = "button";
   button.className = "text-btn";
   button.textContent = tr("blocks.convert");
@@ -289,14 +323,14 @@ async function openConvertPicker(from) {
   kindSelect.addEventListener("change", syncRevision);
   syncRevision();
 
-  const go = document.createElement("button");
+  const go = createComponentElement("button");
   go.type = "button";
   go.className = "text-btn";
   go.textContent = tr("action.preview");
   go.addEventListener("click", () =>
     previewConvertTagBlock(from, kindSelect.value, revisionSelect.hidden ? null : revisionSelect.value)
   );
-  const cancel = document.createElement("button");
+  const cancel = createComponentElement("button");
   cancel.type = "button";
   cancel.className = "text-btn";
   cancel.textContent = tr("action.cancel");
@@ -387,70 +421,33 @@ async function previewConvertTagBlock(from, to, revision) {
   }
 }
 
-// Suggest the custom field names already present on the selected files — the
-// "known but not-yet-shown" fields — so common ones don't have to be retyped
-// (#114). Feeds the ADD FIELD name input's datalist.
-function populateKnownFields() {
-  // Over the selection, not over the library (#184): this runs on every
-  // selection change, and walking a few thousand files to read a handful of
-  // them is most of what made a row click expensive.
-  const names = new Set();
-  for (const path of selection) {
-    const track = trackAt(path);
-    if (!track || !track.tags) continue;
-    for (const key of Object.keys(track.tags)) {
-      if (key.startsWith("custom:")) names.add(key.slice(7));
-    }
-  }
-  el("fields-known").innerHTML = [...names]
-    .sort()
-    .map((n) => `<option value="${escapeHtml(n)}"></option>`)
-    .join("");
-}
-
-// The ADD FIELD affordance (#114): idle shows just "+ Add field"; opening it
-// reveals the inline name/value row.
-function openAddField() {
-  el("fields-add-toggle").hidden = true;
-  el("fields-add-row").hidden = false;
-  el("fields-new-name").focus();
-}
-function closeAddField() {
-  el("fields-add-row").hidden = true;
-  el("fields-add-toggle").hidden = false;
-  el("fields-new-name").value = "";
-  el("fields-new-value").value = "";
-}
-
-// The core group is what a DJ touches every session; the rest (+ custom fields)
-// lives in a collapsible Extended group (#editor design pass, Q2).
-const EDITOR_CORE_KEYS = ["artist", "title", "album", "albumartist", "track", "tracktotal", "disc", "disctotal", "year", "genre"];
-// How the Core group lays out: singles, plus the two number/total pairs rendered
-// as one row each — "Track [n] / [total]", "Disc [n] / [total]" — mirroring a
-// reference tagger's combined NN/TT presentation (#136 pass 2).
+// Everyday fields live in Core; the remaining fields and existing custom
+// metadata live in Standard or Advanced.
+const EDITOR_CORE_KEYS = ["artist", "title", "album", "albumartist", "track", "tracktotal", "disc", "disctotal", "year", "genre", "comment", "bpm", "key"];
+// Core follows the tagging workflow: compact number pairs, identity fields,
+// genre and multiline comment, then tempo/key. Labels keep a fixed rail.
 const EDITOR_CORE_LAYOUT = [
-  {
-    duo: [
-      { pair: ["track", "tracktotal"], key: "track" },
-      { pair: ["disc", "disctotal"], key: "disc" },
-    ],
-  },
-  { key: "artist" },
+  { duo: [
+    { pair: ["track", "tracktotal"], key: "track" },
+    { pair: ["disc", "disctotal"], key: "disc" },
+  ] },
   { key: "title" },
+  { key: "artist" },
   { key: "album" },
   { key: "albumartist" },
   { key: "year" },
   { key: "genre" },
+  { key: "comment" },
+  { inline: ["bpm", "key"] },
 ];
 // Numeric/typed fields get a narrow right-aligned input and inline validation
 // mirroring the backend's is_writable_value rule, so a bad value shows as an
 // error as you type instead of only being rejected at apply.
 const EDITOR_NUMERIC_KEYS = new Set(["track", "tracktotal", "disc", "bpm", "year"]);
 // Whether each collapsible group is folded; persists across re-renders in a
-// session. Standard is open by default; Advanced (raw key/value) starts folded
+// session. Core and Standard are open by default; Advanced starts folded
 // so the everyday form isn't buried under technical noise (#136).
-let editorStandardCollapsed = false;
-let editorAdvancedCollapsed = true;
+const editorGroupCollapsed = { core: false, standard: false, advanced: true };
 
 // A vinyl position as a track or disc number (#641), the backend's
 // is_vinyl_position: one or two letters with up to three digits ("A", "B2",
@@ -513,6 +510,7 @@ function renderFieldEditor(paths) {
   const coreRows = EDITOR_CORE_LAYOUT.map((r) =>
     r.duo
       ? { duo: r.duo.map((d) => ({ ...d, label: catalogueLabel(d.key) })) }
+      : r.inline ? { inline: r.inline.map(key => ({ key, label: catalogueLabel(key) })) }
       : { key: r.key, label: catalogueLabel(r.key) }
   );
 
@@ -540,50 +538,74 @@ function renderFieldEditor(paths) {
     body.appendChild(fieldGroup(tr("editor.group.advanced"), advancedRows, paths, "advanced"));
 }
 
-// Build one field group (a header + its rows). `kind` is "core" (always open),
-// "standard", or "advanced" (both fold, tracking their own collapse flag). The
-// Advanced group renders raw key/value rows (#136).
+// All groups fold in place. Their session preferences are independent of the
+// selected files; drafts remain tied to editorPaths in refreshFieldEditor.
 function fieldGroup(title, rows, paths, kind) {
-  const collapsible = kind !== "core";
-  const advanced = kind === "advanced";
-  const collapsed = advanced ? editorAdvancedCollapsed : kind === "standard" ? editorStandardCollapsed : false;
+  const collapsed = editorGroupCollapsed[kind];
 
   const group = document.createElement("div");
-  group.className = "fe-group" + (collapsible ? " collapsible" : "");
+  group.className = "fe-group collapsible";
+  group.dataset.group = kind;
   if (collapsed) group.classList.add("collapsed");
 
-  const head = document.createElement("div");
+  const head = createComponentElement("button");
   head.className = "fe-group-head";
   head.textContent = title;
-  if (collapsible) {
-    const count = document.createElement("span");
-    count.className = "fe-group-count";
-    count.textContent = String(rows.length);
-    const caret = document.createElement("span");
-    caret.className = "fe-group-caret";
-    caret.innerHTML = ico("caret-down");
-    head.append(" ", count, caret);
-    head.addEventListener("click", () => {
-      const next = !group.classList.contains("collapsed");
-      group.classList.toggle("collapsed", next);
-      if (advanced) editorAdvancedCollapsed = next;
-      else editorStandardCollapsed = next;
-    });
-  }
+  head.type = "button";
+  head.setAttribute("aria-expanded", String(!collapsed));
+  head.setAttribute("aria-controls", `editor-group-${kind}`);
+  const count = document.createElement("span");
+  count.className = "fe-group-count";
+  count.textContent = String(rows.reduce((total, row) =>
+    total + (row.duo ? row.duo.reduce((fields, entry) => fields + entry.pair.length, 0) : row.inline?.length || 1), 0));
+  const caret = document.createElement("span");
+  caret.className = "fe-group-caret";
+  caret.setAttribute("aria-hidden", "true");
+  caret.innerHTML = ico("caret-down");
+  head.append(" ", count, caret);
   group.appendChild(head);
 
   const grid = document.createElement("div");
   grid.className = "fe-grid";
+  grid.id = `editor-group-${kind}`;
+  grid.inert = collapsed;
   for (const r of rows) {
-    grid.appendChild(r.duo ? fieldDuoRow(r.duo, paths) : fieldRow(r.key, r.label, paths));
+    if (r.inline) {
+      const shared = document.createElement("div");
+      shared.className = "fe-inline-fields";
+      for (const field of r.inline) shared.append(fieldRow(field.key, field.label, paths));
+      grid.append(shared);
+    } else grid.appendChild(r.duo ? fieldDuoRow(r.duo, paths) : fieldRow(r.key, r.label, paths));
   }
   group.appendChild(grid);
+  head.addEventListener("click", () => {
+    const next = !editorGroupCollapsed[kind];
+    editorGroupCollapsed[kind] = next;
+    group.classList.toggle("collapsed", next);
+    head.setAttribute("aria-expanded", String(!next));
+    grid.inert = next;
+  });
   return group;
 }
 
+function sharedFieldValue(paths, key) {
+  if (!paths.length) return null;
+  const first = currentFieldValue(paths[0], key);
+  for (let i = 1; i < paths.length; i++) if (currentFieldValue(paths[i], key) !== first) return null;
+  return first;
+}
+
+function restoreDraft(input, row, key) {
+  if (!stagedFields.has(key)) return;
+  input.value = stagedFields.get(key);
+  input.classList.remove("multiple");
+  row.classList.remove("multiple");
+  input.classList.add("dirty");
+  row.classList.add("dirty");
+}
+
 function fieldRow(key, label, paths) {
-  const values = new Set(paths.map((path) => currentFieldValue(path, key)));
-  const shared = values.size === 1 ? [...values][0] : null;
+  const shared = sharedFieldValue(paths, key);
   const numeric = EDITOR_NUMERIC_KEYS.has(key);
 
   const row = document.createElement("div");
@@ -592,7 +614,7 @@ function fieldRow(key, label, paths) {
   const marker = document.createElement("span");
   marker.className = "fe-marker";
 
-  const labelCell = document.createElement("span");
+  const labelCell = document.createElement("label");
   labelCell.className = "fe-label";
   labelCell.textContent = label;
   labelCell.title = label; // full name on hover — labels wrap, never truncate (#136)
@@ -600,10 +622,13 @@ function fieldRow(key, label, paths) {
   const cell = document.createElement("span");
   cell.className = "fe-cell" + (numeric ? " num" : "");
 
-  const input = document.createElement("input");
-  input.type = "text";
+  const input = createComponentElement(key === "comment" ? "textarea" : "input");
+  if (key !== "comment") input.type = "text";
+  else { input.rows = 3; row.classList.add("fe-comment"); }
   input.className = "field-input" + (numeric ? " num" : "");
   input.dataset.key = key;
+  input.id = `editor-field-${encodeURIComponent(key)}`;
+  labelCell.htmlFor = input.id;
   input.spellcheck = false;
   if (numeric) input.inputMode = "numeric";
   // A locked field cannot be typed into here either (#48). The backend is what
@@ -642,13 +667,20 @@ function fieldRow(key, label, paths) {
     row.classList.add("dirty");
     input.classList.add("dirty");
     reflect();
+    recordLiveField(paths, key, input.value, validateFieldValue(key, input.value, paths).ok);
   });
 
   // A pre-filled value that's already invalid (rare — the backend guards it)
   // should show its error state on first render too.
-  if (shared) reflect();
+  restoreDraft(input, row, key);
+  if (shared || stagedFields.has(key)) reflect();
 
   cell.append(input, hint);
+  if (key === "genre") attachGenrePicker(input,
+    // Suggestions come from saved library values. Including this pending draft
+    // would offer an unfinished token ahead of its completion (Ho before House).
+    () => tracks.map(track => track.tags?.genre ?? ""),
+    () => savedSettings?.multi_value_separator ?? "; ");
   row.append(marker, labelCell, cell, lockButton([key], label, refreshFieldEditor));
   return row;
 }
@@ -665,7 +697,7 @@ function fieldDuoRow(pairs, paths) {
   const marker = document.createElement("span");
   marker.className = "fe-marker";
 
-  const labelCell = document.createElement("span");
+  const labelCell = document.createElement("label");
   labelCell.className = "fe-label";
   labelCell.textContent = pairs[0].label;
   labelCell.title = pairs[0].label;
@@ -687,12 +719,13 @@ function fieldDuoRow(pairs, paths) {
   };
 
   const makeSub = (key, aria) => {
-    const values = new Set(paths.map((path) => currentFieldValue(path, key)));
-    const shared = values.size === 1 ? [...values][0] : null;
-    const input = document.createElement("input");
+    const shared = sharedFieldValue(paths, key);
+    const input = createComponentElement("input");
     input.type = "text";
     input.className = "field-input num";
     input.dataset.key = key;
+    input.id = `editor-field-${encodeURIComponent(key)}`;
+    if (!labelCell.htmlFor) labelCell.htmlFor = input.id;
     input.spellcheck = false;
     input.inputMode = "numeric";
     input.setAttribute("aria-label", aria);
@@ -709,7 +742,9 @@ function fieldDuoRow(pairs, paths) {
       input.classList.add("dirty");
       row.classList.add("dirty");
       reflectRow();
+      recordLiveField(paths, key, input.value, validateFieldValue(key, input.value, paths).ok);
     });
+    restoreDraft(input, row, key);
     inputs.push(input);
     return input;
   };
@@ -719,8 +754,9 @@ function fieldDuoRow(pairs, paths) {
     unit.className = "fe-duo-unit";
     // The first pair's label is the row's aligned column label; the rest inline.
     if (i > 0) {
-      const inlineLabel = document.createElement("span");
+      const inlineLabel = document.createElement("label");
       inlineLabel.className = "fe-duo-label";
+      inlineLabel.htmlFor = `editor-field-${encodeURIComponent(p.pair[0])}`;
       inlineLabel.textContent = p.label;
       unit.append(inlineLabel);
     }
@@ -739,11 +775,8 @@ function fieldDuoRow(pairs, paths) {
   });
 
   reflectRow(); // surface a pre-filled invalid value on first render (rare)
-  // One padlock for the whole row, in the same column every other row keeps it
-  // in (#48). Not one per pair: four numbers on one line leave no room for two
-  // more buttons — the second pair wraps onto a line of its own — and the
-  // numbers are one idea anyway. Where a file sits in its release is what a
-  // renumbering rewrites, and it rewrites the disc alongside the track.
+  // One lock for the number/total pair, aligned with the other field locks.
+  // Track and Disc share a compact row; the fixed label rail does not resize.
   const keys = pairs.flatMap((p) => p.pair);
   const label = pairs.map((p) => p.label).join(" / ");
   if (keys.every((key) => isFieldLocked(key))) row.classList.add("locked");
@@ -751,69 +784,19 @@ function fieldDuoRow(pairs, paths) {
   return row;
 }
 
-// Add a custom field row; it stages immediately so an empty-valued custom field
-// can still be created.
-function addCustomField() {
-  const name = el("fields-new-name").value.trim();
-  if (!name) {
-    toast(tr("toast.editor.nameField"), true);
-    return;
-  }
-  const key = name.startsWith("custom:") ? name : `custom:${name}`;
-  stagedFields.set(key, el("fields-new-value").value);
-  toast(tr("toast.editor.stagedCustom", { name }));
-  // Keep the row open and refocus the name so several fields add in a row (#114).
-  el("fields-new-name").value = "";
-  el("fields-new-value").value = "";
-  el("fields-new-name").focus();
-}
-
 // Push the staged fields into the shared pending-edits buffer for every
 // selected file, then preview them alongside any other pending edits.
 async function applyFieldEditor() {
-  const paths = selectedPaths();
-  if (paths.length === 0) {
-    toast(tr("toast.editor.selectFirst"), true);
-    return;
-  }
-  if (stagedFields.size === 0) {
-    toast(tr("toast.editor.nothingToStage"));
-    return;
-  }
-  let changed = 0;
-  for (const path of paths) {
-    if (!edits.has(path)) edits.set(path, new Map());
-    const fields = edits.get(path);
-    for (const [key, value] of stagedFields) {
-      // Skip no-ops so the preview stays honest.
-      const track = trackAt(path);
-      const onDisk = (track && track.tags[key]) || "";
-      if (value === onDisk && !fields.has(key)) continue;
-      fields.set(key, value);
-      changed += 1;
-    }
-    if (fields.size === 0) edits.delete(path);
-  }
-  // Same as the import path (#186): the diff render that `previewEdits` triggers
-  // replaces this one outright.
-  refreshFieldEditor();
+  // Compatibility entry point for tools that formerly staged the Editor.
+  liveInputChanged();
   await hooks.previewEdits();
-  toast(
-    changed
-      ? tr("toast.editor.staged", {
-          fields: tn("unit.field", stagedFields.size),
-          files: tn("unit.file", paths.length),
-        })
-      : tr("toast.nothingChanged")
-  );
 }
 
 export {
   currentFieldValue,
+  hasEditorDraft,
+  resetFieldEditor,
   refreshFieldEditor,
-  openAddField,
-  closeAddField,
   validateFieldValue,
-  addCustomField,
   applyFieldEditor,
 };
