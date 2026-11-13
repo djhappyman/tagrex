@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- Prepare provider image fetchers through the source queue, then download outside its lock with bounded concurrency (upstream #749).
+
 ### Added
 
 - A Cover column for the file table: a glyph for a file with embedded cover art, a red struck-through one for a file without, and sorting that brings the files without a cover together. Turn it on from the Columns menu ([#730](https://github.com/tagrex/tagrex/issues/730)).
