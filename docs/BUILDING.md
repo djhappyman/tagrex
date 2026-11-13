@@ -10,7 +10,7 @@ A push to `main` runs those same reusable CI checks through **Build and release*
 
 1. Set matching personal versions in `Cargo.toml`, workspace entries in `Cargo.lock`, and `app/tauri.conf.json`. Add a matching changelog heading.
 2. Merge the reviewed change only after applicable checks pass.
-3. Push a matching tag, for example `personal-v1.4.0-personal.2`. Alternatively publish a GitHub release using that personal tag. A published release triggers the same validation/package path.
+3. Push a matching tag, for example `personal-v1.4.1`. Alternatively publish a GitHub release using that personal tag. A published release triggers the same validation/package path.
 4. Wait for all validation and all package jobs. The publication job attaches packages only after the complete build matrix succeeds; it is not marked Latest and does not generate an updater manifest.
 
 Do not create an upstream-style `v*` tag for personal builds. The tag version is checked against the app configuration before packaging.

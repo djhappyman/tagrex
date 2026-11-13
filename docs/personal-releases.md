@@ -25,3 +25,10 @@ Upstream provider fixes #746, #747 and #748 are integrated selectively. Existing
 drag behavior, cached provider clients, command queues and performance changes
 remain. A separate fix prevents superseded provider replies from repopulating
 the next search's caches.
+
+New hosted builds use numeric `major.minor.patch` versions, starting at `1.4.1`.
+Tauri passes the app version directly to RPM, where hyphenated SemVer
+prerelease strings are rejected. The earlier local `1.4.0-personal.1` build
+remains unchanged. Personal tags (`personal-v1.4.1`), the bundle identifier and
+GitHub's prerelease flag distinguish this fork; version numbers advance for
+this fork's changes independently of upstream.
