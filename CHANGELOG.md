@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Undo history list reads only each batch's description and file paths, not the full tag, artwork and block snapshots behind it, so it opens quickly even with a long history. The snapshots are loaded when a batch is actually undone ([#739](https://github.com/tagrex/tagrex/pull/739)).
 - The README's screenshots and demo animation show the mode switcher as the segmented pill the app now opens with, in both the light and the dark theme ([#754](https://github.com/tagrex/tagrex/issues/754)).
 - Online sources reuse their connection between requests instead of building a new client for each one; a changed token or proxy setting still takes effect at once. Finding duplicates by content reads each file through a small buffer instead of loading the whole file into memory ([#740](https://github.com/tagrex/tagrex/pull/740)).
+- Rename, move and file-name cleanup previews list each folder once to find the companion files that travel with a track, instead of once per track, and check a file's type only for names that match. A preview over 2000 tracks in 20 folders went from about a second to about a tenth of one; the plans are the same ([#751](https://github.com/tagrex/tagrex/pull/751)).
 
 ### Fixed
 
