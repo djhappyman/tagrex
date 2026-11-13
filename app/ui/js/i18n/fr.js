@@ -851,6 +851,7 @@ export const fr = {
   "settings.extensionsHint": "Les fichiers du même nom qui suivent une piste renommée ou déplacée. Séparées par des espaces ou des virgules, sans le point, sans tenir compte de la casse. Le fait qu'ils suivent ou non se règle par une case du panneau RENAMER.",
   "settings.portableNames": "Noms de fichier sûrs",
   "settings.portableNamesHint": "Les noms créés par un renommage ou une transformation fonctionnent aussi sous Windows et sur les clés USB et cartes SD : \":\" devient \" -\", \"?\" et \"*\" sont retirés, \" < > | deviennent _, et un point ou une espace final est supprimé. Désactivé, ces caractères sont conservés là où ce système les accepte. Sous Windows, ils sont toujours remplacés.",
+  "settings.appearance": "Apparence",
   "settings.theme": "Thème",
   "settings.theme.light": "Clair",
   "settings.theme.dark": "Sombre",

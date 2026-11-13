@@ -12,6 +12,9 @@ should deliver one independently reviewable concern. Workers implement their
 assigned scope; the orchestrator reviews, resolves integration issues and verifies
 the combined result. Delegation requires authorization from the current task.
 
+For interface styling, read [Interface rules](design/interface-rules.md) before
+changing surfaces, borders, inputs or focus treatments.
+
 Use the fork's current remote `main` as the base for personal work. Check the remote
 URL explicitly: this workspace's `origin` can refer to upstream and `fork` to the
 personal repository. Use an isolated checkout and preserve other threads' edits.

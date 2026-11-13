@@ -173,7 +173,7 @@ function blocksOf(group) {
     // is the first thing under a sub-heading, which it stays with.
     const last = blocks[blocks.length - 1];
     const underHeading = last.length === 1 && last[0].tagName === "H4";
-    if (child.tagName === "H4" || (child.classList.contains("settings-row") && !underHeading)) {
+    if (child.tagName === "H4" || (child.matches(".settings-row, .settings-field") && !underHeading)) {
       blocks.push([]);
     }
     blocks[blocks.length - 1].push(child);
@@ -193,11 +193,25 @@ export function filterSettings(query) {
     const title = group.querySelector("h3")?.textContent.toLowerCase() || "";
     const titleMatches = terms.length > 0 && everything(title);
     let groupShown = !terms.length;
+    let section = null;
+    let sectionShown = false;
+    const finishSection = () => {
+      if (section) section.classList.toggle(HIDDEN, !sectionShown);
+    };
     for (const block of blocksOf(group)) {
-      const shown = !terms.length || titleMatches || everything(`${title} ${textOf(block)}`);
+      const heading = block.find(node => node.tagName === "H4");
+      if (heading) {
+        finishSection();
+        section = heading;
+        sectionShown = false;
+      }
+      const sectionText = section?.textContent || "";
+      const shown = !terms.length || titleMatches || everything(`${title} ${sectionText.toLowerCase()} ${textOf(block)}`);
+      sectionShown = sectionShown || shown;
       block.forEach((node) => { if (node.classList.contains(HIDDEN) !== !shown) node.classList.toggle(HIDDEN, !shown); });
       groupShown = groupShown || shown;
     }
+    finishSection();
     if (group.classList.contains(HIDDEN) !== !groupShown) group.classList.toggle(HIDDEN, !groupShown);
     anyShown = anyShown || groupShown;
   }

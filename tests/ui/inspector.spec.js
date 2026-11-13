@@ -76,7 +76,7 @@ for (const width of [360, 480]) {
     const fields = await Promise.all([artist, title, album].map((input) => input.boundingBox()));
     expect(Math.max(...fields.map((box) => box.x)) - Math.min(...fields.map((box) => box.x))).toBeLessThan(1);
     expect(fields.every((box) => box.width >= 150 && box.height === 32)).toBe(true);
-    expect(await artist.evaluate(input => parseFloat(getComputedStyle(input).borderRadius))).toBe(6);
+    expect(await artist.evaluate(input => parseFloat(getComputedStyle(input).borderRadius))).toBe(10);
     for (const row of await page.locator('#fields-body .fe-row.duo').all()) {
       expect((await row.boundingBox()).height).toBeLessThanOrEqual(36);
     }
@@ -176,7 +176,7 @@ for (const theme of ['light', 'dark']) {
     await page.locator('.subtab[data-subtab="editor"]').click();
     const editor = {text:await styles('#fields-body input[data-key="title"]', typography), frame:await styles('#fields-body input[data-key="title"]', frame), padding:await styles('#fields-body input[data-key="title"]', padding)};
     expect(editor.frame.height).toBe('32px');
-    expect(editor.frame.borderRadius).toBe('6px');
+    expect(editor.frame.borderRadius).toBe('10px');
     for (const field of [...online, query]) {
       expect(field.text).toEqual(editor.text);
       expect(field.frame).toEqual(editor.frame);
@@ -185,7 +185,8 @@ for (const theme of ['light', 'dark']) {
     await page.locator('#settings-open').click();
     await page.locator('#settings-search').fill('proxy');
     expect(await styles('#set-proxy', typography)).toEqual(editor.text);
-    expect(await styles('#set-proxy', frame)).toEqual(editor.frame);
+    const settingsFill = await page.locator('.settings-sheet').evaluate(node => getComputedStyle(node).backgroundColor);
+    expect(await styles('#set-proxy', frame)).toEqual({ ...editor.frame, borderTopColor: 'rgba(0, 0, 0, 0)', backgroundColor: settingsFill });
     expect(await styles('#set-proxy', padding)).toEqual(editor.padding);
   });
 }
@@ -216,7 +217,7 @@ test('editor labels keep a fixed rail while inputs resize, with compact metadata
   expect(Math.abs((await disc.boundingBox()).y-(await track.boundingBox()).y)).toBeLessThan(1);
   await page.locator('label[for="editor-field-artist"]').click();
   await expect(artist).toBeFocused();
-  for (const field of [track, disc, artist]) expect(await field.evaluate(node => getComputedStyle(node).borderRadius)).toBe('6px');
+  for (const field of [track, disc, artist]) expect(await field.evaluate(node => getComputedStyle(node).borderRadius)).toBe('10px');
   if (process.env.ITERATION_CAPTURE_EVIDENCE === '1') {
     await mkdir('docs/ui-iteration', { recursive:true });
     await page.screenshot({path:'docs/ui-iteration/editor-compact-fields.png'});
