@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- A setting for how the mode switcher in the top bar looks, in Settings › General: the segmented pill or the earlier underlined tabs, each shown as a small drawing beside its radio button. The top bar follows the choice at once, and resetting the group brings back the pill ([#753](https://github.com/tagrex/tagrex/issues/753)).
+
+### Changed
+
+- The mode tabs in the top bar are one segmented control: a rounded track holding the five modes, the active one a soft pill in the accent colour instead of an underline. The segments line up with the buttons beside them and the path field below, and turn into round icon-only buttons when the window gets narrow ([#752](https://github.com/tagrex/tagrex/issues/752)).
+
 ### Fixed
 
 - A cover image larger than 10 MB downloads instead of failing with "the response body is larger than request limit". Cover Art Archive originals are often bigger, so such a MusicBrainz release card showed no cover and the image could not be embedded or saved. Images are now accepted up to 64 MB ([#746](https://github.com/tagrex/tagrex/issues/746)).

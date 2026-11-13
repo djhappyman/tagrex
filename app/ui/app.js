@@ -149,6 +149,8 @@ import {
   applyValueFont,
   checkboxColEnabled,
   applyCheckboxCol,
+  modeTabsStyle,
+  applyModeTabsStyle,
   regexModeEnabled,
   caseSensitiveEnabled,
   saveFilterMode,
@@ -2249,6 +2251,8 @@ function updateCompactTabs() {
 // viewport shrink — track the viewport (the root element) instead, plus the window
 // resize event, and run once at startup.
 window.addEventListener("resize", updateCompactTabs);
+// The switcher's look (Settings › General) changes its width without any resize.
+document.addEventListener("tagrex:mode-tabs-style", updateCompactTabs);
 if (window.ResizeObserver) {
   new ResizeObserver(updateCompactTabs).observe(document.documentElement);
 }
@@ -3527,6 +3531,7 @@ loadColumnWidths();
 renderTableHead();
 applyValueFont(valueFont());
 applyCheckboxCol(checkboxColEnabled());
+applyModeTabsStyle(modeTabsStyle());
 // --panel-inset (#374) is the right padding every mode-panel and TAGGER/
 // ONLINE's own head/scroll use — 14px, matching the topbar's own right
 // inset above them, with none of these elements reserving a

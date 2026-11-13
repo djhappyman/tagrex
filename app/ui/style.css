@@ -83,6 +83,10 @@
      as a fill behind white text — split out so it can clear small-text contrast
      independently of the fill colour (matters most in dark mode). */
   --accent-ink: #0a5f49;
+  /* The accent as a soft fill for "the chosen one of a set" (the active mode).
+     A hex per theme rather than color-mix, so it stays a plain token: accent at
+     14% on --bg here (accent-ink on it 6.2:1), 22% in dark (4.65:1). */
+  --accent-soft: #ddeae7;
   --add: #15803d;
   --del: #dc2626;
   --row-hover: #eef1f5;
@@ -228,6 +232,7 @@
     --accent: #0b7d5c;
     --accent-text: #ffffff;
     --accent-ink: #14a67d;
+    --accent-soft: #142e2b;
     --add: #3fca74;
     --del: #f87171;
     --row-hover: #242832;
@@ -249,6 +254,7 @@
   --accent: #0b7d5c;
   --accent-text: #ffffff;
   --accent-ink: #14a67d;
+  --accent-soft: #142e2b;
   --add: #3fca74;
   --del: #f87171;
   --row-hover: #242832;
@@ -347,6 +353,10 @@ select,
   align-items: center;
   gap: 12px;
   min-width: 0;
+  /* The height the old underline tabs gave the row; the pill track is 36px, so
+     without this the row would shrink and the macOS traffic lights, placed for
+     a 40px row, would sit off its centre. */
+  min-height: 40px;
 }
 /* Row 2: the path box spans the full width now that it has its own row, so drop
    the single-row basis and 620px cap it carried when it shared the top row (#343). */
@@ -822,32 +832,40 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 /* ---- mode tabs ---- */
+/* One segmented control: a rounded --bg track with a hairline on the --panel
+   bar, the five modes as pills inside it, the active one on --accent-soft.
+   3px inset + 1px border around 28px segments = a 36px track. */
 .mode-tabs {
   display: flex;
-  /* Tight enough that the row reads as one connected group instead of
-     separate floating buttons (#377) — each tab is its own content width
-     now, not a uniform slot, so the gap is what has to carry that. */
-  gap: 0;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
   /* Sharing the top bar now (#280): the tabs hold their natural width and never
      shrink, so the labels stay put until the width check swaps them for
      icon-only (body.compact-tabs) — the path box and the spacer give way first. */
   flex: 0 0 auto;
 }
 
+/* A segment is --ctl-h tall, so it shares its top and bottom with the icon
+   buttons at the right of the row and the path field on row 2. */
 .mode-tab {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  height: var(--ctl-h);
+  padding: 0 var(--space-5) 0 var(--space-4);
   border: none;
-  border-radius: 0;
+  border-radius: 999px;
   box-shadow: none;
   background: transparent;
   color: var(--muted);
   font-weight: var(--fw-medium);
   letter-spacing: var(--ls-caps);
   font-size: var(--text-md);
-  padding: var(--space-4) var(--space-4);
-  border-bottom: 2px solid transparent;
+  line-height: 1;
 }
 
 /* The mode icon carries identity (#116): slightly dimmed until active/hovered so
@@ -856,26 +874,63 @@ input[type="search"]::-webkit-search-cancel-button {
   opacity: 0.8;
 }
 
-.mode-tab:hover:not(.active) {
+.mode-tab:hover:not(.active):not(:disabled) {
   background: var(--row-hover);
   color: var(--text);
 }
 
 .mode-tab.active {
+  background: var(--accent-soft);
   color: var(--accent-ink);
-  border-bottom-color: var(--accent);
 }
-.mode-tab.active > .ico {
+.mode-tab.active > .ico,
+.mode-tab:hover > .ico {
   opacity: 1;
 }
 
 /* Compact fallback (#116): under a width threshold the app adds
    body.compact-tabs and the labels drop away, leaving scannable icon-only tabs
-   (tooltip + aria-label keep the names) so a fifth/longer mode never truncates. */
+   (tooltip + aria-label keep the names) so a fifth/longer mode never truncates.
+   The segments become round, the glyph centred, inside the same track. */
 body.compact-tabs .mode-tab .lbl {
   display: none;
 }
 body.compact-tabs .mode-tab {
+  justify-content: center;
+  width: var(--ctl-h);
+  padding: 0;
+}
+
+/* The earlier look, kept as a choice in Settings › General (body.tabs-classic):
+   flat tabs side by side, the active one marked by a 2px accent underline. */
+body.tabs-classic .mode-tabs {
+  gap: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+body.tabs-classic .mode-tab {
+  height: auto;
+  padding: var(--space-4) var(--space-4);
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  line-height: normal;
+}
+body.tabs-classic .mode-tab.active {
+  background: transparent;
+  border-bottom-color: var(--accent);
+}
+body.tabs-classic .mode-tab:focus-visible {
+  border-radius: var(--radius-sm);
+}
+body.tabs-classic .mode-tab:disabled {
+  color: var(--border);
+  opacity: 1;
+  cursor: not-allowed;
+}
+body.tabs-classic.compact-tabs .mode-tab {
+  width: auto;
   padding: var(--space-4);
 }
 
@@ -4779,6 +4834,18 @@ td.editable:focus-visible {
   cursor: not-allowed;
 }
 
+/* The pill keeps its shape under the shared focus ring (which sets
+   --radius-sm); the 2px ring fits inside the track's 3px inset. A disabled
+   mode is dimmed like every other control rather than drawn in --border. */
+.mode-tabs > .mode-tab:focus-visible {
+  border-radius: 999px;
+}
+.mode-tabs > .mode-tab:disabled {
+  color: var(--muted);
+  opacity: 0.55;
+  cursor: default;
+}
+
 /* Empty state — a dashed, faintly-striped panel that says "nothing yet" without
    looking broken (opt in with .inert-panel). */
 .empty.inert-panel {
@@ -6579,6 +6646,99 @@ body.drag-active #drop-overlay {
 }
 .accent-reset {
   margin-left: var(--space-2);
+}
+
+/* ---- mode switcher look (Settings › General) ----
+   Two cards, each a small drawing of the switcher above a radio and its name.
+   The drawings are markup, not images, so they follow the theme and accent. */
+.tabs-style-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+/* The cards stack when the sheet is narrow: keep the row's label at the top. */
+.settings-row:has(> .tabs-style-picker) > label {
+  align-self: start;
+  padding-top: var(--space-4);
+}
+.tabs-style-opt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  cursor: pointer;
+}
+.tabs-style-opt:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tabs-style-opt:has(input:focus-visible) {
+  box-shadow: var(--ring);
+}
+.tabs-style-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+.tabs-style-name input {
+  margin: 0;
+}
+/* The drawing: a strip of the top bar with three modes, TAGGER active. */
+.tabs-sample {
+  display: flex;
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  pointer-events: none;
+}
+.tabs-sample-track {
+  display: flex;
+  align-items: center;
+}
+.tabs-sample-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: var(--fw-medium);
+  letter-spacing: var(--ls-caps);
+  line-height: 1;
+  white-space: nowrap;
+}
+.tabs-sample-tab .ico {
+  width: 11px;
+  height: 11px;
+}
+.tabs-sample-tab.on {
+  color: var(--accent-ink);
+}
+.tabs-sample.pill .tabs-sample-track {
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+}
+.tabs-sample.pill .tabs-sample-tab {
+  height: 20px;
+  padding: 0 9px 0 7px;
+  border-radius: 999px;
+}
+.tabs-sample.pill .tabs-sample-tab.on {
+  background: var(--accent-soft);
+}
+.tabs-sample.classic .tabs-sample-tab {
+  padding: 7px 7px 5px;
+  border-bottom: 2px solid transparent;
+}
+.tabs-sample.classic .tabs-sample-tab.on {
+  border-bottom-color: var(--accent);
 }
 
 /* ---- library health menu (#436, house style in #559) ------------------------
