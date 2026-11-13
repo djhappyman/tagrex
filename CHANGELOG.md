@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [1.4.0-personal.2] - Unreleased
 
+- Download provider images outside the source queue/lock with a six-download cap, preserving queue-based preparation and source spacing.
 - Integrate progressive filter conditions while retaining preview validity and pending-filter Apply guards.
 - Establish the personal fork README, preliminary roadmap and contribution ledger.
 - Validate commits on Linux, Windows and macOS; package successful main commits as artifacts and publish matching personal tags only after all packages succeed.
