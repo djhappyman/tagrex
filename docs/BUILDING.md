@@ -36,3 +36,6 @@ npx tauri build --bundles appimage --ci -- --locked
 Keep personal state separate from upstream and test writes on disposable media. Build caches and generated installers are not source files to commit.
 
 GitHub documentation: [workflow triggers](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows), [reusable workflows](https://docs.github.com/en/actions/how-tos/reuse-automations/reuse-workflows), [artifacts](https://docs.github.com/en/actions/tutorials/store-and-share-data).
+
+For feature checkpoints, paired upstream contributions and branch retirement,
+see the [contribution workflow](WORKFLOW.md).
