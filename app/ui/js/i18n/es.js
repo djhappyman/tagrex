@@ -200,6 +200,7 @@ export const es = {
   "editor.coverArt": "Portada",
   "editor.clearTags": "Borrar etiquetas",
   "editor.clearTagsTitle": "Borrar todas las etiquetas de texto de los archivos seleccionados para empezar de cero (se conservan la portada y los cue points de DJ). Se puede deshacer.",
+  "editor.livePreview": "Vista previa automática de cambios",
   "editor.stageFields": "Preparar cambios de campos",
   "fromName.heading": "Etiquetas desde el nombre de archivo",
   "fromName.hintSummary": "Cómo se lee la máscara",
@@ -542,6 +543,7 @@ export const es = {
   "cover.frontCover": "Portada frontal",
   "cover.sharedAcross": "compartida por {files}",
   "cover.replace": "Reemplazar…",
+  "cover.exportSaved": "Exportar portada guardada",
   "cover.export": "Exportar",
   "cover.multiple": "Varias portadas",
   "cover.withCover": "{with_cover}/{n} con portada",
@@ -1211,4 +1213,7 @@ export const es = {
   "artwork.chosen": "Portada {number} seleccionada",
   "apply.checking": "Comprobando archivos…",
   "workspace.transformations": "Transformaciones",
+  "session.unavailable": "No se pudo abrir {folder}. Reconéctala, reintenta arriba o abre otra carpeta.",
+  "session.slow": "{folder} tarda demasiado. Reintenta arriba o abre otra carpeta. La lectura anterior puede seguir en curso.",
+  "session.interrupted": "Reanudación automática pausada para {folder}. Reintenta arriba o abre otra carpeta.",
 };

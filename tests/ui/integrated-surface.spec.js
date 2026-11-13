@@ -77,7 +77,7 @@ test('Core, Standard and Advanced headers are accessible collapsibles and retire
   await open(page);
   await editor(page);
   await expect(page.locator('#fields-body .fe-group[data-group="core"] > button.fe-group-head')).toHaveAttribute('aria-expanded', 'true', { timeout: 1200 });
-  await expect(page.locator('.fe-group[data-group="core"] .fe-group-count')).toHaveText('10');
+  await expect(page.locator('.fe-group[data-group="core"] .fe-group-count')).toHaveText('13');
   await expect(page.locator('#subtab-editor [data-i18n="editor.tagFields"], #subtab-editor [data-i18n="editor.fieldsShort"]')).toHaveCount(0);
   await expect(page.locator('#fields-add-toggle, #fields-add-row, #fields-new-name, #fields-new-value, #fields-add, #fields-add-cancel, #fields-known')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Add tags$/i })).toHaveCount(0);
@@ -132,7 +132,7 @@ test('folding Transformations retains the exact checkbox, draft and manual plan 
   await title.fill('Pending title');
   await page.locator('#groups-menu .preset-apply').first().click();
   await expect(page.locator('#groups-menu input.group-tick').first()).toBeChecked();
-  await page.locator('#fields-apply').click();
+  await expect(page.locator('#diff-apply')).toBeEnabled();
   await expect(page.locator('#diff-actionbar')).toBeVisible();
   await title.fill('KEEP UNSTAGED DRAFT');
   await page.waitForTimeout(200);
@@ -281,7 +281,7 @@ for (const theme of ['dark', 'light']) for (const size of [{ width: 375, height:
     await toggle(page).click(); await toggle(page).click();
     await editor(page);
     await expect(page.locator('.fe-group[data-group="core"] > button.fe-group-head')).toBeInViewport({ ratio: 1 });
-    await expect(page.locator('#fields-apply')).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('#fields-clear')).toBeInViewport({ ratio: 1 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const panel = await page.locator('#dock-module-inspector').evaluate(node => ({ scroll: node.scrollWidth, client: node.clientWidth }));
     expect(panel.scroll).toBeLessThanOrEqual(panel.client);

@@ -77,7 +77,7 @@ test('unchanged column menus retain their controls', async ({ page }) => {
   await menu.evaluate(node => { window.auditColumnControl = node.querySelector('input[type="checkbox"]'); });
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
-  await page.locator('#view-btn').click();
+  // Escape closes the child chooser while retaining its View tray.
   await page.locator('#columns-btn').click();
   expect(await page.evaluate(() => document.querySelector('#columns-menu input[type="checkbox"]') === window.auditColumnControl)).toBe(true);
 });
@@ -100,7 +100,7 @@ test('typing a cell completion updates existing suggestion controls', async ({ p
   await expect(cell).toHaveAttribute('contenteditable', 'true');
 });
 
-test('virtual checkbox rows do not register document reset listeners per control', async ({ page }) => {
+test('virtual rows mount no selection checkboxes or per-control reset listeners', async ({ page }) => {
   await page.evaluate(() => {
     window.auditResetListeners = 0;
     const add = document.addEventListener.bind(document);
@@ -115,6 +115,6 @@ test('virtual checkbox rows do not register document reset listeners per control
     await window.tagrex.openLibrary();
   });
   await expect(page.locator('#tracks-body tr[data-path]')).not.toHaveCount(0);
-  await expect(page.locator('#tracks-body [data-slot="checkbox"]').first()).toBeAttached();
+  await expect(page.locator('#tracks-body [data-slot="checkbox"]')).toHaveCount(0);
   expect(await page.evaluate(() => window.auditResetListeners)).toBeLessThanOrEqual(1);
 });

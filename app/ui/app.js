@@ -1,3 +1,7 @@
+import { connectWorkspaceController, publishWorkspaceMode, publishWorkspaceSubtab } from './lib/workspace-state';
+import { compileQuery, normalizeConditions, conditionLabel, coverState } from "./js/filter-query.js";
+import { createGroupMotion } from "./js/group-motion.js";
+import { clearLiveInputs, hasLiveInputs, liveInputChanged, recordLiveField, hasInvalidLiveFields, hasInvalidPreview, removeAppliedLiveInputs, undoLiveImport } from "./js/live-preview.js";
 "use strict";
 
 import { TAURI, invoke } from "./js/invoke.js";
@@ -24,6 +28,7 @@ import { applyStaticText, planText, t as msg, tn, list as joinList } from "./js/
 import { hooks } from "./js/hooks.js";
 import { vinylPositionOf } from "./js/vinyl.js";
 import { initLaunchOpen } from "./js/dragdrop.js";
+import { readSession, saveSession, clearSession, beginResume, clearResumeAttempt } from "./js/session-resume.js";
 import {
   beginApplyProgress,
   beginUndoProgress,
@@ -95,7 +100,7 @@ import { initPlaceholderReference } from "./js/placeholders.js";
 import { initMaskPresets } from "./js/maskpresets.js";
 import { initTooltips } from "./js/tooltip.js";
 import { comboOf, formatCombo, initShortcuts } from "./js/shortcuts.js";
-import { bpmRunning, retranslateBpm, stopBpm } from "./js/bpm.js";
+import { bpmRunning, invalidateBpm, retranslateBpm, stopBpm } from "./js/bpm.js";
 import { isFieldLocked, loadFieldLocks, pushFieldLocks } from "./js/locks.js";
 import {
   cellSuggestKey,
@@ -108,7 +113,6 @@ import {
   refreshFieldEditor,
   resetFieldEditor,
   validateFieldValue,
-  applyFieldEditor,
 } from "./js/editor.js";
 
 // Hand the table-side refreshers to the panels that were split out (#143); see
@@ -141,6 +145,7 @@ Object.assign(hooks, {
     // drawn again (#476): the table (folder bands), the status line, the release
     // cards and the Library health button.
     syncCssLabels();
+    syncFilterControls();
     renderTracks();
     updateStatus();
     retranslateOnline();
@@ -167,6 +172,8 @@ import {
   applyBadgeFont,
   groupByPref,
   saveGroupBy,
+  showOldValues,
+  saveShowOldValues,
 } from "./js/prefs.js";
 import {
   fmtTime,
@@ -175,6 +182,7 @@ import {
   isPlayingPath,
 } from "./js/player.js";
 import {
+  selectionVersion,
   tracks, setTracks, reindexTracks, invalidateTrackContent, contentRevision,
   previewPlan, setPreviewPlan,
   previewSource, setPreviewSource,
@@ -239,6 +247,43 @@ let spreadsheet = null;
 // replace its composed description, which is also the journal fallback text.
 let spreadsheetBatchKind = "";
 
+// An open intent owns every awaited result. An OS hand-over or manual open
+// supersedes startup resume before a late result can repaint another subject.
+let openVersion = 0;
+let resumableRoot = "";
+let sessionSaveTimer = null;
+let restoringView = false;
+function sessionStorage() { try { return localStorage; } catch { return null; } }
+function sessionSnapshot() {
+  return {
+    version: 1, root: resumableRoot,
+    mode: currentMode,
+    subtab: document.querySelector('.subtab.active')?.dataset.subtab,
+    filter: filterText, conditions: filterConditions, conditionMode: filterConditionMode, regex: filterRegex, caseSensitive: filterCase,
+    sortKey, sortDir, groupBy,
+    collapsed: [...collapsedGroups], selection: [...selection],
+    scrollTop: tableWrap.scrollTop, scrollLeft: tableWrap.scrollLeft,
+    filterOpen: el('filter-panel-toggle')?.getAttribute('aria-expanded') === 'true',
+  };
+}
+function flushSessionView() {
+  clearTimeout(sessionSaveTimer);
+  if (resumableRoot && !restoringView) saveSession(sessionStorage(), sessionSnapshot());
+}
+function scheduleSessionSave() {
+  if (!resumableRoot || restoringView) return;
+  clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(flushSessionView, 250);
+}
+// Only bounded view state is captured, once after a burst, never on each row
+// in a marquee or each scroll frame. No drafts or write plans enter storage.
+window.addEventListener('pagehide', flushSessionView);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushSessionView(); });
+tableWrap.addEventListener('scroll', scheduleSessionSave, { passive: true });
+document.addEventListener('click', scheduleSessionSave);
+document.addEventListener('input', scheduleSessionSave);
+document.addEventListener('keydown', scheduleSessionSave);
+
 // Remember an inner popup's Escape in capture phase: its content may already
 // have unmounted by the time a document-level Settings/Discard handler runs.
 const componentEscapeEvents = new WeakSet();
@@ -282,7 +327,10 @@ function tagBlockSummary(track) {
 }
 
 function sortValue(track, key) {
-  if (key === "artwork") return track.unreadable || typeof track.has_cover !== "boolean" ? "2" : track.has_cover ? "1" : "0";
+  if (key === "artwork") {
+    const state = coverState(track);
+    return state === "unknown" ? "2" : state === "embedded" ? "1" : "0";
+  }
   // Length sorts on the seconds, not on "9:59" vs "10:01" as text.
   if (key === "length") return String(track.duration_secs ?? -1).padStart(9, "0");
   // Position sorts by (disc, track) numerically, so A1, A2, … B1 order holds
@@ -313,59 +361,48 @@ function fieldValue(track, key) {
   return track.tags[key] || "";
 }
 
-// Re-derive the parsed filter from the raw text + mode flags (#44). Runs on any
-// change to either, so `matchesFilter` stays a cheap per-row test. A leading
-// `field:` scopes the query to one column when the prefix names a known one;
-// otherwise the colon is treated as part of the query. In regex mode the pattern
-// is compiled once here, inside a try/catch, so an invalid pattern is flagged
-// (`filterError`) and can never throw from the render loop.
+// Compile one immutable query per edit; retain the previous predicate on error.
+// Existing display values and cached free text stay in the table controller.
 const numericCollator = new Intl.Collator(undefined, { numeric: true });
 const trackSearchText = new WeakMap();
 let filterRenderVersion = 0;
+let filterConditions = [];
+let filterConditionMode = 'all';
+let filterPending = false;
+let filterMessage = '';
 
-function recompileFilter() {
-  setFilterError(false);
-  let raw = filterText;
-  let scope = null;
-  const m = raw.match(/^([A-Za-z0-9_]+):(.*)$/);
-  if (m) {
-    const key = m[1].toLowerCase();
-    if (allColumnKeys().includes(key)) {
-      scope = key;
-      raw = m[2];
-    }
-  }
-  let re = null;
-  if (filterRegex && raw) {
-    try {
-      re = new RegExp(raw, filterCase ? "" : "i");
-    } catch (e) {
-      setFilterError(true);
-    }
-  }
-  setFilterQuery({ scope, needle: raw, foldedNeedle: raw.toLowerCase(), re });
+function filterModel() {
+  return { version: 1, text: filterText, regex: filterRegex, caseSensitive: filterCase,
+    conditions: filterConditions, mode: filterConditionMode };
 }
-
+function publishFilterState() {
+  document.dispatchEvent(new CustomEvent('tagrex:filter-state', { detail: {
+    ...filterModel(), pending: filterPending, error: filterMessage,
+    matched: matchingTrackCount, total: tracks.length,
+    hidden: [...selection].filter(path => !viewPathIndex.has(path)).length,
+  } }));
+}
+function recompileFilter() {
+  const compiled = compileQuery(filterModel(), {
+    fields: allColumnKeys(), fieldValue,
+    coverLabel: state => msg(`table.artwork.${state}`),
+    searchText(track, folded) {
+      let cached = trackSearchText.get(track);
+      if (!cached || cached.tags !== track.tags || cached.path !== track.path) {
+        const text = [fileName(track.path), ...Object.values(track.tags)].join(' ');
+        cached = { tags: track.tags, path: track.path, text, lower: text.toLowerCase() };
+        trackSearchText.set(track, cached);
+      }
+      return folded ? cached.lower : cached.text;
+    },
+  });
+  filterMessage = compiled.error;
+  setFilterError(!!compiled.error);
+  // Invalid input retains the previous predicate instead of broadening scope.
+  if (!compiled.error) setFilterQuery(compiled);
+}
 function matchesFilter(track) {
-  // The library health check that is on (#436) narrows the table before the
-  // filter box does.
-  if (!healthAllows(track.path)) return false;
-  const { scope, needle, foldedNeedle, re } = filterQuery;
-  if (!needle) return true;
-  // A broken regex filters nothing (the box shows the error) so the UI never
-  // hangs or empties out mid-keystroke.
-  if (filterRegex && !re) return true;
-  // Scope to one column, or search the file name plus every tag value so a
-  // column the user added (#43) is filterable too.
-  let cached = trackSearchText.get(track);
-  if (!scope && (!cached || cached.tags !== track.tags || cached.path !== track.path)) {
-    const text = [fileName(track.path), ...Object.values(track.tags)].join(" ");
-    cached = { tags: track.tags, path: track.path, text, lower: text.toLowerCase() };
-    trackSearchText.set(track, cached);
-  }
-  const hay = scope ? fieldValue(track, scope) : cached.text;
-  if (re) return re.test(hay);
-  return filterCase ? hay.includes(needle) : (scope ? hay.toLowerCase() : cached.lower).includes(foldedNeedle ?? needle.toLowerCase());
+  return healthAllows(track.path) && (!filterQuery.match || filterQuery.match(track));
 }
 
 function updateSortIndicators() {
@@ -403,26 +440,35 @@ function syncFilterControls() {
   // the red border, and a clear button only when there is text to clear.
   box.parentElement.classList.toggle("has-error", filterError);
   box.parentElement.classList.toggle("is-empty", !box.value);
-  box.title = filterError ? msg("app.invalidRegex") : "";
+  box.title = filterMessage;
+  box.setAttribute('aria-invalid', String(filterError));
+  box.setAttribute('aria-describedby', 'filter-feedback');
+  publishFilterState();
+  updateDiffBar();
 }
 
 // A named preset captures the full view query: filter text + mode flags, the
 // sort column/direction, and the grouping — everything the user tuned by hand.
+// Older UIs must not see a structured preset and silently ignore its conditions.
+const PRESETS_STORAGE_KEY = "tagrex.filterPresets";
+const conditionPresetsKey = `${PRESETS_STORAGE_KEY}.conditions.v1`;
 function loadPresets() {
-  try {
-    const saved = JSON.parse(localStorage.getItem(PRESETS_STORAGE_KEY));
-    return Array.isArray(saved) ? saved.filter((p) => p && typeof p.name === "string") : [];
-  } catch (e) {
-    return [];
+  const byName = new Map();
+  for (const key of [PRESETS_STORAGE_KEY, conditionPresetsKey]) {
+    try {
+      const list = JSON.parse(localStorage.getItem(key) || '[]');
+      if (Array.isArray(list)) for (const preset of list) {
+        if (preset && typeof preset.name === 'string') byName.set(preset.name, preset);
+      }
+    } catch { /* A damaged or unavailable optional store does not block the other. */ }
   }
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
-
 function savePresets(list) {
   try {
-    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(list));
-  } catch (e) {
-    /* localStorage unavailable — presets just won't persist */
-  }
+    localStorage.setItem(conditionPresetsKey, JSON.stringify(list.filter(p => p.conditions?.length)));
+    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(list.filter(p => !p.conditions?.length)));
+  } catch { /* Optional persistence; current filtering remains usable. */ }
 }
 
 // Store the current view under `name` (replacing a same-named one).
@@ -432,6 +478,7 @@ function saveCurrentPreset(name) {
   const list = loadPresets().filter((p) => p.name !== name);
   list.push({
     name,
+    queryVersion: 1, conditions: filterConditions, conditionMode: filterConditionMode,
     filter: filterText,
     regex: filterRegex,
     caseSensitive: filterCase,
@@ -447,6 +494,11 @@ function saveCurrentPreset(name) {
 // Re-apply a saved preset: restore the filter text/flags, sort, and grouping,
 // then reflect them onto every control and repaint.
 function applyPreset(p) {
+  try {
+    if ((p.queryVersion != null && p.queryVersion !== 1) || (p.conditionMode != null && !['all', 'any'].includes(p.conditionMode))) throw new Error('Unsupported saved filter version.');
+    filterConditions = normalizeConditions(p.conditions);
+    filterConditionMode = p.conditionMode === 'any' ? 'any' : 'all';
+  } catch (error) { toast(error.message, true); return; }
   setFilterText(p.filter || "");
   setFilterRegex(!!p.regex);
   setFilterCase(!!p.caseSensitive);
@@ -536,6 +588,7 @@ function renderPresetsMenu() {
 // A human-readable one-liner for a preset's tooltip.
 function presetSummary(p) {
   const bits = [];
+  try { bits.push(...normalizeConditions(p.conditions).map(conditionLabel)); } catch { bits.push('Invalid conditions'); }
   if (p.filter) {
     bits.push(
       msg("app.presetFilter", { filter: p.filter }) +
@@ -571,8 +624,7 @@ function decorateTrackArtwork(row, track) {
   if (!file) return row;
   row.querySelector('td.sel')?.setAttribute('aria-colindex', '1');
   file.setAttribute('aria-colindex', String(TABLE_DATA_COLUMN_OFFSET + 1));
-  const known = !track.unreadable && typeof track.has_cover === 'boolean';
-  const state = known ? (track.has_cover ? 'embedded' : 'missing') : 'unknown';
+  const state = coverState(track);
   const indicator = document.createElement('span');
   indicator.className = 'track-artwork';
   indicator.dataset.coverState = state;
@@ -601,7 +653,7 @@ function buildTrackRow(track, groupKey) {
   if (track.unreadable) {
     tr.classList.add("unreadable");
     tr.innerHTML = `
-      <td class="sel"><input type="checkbox" disabled title="${escapeHtml(msg("app.unreadableTags"))}" /></td>
+      <td class="sel"></td>
       <td class="file" title="${escapeHtml(msg("app.unreadablePath", { path: track.path }))}">${escapeHtml(fileName(track.path))}</td>
       ${visibleColumns.length > 1 ? `<td class="unreadable-note" colspan="${visibleColumns.length - 1}">${escapeHtml(msg("app.unreadableNote"))}</td>` : ""}`;
     return decorateTrackArtwork(tr, track);
@@ -619,7 +671,7 @@ function buildTrackRow(track, groupKey) {
   const isSel = selection.has(track.path);
   if (isSel) tr.classList.add("selected");
   tr.innerHTML = `
-      <td class="sel"><input type="checkbox" ${isSel ? "checked" : ""} data-path="${escapeHtml(track.path)}" /></td>
+      <td class="sel"></td>
       <td class="file" title="${escapeHtml(track.path)}">${escapeHtml(fileName(track.path))}</td>`;
   for (const field of visibleColumns) {
     if (field === "file") continue; // rendered above (structural, always first)
@@ -673,12 +725,12 @@ function fillDiffRow(tr, track) {
   const change = diffByPath.get(track.path);
   const pending = edits.get(track.path);
   const automatic = isAutomaticTransformPreview();
-  if (automatic && selection.has(track.path)) tr.classList.add('selected');
+  if ((automatic ? selection : applySelection).has(track.path)) tr.classList.add('selected');
   if (!change) {
     // Untouched row: current values, no apply tick, no editing/selection.
     tr.classList.add("untouched");
     tr.innerHTML =
-      `<td class="sel"><input type="checkbox" ${automatic ? `data-path="${escapeHtml(track.path)}" ${selection.has(track.path) ? 'checked' : ''}` : `disabled title="${escapeHtml(msg("app.notPartOfChange"))}"`} /></td>` +
+      `<td class="sel"></td>` +
       `<td class="file" title="${escapeHtml(track.path)}">${escapeHtml(fileName(track.path))}</td>`;
     for (const field of visibleColumns) {
       if (field === "file") continue;
@@ -689,15 +741,15 @@ function fillDiffRow(tr, track) {
         td.textContent = derived;
       } else {
         td.textContent = tag(track, field);
+        if (automatic) markLiveEditable(td,track,field);
       }
       tr.appendChild(td);
     }
     return;
   }
   tr.classList.add("staged");
-  const ticked = automatic ? selection.has(track.path) : applySelection.has(track.path);
   tr.innerHTML =
-    `<td class="sel"><input type="checkbox" class="${automatic ? 'auto-selection-tick' : 'apply-tick'}" ${ticked ? "checked" : ""} data-path="${escapeHtml(track.path)}" ${automatic ? '' : `title="${escapeHtml(msg("app.includeInApply"))}"`} /></td>` +
+    `<td class="sel"></td>` +
     diffFileCellHtml(change, track);
   for (const field of visibleColumns) {
     if (field === "file") continue;
@@ -717,6 +769,7 @@ function fillDiffRow(tr, track) {
     td.className = cell.cls;
     if (cell.title) td.title = cell.title;
     td.textContent = cell.text;
+    if (automatic) markLiveEditable(td,track,field);
     if (cell.old) {
       const old = document.createElement("span");
       old.className = "cell-old";
@@ -725,6 +778,14 @@ function fillDiffRow(tr, track) {
     }
     tr.appendChild(td);
   }
+}
+
+function markLiveEditable(cell,track,field) {
+  if (customColumnOf(field) || isFieldLocked(field)) return;
+  cell.classList.add('editable');
+  cell.contentEditable='false'; cell.spellcheck=false;
+  cell.dataset.path=track.path; cell.dataset.field=field;
+  cell.dataset.original=tag(track,field);
 }
 
 // The File cell for a staged row: on a rename/move it shows the new name, the
@@ -765,6 +826,8 @@ function buildGroupHeader(key, count) {
   const tr = document.createElement("tr");
   tr.className = "group-head" + (collapsed ? " collapsed" : "");
   tr.dataset.group = key;
+  tr.tabIndex = -1;
+  tr.setAttribute('aria-expanded', String(!collapsed));
   const dest = destGroups.get(key);
   if (dest || key === UNCHANGED_GROUP_KEY) {
     // A destination group (#385): where these files land, whether that folder
@@ -783,14 +846,14 @@ function buildGroupHeader(key, count) {
         )}">+ ${escapeHtml(tn("unit.folderFile", dest.extras.length))}</span>`
       : "";
     tr.innerHTML = `<td class="group-cell" colspan="${TABLE_DATA_COLUMN_OFFSET + visibleColumns.length}"><span class="group-heading-content">
-      <span class="group-caret">${collapsed ? ico("chevron-right") : ico("caret-down")}</span>
+      <span class="group-caret">${ico("caret-down")}</span>
       ${label}
       <span class="group-count muted">· ${escapeHtml(tn("unit.file", count))}${extras}</span>
     </span></td>`;
     return tr;
   }
   tr.innerHTML = `<td class="group-cell" colspan="${TABLE_DATA_COLUMN_OFFSET + visibleColumns.length}"><span class="group-heading-content">
-      <span class="group-caret">${collapsed ? ico("chevron-right") : ico("caret-down")}</span>
+      <span class="group-caret">${ico("caret-down")}</span>
       <span class="group-label">${escapeHtml(groupLabel(key))}</span>
       <span class="group-count muted">· ${tn("unit.file", count)}</span>
     </span></td>`;
@@ -1185,9 +1248,6 @@ function renderWindow({ force = false, refreshGrid = true } = {}) {
   for (let i = first; i <= last; i++) frag.appendChild(buildItemRow(i));
   frag.appendChild(spacerRow(itemTops[viewItems.length] - itemTops[Math.min(last + 1, viewItems.length)]));
   tracksBody.replaceChildren(frag);
-  // The rows were built from the current selection, so that is what the DOM
-  // shows (#184: the painter only touches rows whose state moved).
-  paintedSelection = new Set(selection);
   measureRenderedRows();
   if (refreshGrid) spreadsheet?.refresh();
 }
@@ -1235,7 +1295,12 @@ function mountMeasureRows(keys) {
   return () => borrowed.forEach((tr) => tr.remove());
 }
 
-tableWrap.addEventListener("scroll", () => renderWindow(), { passive: true });
+let lastVerticalScroll = tableWrap.scrollTop;
+tableWrap.addEventListener("scroll", () => {
+  if (tableWrap.scrollTop === lastVerticalScroll) return;
+  lastVerticalScroll = tableWrap.scrollTop;
+  renderWindow();
+}, {passive:true});
 // The window is a function of the viewport, so anything that resizes it — the
 // OS window, the mode-panel splitter, showing the table for the first time —
 // has to re-cut it.
@@ -1270,6 +1335,7 @@ document.addEventListener("tagrex:dock-resize-end", () => {
 
 function renderTracks({ preparedFilter = null } = {}) {
   filterRenderVersion++;
+  filterPending = false;
   updateSortIndicators();
   tracksEmpty.hidden = tracks.length > 0;
   headHeight = el("tracks").tHead?.offsetHeight || headHeight;
@@ -1283,7 +1349,7 @@ function renderTracks({ preparedFilter = null } = {}) {
   // While diffing the sel column is the apply scope, not the selection, so the
   // selection UI must not repaint the checkboxes — refresh the action bar instead.
   if (diffByPath) updateDiffBar();
-  if (!diffByPath || isAutomaticTransformPreview()) syncSelectionUI({ refreshGrid: false });
+  if (!diffByPath || isAutomaticTransformPreview()) syncSelectionUI({ refreshGrid: false, refreshPanels:true });
   refreshRoving();
   spreadsheet?.refresh();
   // Sticky autofit (#151): re-fit only when what the cells show has actually
@@ -1291,6 +1357,7 @@ function renderTracks({ preparedFilter = null } = {}) {
   maybeAutofit();
   scheduleAutomaticTransformPreview();
   updateTransformScope();
+  publishFilterState();
 }
 
 // Selection count in the status bar ("N/M selected"). Uses the checked-row
@@ -1305,15 +1372,17 @@ function updateStatus(selected = selectedPaths().length) {
     return;
   }
   const files =
-    filterText || activeHealthLabel()
+    filterText || filterConditions.length || activeHealthLabel()
       ? `${matchingTrackCount}/${tn("unit.file", total)}`
       : tn("unit.file", total);
   // The active check names itself in the filter field's chip (#559).
   statusSel.textContent = `${files} · ${tn("count.selected", selected)}`;
+  publishFilterState();
 }
 
 function resetEdits() {
-  edits.clear();
+  clearLiveInputs();
+  resetFieldEditor();
 }
 
 // Move pending edits from old paths to new paths after a rename is applied, so
@@ -1328,137 +1397,40 @@ function remapEditsAfterRename(plan) {
 }
 
 function onCellEdit(td) {
-  const { path, field, original } = td.dataset;
+  const {path,field,original} = td.dataset;
   const value = td.textContent.trim();
-  const unstage = () => {
-    if (edits.has(path)) {
-      edits.get(path).delete(field);
-      if (edits.get(path).size === 0) edits.delete(path);
-    }
-  };
-  // Typed fields (year / track / disc / bpm) are validated with the same rule
-  // the EDITOR form and the backend use. An invalid value lights up the cell's
-  // error state and is never staged, so an apply can't try to write it (#76).
-  if (!validateFieldValue(field, value).ok) {
-    td.classList.add("error");
-    td.classList.remove("dirty");
-    unstage();
-    return;
-  }
-  td.classList.remove("error");
-  if (value === original) {
-    td.classList.remove("dirty");
-    unstage();
-  } else {
-    td.classList.add("dirty");
-    if (!edits.has(path)) edits.set(path, new Map());
-    edits.get(path).set(field, value);
-  }
+  const valid = validateFieldValue(field,value,[path]).ok;
+  td.classList.toggle('error',!valid);
+  td.classList.toggle('dirty',valid && value!==original);
+  recordLiveField([path],field,value,valid);
 }
 
-// ---- writing a cell edit (#507) ----
-// A cell is written the moment it is committed — Enter, or leaving it — as one
-// batch of its own in the undo journal, so the undo arrow and ⌘Z take it back
-// like anything else. There is no preview: the new value is what was just
-// typed, already on screen, and staging it behind Preview edits + Apply was two
-// clicks to confirm what nobody needed shown. The panels that change many files
-// at once (EDITOR, imports, GENERATOR) keep theirs.
-//
-// One write at a time: committing a cell and moving straight on to the next
-// queues the second behind the first, and both wait out an apply or an undo
-// already running.
-let cellWrites = Promise.resolve();
-// What is already queued, by file and field: Enter both blurs the cell and asks
-// for the write itself, and only one of the two should reach the backend.
-const queuedCellWrites = new Map();
-
+// Enter or blur finishes the cell's raw input; Apply is the only writer.
 function commitCellEdit(td) {
-  const { path, field, original } = td.dataset;
-  // A value that failed validation was never staged; the cell goes back to what
-  // the file says and the reason is shown, rather than leaving text on screen
-  // that is not in the file.
-  if (td.classList.contains("error")) {
-    const { hint } = validateFieldValue(field, td.textContent.trim());
-    td.textContent = original;
-    td.classList.remove("error");
-    if (hint) toast(hint, true);
-    return;
+  if (!td.isConnected) return;
+  // Leaving an invalid cell keeps its visible raw draft and the Apply gate.
+  // It is never silently filtered out of an otherwise applicable plan.
+  // Input already scheduled this revision. Ending focus must not start another
+  // revision while a preview is patching rows (which also produces blur).
+  const change = diffByPath?.get(td.dataset.path);
+  const track = trackAt(td.dataset.path);
+  if (change && track) {
+    const cell = diffCell(change, td.dataset.field, track);
+    td.textContent = cell.text;
+    td.classList.toggle('dirty', cell.cls.split(' ').includes('dirty'));
+    td.classList.toggle('error', cell.cls.split(' ').includes('error'));
   }
-  const value = edits.get(path)?.get(field);
-  if (value === undefined) return; // nothing changed
-  const key = `${path}\u0000${field}`;
-  if (queuedCellWrites.get(key) === value) return;
-  queuedCellWrites.set(key, value);
-  cellWrites = cellWrites.then(async () => {
-    await writeCellEdit(path, field, value);
-    if (queuedCellWrites.get(key) === value) queuedCellWrites.delete(key);
-  });
-}
-
-async function writeCellEdit(path, field, value) {
-  while (applying || undoing) await new Promise((resolve) => setTimeout(resolve, 50));
-  // Taken off the pending set whatever happens next: written, refused, or
-  // failed, the cell then shows what the file says.
-  const pending = edits.get(path);
-  if (pending?.get(field) === value) {
-    pending.delete(field);
-    if (pending.size === 0) edits.delete(path);
-  }
-  applying = true;
-  try {
-    const plan = await invoke("preview_tag_edits", { edits: [{ path, field, value }], cover: null });
-    if (plan.changes.length > 0) {
-      const batch = await invoke("apply_plan", { plan });
-      rememberBatchScope(batch, plan);
-      await refreshHistory();
-    }
-  } catch (e) {
-    toast(String(e), true);
-  } finally {
-    applying = false;
-  }
-  await refreshTrackInPlace(path, field);
-}
-
-// Bring one file's row up to date without re-sorting or regrouping the table:
-// the edited row stays under the pointer even when its column is the sort key,
-// and moves the next time the table is sorted or filtered.
-async function refreshTrackInPlace(path, field) {
-  const track = trackAt(path);
-  if (!track) return;
-  try {
-    const fresh = await invoke("read_track", { path });
-    // The library may have changed while the file was read. Never patch a DTO
-    // from a previous session into its replacement.
-    if (trackAt(path) !== track) return;
-    const matched = matchesFilter(track);
-    Object.assign(track, fresh);
-    invalidateTrackContent();
-    scheduleAutomaticTransformPreview({ modelChanged: true });
-    await refreshCustomColumnPath(path, field);
-    if (trackAt(path) !== track) return;
-    matchingTrackCount += Number(matchesFilter(track)) - Number(matched);
-  } catch (e) {
-    toast(String(e), true);
-  }
-  // Keep model order/grouping stable and paint once after the one-file caches
-  // are ready. The next sort/filter intentionally rebuilds the model.
-  renderWindow({ force: true });
-  updateStatus();
-  if (currentMode === "tagger") refreshFieldEditor();
+  updateDiffBar();
 }
 
 // Escape leaves a cell as it was: the typed value is dropped and nothing is
 // written.
 function cancelCellEdit(td) {
-  const { path, field, original } = td.dataset;
-  const pending = edits.get(path);
-  if (pending) {
-    pending.delete(field);
-    if (pending.size === 0) edits.delete(path);
-  }
-  td.textContent = original;
-  td.classList.remove("dirty", "error");
+  const {path,field,original} = td.dataset;
+  const value = td.dataset.editOriginal ?? original;
+  td.textContent = value;
+  td.classList.remove('dirty','error');
+  recordLiveField([path],field,value,validateFieldValue(field,value,[path]).ok);
 }
 
 // Reveal the file table. The Preview view is gone (#117): a staged plan now
@@ -1472,14 +1444,10 @@ function showView(which) {
 
 // ---- duplicate finder (#40): a read-only library scan, grouped ----
 function discardPreview() {
-  // A preview built from the pending-edits buffer (inline edits + Discogs
-  // import) owns that buffer, so discarding it must also drop those staged
-  // values; other previews just drop the plan. exitDiffState() repaints the
-  // table back to its normal (non-diff) state either way.
-  const wasEdits = previewSource === "edits";
+  resetEdits();
   dismissAutomaticTransformPreview();
-  if (wasEdits) resetEdits();
   exitDiffState();
+  refreshFieldEditor({force:true,resetDraft:true});
 }
 
 // Path -> track lookup, so the diff can show the current value of a file's
@@ -1490,6 +1458,30 @@ function discardPreview() {
 // Preview view any more — the same #tracks table shows the change in place with a
 // floating Apply/Discard bar. An empty plan just leaves the table untouched.
 function renderPreview(plan) {
+  // Live typing changes values, not table membership. Keep an actively edited
+  // cell attached and patch only affected visible rows; grouping and virtual
+  // prefix sums do not need rebuilding on every keystroke.
+  if (plan?.changes.length && (diffByPath || tracksBody.querySelector('[contenteditable="true"]')) && isAutomaticTransformRefresh() &&
+      !plan.changes.some(change => change.rename_to) && ![...(diffByPath?.values() || [])].some(change => change.rename_to)) {
+    const previous = diffByPath || new Map();
+    const next = new Map(plan.changes.map(change => [change.path,change]));
+    setDiffByPath(next);
+    setApplySelection(new Set(next.keys()));
+    document.body.classList.add('diffing','automatic-transform-preview');
+    el('tracks').classList.toggle('show-old', el('diff-show-old').checked);
+    for (const [path,row] of renderedRows) {
+      const displaySignature = change => JSON.stringify([change?.tag_changes, !!change?.cover_change, change?.cover_change?.new?.length]);
+      if (displaySignature(previous.get(path)) === displaySignature(next.get(path))) continue;
+      if (row.querySelector('[contenteditable="true"]')) continue;
+      const track = trackAt(path); if (!track) continue;
+      const fresh = buildTrackRow(track,row.dataset.group ?? null);
+      row.className = fresh.className;
+      row.replaceChildren(...fresh.childNodes);
+    }
+    el('diff-actionbar').hidden = false;
+    renderLockedSkips(); updateDiffBar(); spreadsheet?.refresh();
+    return;
+  }
   if (!plan || plan.changes.length === 0) {
     // A plan a lock emptied would otherwise land as "nothing to change", which
     // is the one message it must not give: nothing changed BECAUSE of the lock,
@@ -1533,8 +1525,7 @@ function enterDiffState() {
   setApplySelection(new Set(diffByPath.keys()));
   document.body.classList.add("diffing");
   document.body.classList.toggle('automatic-transform-preview', isAutomaticTransformPreview());
-  el("diff-show-old").checked = false;
-  el("tracks").classList.remove("show-old");
+  el("tracks").classList.toggle("show-old", el("diff-show-old").checked);
   showView("files"); // never diff over the dedup view
   if (isAutomaticTransformPreview() && currentMode === 'deduplicator') {
     el('duplicates-view').hidden = true;
@@ -1634,12 +1625,13 @@ function syncPanelCellMin() {
 // Sync the floating action bar (apply count + enabled) and the header select-all
 // tri-state to `applySelection`. Every changed file starts ticked; unticking
 // some narrows what a single Apply writes (#81).
-function updateDiffBar() {
+function updateDiffBar(scope) {
   if (!diffByPath) return;
+  scope ??= automaticTransformScope();
   const staged = diffByPath.size;
   const n = applySelection.size;
   el("ab-count").textContent = String(n);
-  applyBtn.disabled = n === 0 || (isAutomaticTransformPreview() && automaticTransformScope().busy);
+  applyBtn.disabled = filterPending || !!filterError || n === 0 || !!tracksBody.querySelector('[contenteditable="true"]') || scope.planInvalid || (isAutomaticTransformPreview() && (scope.busy || scope.invalid || scope.failed));
   if (isAutomaticTransformPreview()) return; // header ticks still select tracks
   selectAll.checked = n > 0 && n === staged;
   selectAll.indeterminate = n > 0 && n < staged;
@@ -1754,11 +1746,6 @@ function writeRecentRoots(list) {
 function rememberRoot(path) {
   if (!path) return;
   writeRecentRoots([path, ...recentRoots().filter((p) => p !== path)]);
-}
-
-// A folder that has since moved or been unmounted stops being offered.
-function forgetRoot(path) {
-  writeRecentRoots(recentRoots().filter((p) => p !== path));
 }
 
 function closeRecentMenu() {
@@ -1999,36 +1986,73 @@ function leaveRootEdit() {
 }
 
 // ---- actions ----
-async function openLibrary() {
+async function openLibrary(options = {}) {
   const root = cleanPastedPath(rootInput.value);
   if (!root) {
     toast(msg("app.enterPath"), true);
     return;
   }
+  invalidateBpm();
+  flushSessionView();
+  const version = ++openVersion;
+  resumableRoot = "";
+  const savedView = options.restore || null;
+  pauseAutomaticTransformPreview();
   // Show what is actually about to be opened, not what was pasted.
   rootInput.value = root;
+  let timeout;
   try {
-    await invoke("open_library", { root });
-    setDropFolders(null); // a typed/browsed open is a plain library, not a drop
+    const operation = (async () => {
+      await invoke("open_library", { root });
+      if (version !== openVersion) return;
+      setDropFolders(null);
+      await afterOpen(root, version, savedView);
+    })();
+    await (savedView ? Promise.race([
+      operation,
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error('resume-timeout')), 10000); }),
+    ]) : operation);
+    if (version !== openVersion) return;
+
     rememberRoot(root);
-    await afterOpen(root);
+    clearResumeAttempt(sessionStorage());
+    resumableRoot = root;
+    restoringView = false;
+    flushSessionView();
   } catch (e) {
-    // A recent folder that no longer opens stops being offered (#180): a list
-    // that keeps suggesting something unopenable is worse than a short one.
-    if (recentRoots().includes(root)) {
-      forgetRoot(root);
-      toast(msg("app.folderGone", { folder: folderName(root) }), true);
+    if (version !== openVersion) return;
+    if (savedView) {
+      // The native filesystem request may still be running. Ignore its result;
+      // later work cannot publish a different selection or plan after timeout.
+      openVersion++;
+      restoringView = false;
+      resumeAutomaticTransformPreview();
+      rootInput.hidden = false;
+      el("root-box").hidden = true;
+      updateLibAction();
+      toast(msg(String(e).includes('resume-timeout') ? 'session.slow' : 'session.unavailable', { folder: folderName(root) }), true);
       return;
     }
+    // Missing, disconnected and permission-denied folders can recover. Keep
+    // their recent entry instead of treating every I/O failure as deletion.
     toast(String(e), true);
+  } finally {
+    clearTimeout(timeout);
+    if (version === openVersion) {
+      restoringView = false;
+      resumeAutomaticTransformPreview();
+    }
   }
+
 }
 
 // Shared tail of every "open a session" path (Open, Browse, or a drag-and-drop):
 // pull the track list and reset all per-session view state. `label` is what the
 // success toast names. When `dropFolders` is set (a file-set drop, #127) the
 // table defaults to drop-origin grouping; otherwise the saved group pref.
-async function afterOpen(label) {
+async function afterOpen(label, version = openVersion, savedView = null) {
+  if (version !== openVersion) return;
+  restoringView = !!savedView;
   latestBatchId = null;
   historyLoaded = false;
   historyReadVersion++;
@@ -2045,7 +2069,10 @@ async function afterOpen(label) {
   // belong to the person rather than to the folder they happen to have open —
   // so they are handed to it again (#48).
   await pushFieldLocks();
-  setTracks(await invoke("list_tracks", {}));
+  if (version !== openVersion) return;
+  const loadedTracks = await invoke("list_tracks", {});
+  if (version !== openVersion) return;
+  setTracks(loadedTracks);
   // The scanner lists names as text (`1, 10, 2`); the header's sort is what the
   // table shows, here as after an apply (#196, #526).
   sortTracks();
@@ -2068,19 +2095,55 @@ async function afterOpen(label) {
   setSortKey(null);
   setSortDir(1);
   setManualOrder(false);
+  filterConditions = [];
+  filterConditionMode = "all";
   setFilterText("");
   el("filter").value = "";
   clearHealth(); // a check belongs to the library it was run on (#436)
   syncFilterControls(); // clears the parsed query + any regex-error state
   setGroupBy(dropFolders ? "drop" : groupByPref(), { persist: false, rerender: false });
+  if (savedView) {
+    filterConditions = normalizeConditions(savedView.conditions);
+    filterConditionMode = savedView.conditionMode === "any" ? "any" : "all";
+    setFilterText(savedView.filter);
+    el("filter").value = savedView.filter;
+    setFilterRegex(savedView.regex);
+    setFilterCase(savedView.caseSensitive);
+    syncFilterControls();
+    const validColumns = new Set(allColumnKeys());
+    setSortKey(validColumns.has(savedView.sortKey) || savedView.sortKey === 'artwork' ? savedView.sortKey : null);
+    setSortDir(savedView.sortDir);
+    sortTracks();
+    // Group fields are checked against the current menu, not trusted from storage.
+    const groups = [...el('group-menu').querySelectorAll('[data-group]')].map(option => option.dataset.group);
+    if (groups.includes(savedView.groupBy)) setGroupBy(savedView.groupBy, { persist: false, rerender: false });
+    collapsedGroups.clear();
+    for (const key of savedView.collapsed) collapsedGroups.add(key);
+    selection.clear();
+    for (const path of savedView.selection) if (trackAt(path) && !trackAt(path).unreadable) selection.add(path);
+    // A removed file is never replaced by another selected target implicitly.
+
+  }
   renderTracks();
+  if (savedView) {
+    const toggle = el('filter-panel-toggle');
+    if (toggle && (toggle.getAttribute('aria-expanded') === 'true') !== savedView.filterOpen) toggle.click();
+    tableWrap.scrollTop = savedView.scrollTop;
+    tableWrap.scrollLeft = savedView.scrollLeft;
+    renderWindow();
+  }
   // Mask columns (#150) are rendered by the backend, so they arrive a beat after
   // the rows do. The table paints immediately with the cells blank and repaints
   // once the values land — a visible column is never worth blocking the open on.
   refreshCustomColumnCells();
   showView("files");
+  if (savedView) {
+    setMode(savedView.mode);
+    setSubtab(savedView.subtab);
+  }
   showPlayerBar();
   await refreshHistory();
+  if (version !== openVersion) return;
   // The folder's own name, not the path to it: the path field above the table
   // is already showing that, and spelling it out again is most of the toast
   // (#267).
@@ -2092,6 +2155,7 @@ async function afterOpen(label) {
   } catch (e) {
     setAside = null; // an older backend without the command: nothing to report
   }
+  if (version !== openVersion) return;
   if (setAside) {
     report(opened, [
       { text: msg("app.journalReset"), problem: true },
@@ -2107,43 +2171,40 @@ async function afterOpen(label) {
 // drives the table's drop-origin grouping, and is null for library mode.
 async function openDrop(paths) {
   if (!paths || !paths.length) return;
+  invalidateBpm();
+  flushSessionView();
+  const version = ++openVersion;
+  resumableRoot = "";
+  pauseAutomaticTransformPreview();
   try {
     const result = await invoke("open_drop", { paths });
+    if (version !== openVersion) return;
     setDropFolders(result.mode === "files" ? result.folders || [] : null);
     rootInput.value = result.root;
     // A dropped FOLDER is a library and worth remembering (#180); a drop of
     // loose files is rooted at their common ancestor, which nobody chose.
-    if (result.mode !== "files") rememberRoot(result.root);
-    await afterOpen(result.root);
+    await afterOpen(result.root, version);
+    if (version !== openVersion) return;
+    clearResumeAttempt(sessionStorage());
+    if (result.mode !== "files") {
+      rememberRoot(result.root);
+      resumableRoot = result.root;
+      restoringView = false;
+      flushSessionView();
+    } else clearSession(sessionStorage());
   } catch (e) {
-    toast(String(e), true);
+    if (version === openVersion) toast(String(e), true);
+  } finally {
+    if (version === openVersion) {
+      restoringView = false;
+      resumeAutomaticTransformPreview();
+    }
   }
 }
 
 
 async function previewEdits() {
-  const list = [];
-  for (const [path, fields] of edits) {
-    for (const [field, value] of fields) {
-      list.push({ path, field, value });
-    }
-  }
-  if (list.length === 0) {
-    toast(msg("app.noPendingEdits"), true);
-    return;
-  }
-  try {
-    // The cover rides along exactly once: whether it is written at all is the
-    // backend's decision (the import-cover setting, per file), but a second
-    // staging must not silently re-offer it.
-    const cover = pendingImportCover;
-    setPendingImportCover(null);
-    setPreviewPlan(await invoke("preview_tag_edits", { edits: list, cover }));
-    setPreviewSource("edits");
-    renderPreview(previewPlan);
-  } catch (e) {
-    toast(String(e), true);
-  }
+  liveInputChanged();
 }
 
 // True while an Apply is running (#437), or an Undo (#448).
@@ -2197,9 +2258,22 @@ function remapTransformSelection(paths) {
   selBase = new Set([...selBase].map(path => paths.get(path) || path));
 }
 
+function freezeMutationSurfaces() {
+  const surfaces = [...document.querySelectorAll('.mode-col, #files-view')];
+  const states = surfaces.map(node => [node, node.inert]);
+  const controls = surfaces.flatMap(node => [...node.querySelectorAll('input,textarea,select,button')]).map(node => [node,node.disabled]);
+  for (const [node] of states) node.inert = true;
+  for (const [node] of controls) node.disabled = true;
+  return () => {
+    for (const [node,disabled] of controls) if (node.isConnected) node.disabled = disabled;
+    for (const [node,inert] of states) node.inert = inert;
+  };
+}
+
 async function apply() {
   if (!previewPlan || previewPlan.changes.length === 0) return;
-  if (isAutomaticTransformPreview() && automaticTransformScope().busy) return;
+  if (isAutomaticTransformPreview() && (automaticTransformScope().busy || automaticTransformScope().failed || automaticTransformScope().invalid)) return;
+  if (filterPending || filterError || hasInvalidPreview(previewPlan)) return;
   const automaticRename = isAutomaticTransformPreview() && previewPlan.changes.some(change => change.rename_to);
   const wasRename = previewSource === "rename" || automaticRename;
   const wasEdits = previewSource === "edits";
@@ -2218,6 +2292,7 @@ async function apply() {
   // A second Apply (the shortcut, a double click) would queue behind the first.
   if (applying || undoing) return;
   applying = true;
+  const releaseMutationSurfaces = freezeMutationSurfaces();
   const sourceTracks = tracks;
   pauseAutomaticTransformPreview();
   try {
@@ -2233,10 +2308,12 @@ async function apply() {
         remapTransformSelection(new Map(renamed.map(change => [change.path, change.rename_to])));
         automaticRenameBatches.set(batch.id, new Map(renamed.map(change => [change.rename_to, change.path])));
       }
-    } else if (wasEdits) {
+    }
+    if (wasEdits) {
       // Drop only the applied files' edits; unticked files keep their staged
       // edits so a follow-up apply can still write them.
-      for (const path of appliedPaths) edits.delete(path);
+      removeAppliedLiveInputs(new Set([...appliedPaths, ...appliedPlan.changes.map(change => change.rename_to).filter(Boolean)]));
+      resetFieldEditor();
     }
     // Cover/tag-only batches read back their exact targets. Moves use the
     // scanner because they can change folder/file-set membership.
@@ -2245,7 +2322,9 @@ async function apply() {
     sortTracks(); // changed values can change the active sort order
     // Mask columns render from disk, and an apply is exactly when what is on
     // disk changed under unchanged paths (#150).
-    invalidateCustomColumns(readback === "scoped" ? batchRefreshScopes.get(batch.id) : null);
+    const scopedFields = readback === 'scoped' && !appliedPlan.changes.some(change => change.block_changes?.length)
+      ? new Map(appliedPlan.changes.map(change => [change.path, new Set((change.tag_changes || []).map(field => field.field))])) : undefined;
+    invalidateCustomColumns(readback === "scoped" ? batchRefreshScopes.get(batch.id) : null, scopedFields);
     // exitDiffState() drops the plan + apply scope and repaints the table.
     exitDiffState();
     refreshCustomColumnCells();
@@ -2259,7 +2338,8 @@ async function apply() {
   } finally {
     endApplyProgress();
     applying = false;
-    resumeAutomaticTransformPreview({ dismiss: true });
+    releaseMutationSurfaces();
+    resumeAutomaticTransformPreview({ dismiss: !hasLiveInputs() });
   }
 }
 
@@ -2288,6 +2368,7 @@ async function undo() {
   // The backend takes one job at a time; a second click would only queue (#448).
   if (applying || undoing) return;
   undoing = true;
+  const releaseMutationSurfaces = freezeMutationSurfaces();
   const sourceTracks = tracks;
   pauseAutomaticTransformPreview();
   try {
@@ -2341,7 +2422,8 @@ async function undo() {
   } finally {
     endUndoProgress();
     undoing = false;
-    resumeAutomaticTransformPreview({ dismiss: true });
+    releaseMutationSurfaces();
+    resumeAutomaticTransformPreview({ dismiss: !hasLiveInputs() });
   }
 }
 
@@ -2364,6 +2446,7 @@ const MODE_REFRESH = {
 // this in sync with the tab/panel marked active/visible there.
 
 function setMode(name) {
+  publishWorkspaceMode(name);
   setCurrentMode(name);
   // The dock borrows the GENERATOR panel's chain block (#149, #233); this puts
   // it wherever the new mode says it belongs — back in that panel on the way
@@ -2410,9 +2493,7 @@ function refreshTagger() {
   scheduleTextProbe(); // the same for FROM TEXT, whose counts follow the selection
 }
 
-document.querySelectorAll(".mode-tab").forEach((tab) => {
-  tab.addEventListener("click", () => setMode(tab.dataset.mode));
-});
+
 
 // Collapse/expand the mode panel to give the table the full width.
 el("panel-toggle").addEventListener("click", () => {
@@ -2489,6 +2570,15 @@ function showEditCtx(x, y, field) {
 document.addEventListener("contextmenu", (e) => {
   if (e.target.closest("[data-artwork-ui]")) return;
   e.preventDefault(); // never show the webview's native menu
+  const header = e.target.closest('#tracks thead th');
+  if (header) { hideEditCtx(); hideFileCtx(); openColumnsMenu({x:e.clientX,y:e.clientY}, header); return; }
+  el('columns-menu').hidden = true;
+  const group = e.target.closest('#tracks-body tr.group-head');
+  if (group) {
+    hideEditCtx(); hideFileCtx(); el('columns-menu').hidden = true;
+    if (!applying && !undoing) selectGroup(group.dataset.group, e.ctrlKey || e.metaKey ? 'toggle' : 'replace');
+    return;
+  }
   const field = e.target.closest('input, textarea, [contenteditable="true"]');
   if (field) {
     hideFileCtx();
@@ -2666,7 +2756,15 @@ el("diff-discard").addEventListener("click", discardPreview);
 // changed cell. A density toggle over the default single-line (new-only) diff.
 el("diff-show-old").addEventListener("change", (e) => {
   el("tracks").classList.toggle("show-old", e.target.checked);
+  saveShowOldValues(e.target.checked);
+  // The toggle changes offscreen row heights too. Cached measurements must
+  // not keep the scrollbar at the old density until each row is visited.
+  itemHeights.fill(null);
+  rowEstimateMeasured = groupEstimateMeasured = false;
+  recomputeItemTops();
+  renderWindow({force:true});
 });
+el('diff-show-old').checked = showOldValues();
 
 // ---- wire up ----
 // One button, two roles (#177): what it does is what its label says.
@@ -2686,7 +2784,7 @@ document.addEventListener("click", (e) => {
 
 applyBtn.addEventListener("click", apply);
 undoBtn.addEventListener("click", undo);
-el("fields-apply").addEventListener("click", applyFieldEditor);
+
 el("fields-clear").addEventListener("click", previewClearTags);
 // Same flow from the table toolbar, so clearing doesn't require opening EDITOR.
 el("clear-tags").addEventListener("click", previewClearTags);
@@ -2697,6 +2795,7 @@ el("export-kind").addEventListener("click", (e) => {
 // TAGGER sub-tabs: ONLINE (a metadata source), EDITOR (tag fields + cover),
 // FROM NAME (the file's own name, #139) — three ways to the same outcome.
 function setSubtab(name) {
+  publishWorkspaceSubtab(name);
   document.querySelectorAll(".subtab").forEach((t) => t.classList.toggle("active", t.dataset.subtab === name));
   document.querySelectorAll(".subtab-panel").forEach((p) => {
     p.hidden = p.id !== `subtab-${name}`;
@@ -2710,9 +2809,7 @@ function setSubtab(name) {
   // EDITOR deliberately has none (#236).
   syncTransformPlacement();
 }
-document.querySelectorAll(".subtab").forEach((tab) => {
-  tab.addEventListener("click", () => setSubtab(tab.dataset.subtab));
-});
+connectWorkspaceController({ setMode, setSubtab });
 
 
 document.addEventListener("keydown", (e) => {
@@ -2744,7 +2841,6 @@ const ESC_POPUPS = [
   "edit-ctx",
   "group-menu",
   "columns-menu",
-  "pl-volume-pop",
   "ph-menu",
   "preset-menu",
   "query-preset-menu",
@@ -2794,11 +2890,7 @@ function selectAllRows() {
   // While diffing, the sel column is the apply scope (#117), so select all of it.
   if (diffByPath && !isAutomaticTransformPreview()) {
     setApplySelection(new Set(diffByPath.keys()));
-    for (const tr of tracksBody.querySelectorAll("tr.staged")) {
-      const cb = tr.querySelector(".apply-tick");
-      if (cb) cb.checked = true;
-    }
-    updateDiffBar();
+    syncSelectionUI();
     return;
   }
   for (const path of viewPaths) selection.add(path);
@@ -2849,11 +2941,7 @@ selectAll.addEventListener("change", () => {
   // While diffing the header box toggles the whole apply scope, not selection.
   if (diffByPath && !isAutomaticTransformPreview()) {
     setApplySelection(new Set(on ? diffByPath.keys() : []));
-    for (const tr of tracksBody.querySelectorAll("tr.staged")) {
-      const cb = tr.querySelector(".apply-tick");
-      if (cb) cb.checked = on;
-    }
-    updateDiffBar();
+    syncSelectionUI();
     return;
   }
   // Every file the table lists, not just the rows on screen (#189) — including
@@ -2865,31 +2953,9 @@ selectAll.addEventListener("change", () => {
   }
   syncSelectionUI();
 });
-// Direct checkbox clicks feed the selection set — or, while diffing, the
-// per-row apply scope (the sel column's meaning switches in diff-state, #117).
-tracksBody.addEventListener("change", (e) => {
-  const cb = e.target.closest(".sel input[type=checkbox]");
-  if (!cb) return;
-  if (diffByPath && !isAutomaticTransformPreview()) {
-    // Only a staged row has an apply tick. A row outside the plan keeps its own
-    // (inert) selection box while diffing (#186), so ignore it here.
-    if (!diffByPath.has(cb.dataset.path)) return;
-    if (cb.checked) applySelection.add(cb.dataset.path);
-    else applySelection.delete(cb.dataset.path);
-    updateDiffBar();
-    return;
-  }
-  if (cb.checked) selection.add(cb.dataset.path);
-  else selection.delete(cb.dataset.path);
-  syncSelectionUI();
-});
-
 // ---- row selection ----
-// The `selection` set is the source of truth (see its declaration). On top of
-// checkboxes, clicking a row selects it the way a file list does (click = only
-// this row, ⌘/Ctrl = toggle, Shift = range); double-clicking a group's name
-// toggles that whole group. Editing a cell is a deliberate double-click, so the
-// single click is free for selection.
+// Track selection uses file-list gestures and an immediate highlight.
+// Tag editing and keyboard cell ranges remain separate from track selection.
 let selAnchor = null; // path of the last row clicked, for Shift-range
 // What a Shift-range is added to: the selection as a ⌘/Ctrl click left it,
 // without the anchor. A file list keeps an earlier block when a second one is
@@ -2917,56 +2983,95 @@ function anchorSelection(path) {
   selBase.delete(path);
 }
 
-function rowCheckbox(tr) {
-  return tr.querySelector(".sel input[type=checkbox]");
+function rowSelectionSet() {
+  return diffByPath && !isAutomaticTransformPreview() ? applySelection : selection;
 }
 
-// Push the `selection` set onto the checkboxes + row highlight, set the
-// select-all tri-state, and refresh the status count. Called after any change.
-// What the DOM was last told about the selection, so a change can be applied to
-// the rows it actually concerns (#184). Walking every row to toggle a class is
-// most of what a row click cost on a library of a few thousand.
-let paintedSelection = new Set();
-
-function syncSelectionUI({ deferPanels = false, refreshGrid = true } = {}) {
-  // Only the rows on screen can be painted; the ones off it are built from the
-  // selection when they scroll in (#189). The tri-state still speaks for the
-  // whole table, so its count comes from the model.
-  for (const [path, tr] of renderedRows) {
-    const on = selection.has(path);
-    if (on !== paintedSelection.has(path)) {
-      const cb = rowCheckbox(tr);
-      if (cb) cb.checked = on;
-      tr.classList.toggle("selected", on);
+let selectionPanelFrame = 0;
+let selectionPanelTimer = 0;
+let selectionPanelVersion = 0;
+let selectionPanelSubject = null;
+let selectionPanelsPending = false;
+function cancelSelectionPanels() {
+  selectionPanelVersion++;
+  cancelAnimationFrame(selectionPanelFrame);
+  clearTimeout(selectionPanelTimer);
+  selectionPanelFrame = selectionPanelTimer = 0;
+}
+function scheduleSelectionPanels() {
+  if (selectionPanelFrame || selectionPanelTimer) return;
+  const version = selectionPanelVersion;
+  // Let the highlight paint before mounting fields or preparing native work.
+  selectionPanelFrame = requestAnimationFrame(() => {
+    selectionPanelFrame = 0;
+    selectionPanelTimer = setTimeout(() => {
+      selectionPanelTimer = 0;
+      if (version !== selectionPanelVersion || applying || undoing) return;
+      selectionPanelsPending = false;
+      try {
+        if (currentMode === 'tagger') {
+          refreshFieldEditor(); scheduleNameProbe(); scheduleTextProbe();
+          if (!el('subtab-online').hidden) refreshReleaseMatches();
+        }
+        if (currentMode === 'renamer') scheduleMaskExample();
+        scheduleAutomaticTransformPreview();
+      } finally {
+        el('fields-body').inert = false;
+        el('fields-body').removeAttribute('aria-busy');
+        el('cover-well').inert = false;
+      }
+    }, 0);
+  });
+}
+function paintRowSelection() {
+  const selected = rowSelectionSet();
+  for (const [path, row] of renderedRows) {
+    const on = selected.has(path);
+    if (row.classList.contains('selected') !== on) row.classList.toggle('selected', on);
+    if (row.getAttribute('aria-selected') !== String(on)) row.setAttribute('aria-selected', String(on));
+  }
+}
+function syncSelectionUI({ deferPanels = false, refreshGrid = true, refreshPanels = false } = {}) {
+  paintRowSelection();
+  if (diffByPath && !isAutomaticTransformPreview()) {
+    updateDiffBar();
+    if (refreshGrid) spreadsheet?.refresh();
+    return;
+  }
+  if (!deferPanels) {
+    const paths = selectedPaths();
+    let checked = 0;
+    for (const path of paths) if (viewPathIndex.has(path)) checked++;
+    selectAll.checked = checked > 0 && checked === viewPaths.length;
+    selectAll.indeterminate = checked > 0 && checked < viewPaths.length;
+    updateStatus(paths.length);
+    updatePanelCounts(paths.length);
+  }
+  if (refreshGrid) spreadsheet?.refresh();
+  let scopeAnnounced = false;
+  if (!isAutomaticTransformRefresh()) {
+    if (refreshPanels) selectionPanelsPending = true;
+    const subject = `${selectionVersion()}:${contentRevision}`;
+    if (subject !== selectionPanelSubject) {
+      selectionPanelSubject = subject;
+      selectionPanelsPending = true;
+      cancelSelectionPanels();
+      invalidateAutomaticTransformPreview();
+      scopeAnnounced = true; // Its public event updates the scope synchronously.
+      // Old controls cannot edit a previous subject while the new view is pending.
+      el('fields-body').inert = true;
+      el('fields-body').setAttribute('aria-busy', 'true');
+      el('cover-well').inert = true;
+    }
+    if (selectionPanelsPending) {
+      if (deferPanels) cancelSelectionPanels();
+      else scheduleSelectionPanels();
     }
   }
-  paintedSelection = new Set(selection);
-  const paths = selectedPaths();
-  let checked = 0;
-  for (const path of paths) if (viewPathIndex.has(path)) checked += 1;
-  selectAll.checked = checked > 0 && checked === viewPaths.length;
-  selectAll.indeterminate = checked > 0 && checked < viewPaths.length;
-  updateStatus(paths.length);
-  // Mode-panel headings show a selection count ("— N selected"); they otherwise
-  // only refresh on mode entry, so keep them live as the selection changes.
-  updatePanelCounts(paths.length);
-  // The TAGGER field grid shows the current selection's values, so keep it in
-  // step as the selection changes while that mode is open — and so does the
-  // FROM NAME probe, which reads the first selected file's name.
-  if (!deferPanels && !isAutomaticTransformRefresh() && currentMode === "tagger") {
-    refreshFieldEditor();
-    scheduleNameProbe();
-    scheduleTextProbe();
-    // An expanded release card compares its listed lengths against the selected
-    // files (#188), so the deltas go stale the moment the selection moves.
-    if (!el("subtab-online").hidden) refreshReleaseMatches();
+  if (!deferPanels) {
+    if (!scopeAnnounced) updateTransformScope();
+    scheduleSessionSave();
   }
-  // RENAMER's mask example reads the first selected track (#382).
-  if (!deferPanels && currentMode === "renamer") scheduleMaskExample();
-  if (refreshGrid) spreadsheet?.refresh();
-  if (deferPanels) invalidateAutomaticTransformPreview();
-  else scheduleAutomaticTransformPreview();
-  updateTransformScope();
 }
 
 // Scope belongs to the app's quiet status rail, not a second transform toolbar.
@@ -2974,14 +3079,15 @@ function updateTransformScope() {
   const note = el('status-transform-scope');
   if (!note) return;
   const scope = automaticTransformScope();
-  const paths = scope.enabled ? selectedPaths() : [];
-  const hidden = paths.filter(path => !navPathIndex.has(path)).length;
-  note.hidden = !scope.enabled;
-  const text = scope.busy ? 'Previewing…' : scope.blocked ? 'Preview paused' : scope.failed ? 'Preview failed' : scope.dismissed ? 'Preview cleared' : `${scope.changes} will change${hidden ? ` · ${hidden} selected hidden` : ''}`;
+  let hidden = 0;
+  for (const path of selectedPaths()) if (!navPathIndex.has(path)) hidden++;
+  note.hidden = !scope.enabled && !hasLiveInputs() && !scope.busy;
+  const text = scope.busy ? 'Previewing…' : scope.invalid ? 'Fix invalid values' : scope.failed ? 'Preview failed' : scope.blocked ? 'Review current preview first' : scope.dismissed ? 'Preview cleared' : `${scope.changes} modified${hidden ? ` · ${hidden} selected hidden` : ''}`;
   if (note.textContent !== text) note.textContent = text;
   note.setAttribute('aria-busy', String(scope.busy));
-  if (isAutomaticTransformPreview() && scope.busy) el('diff-apply').disabled = true;
+  if (isAutomaticTransformPreview()) updateDiffBar(scope);
 }
+
 document.addEventListener('tagrex:transform-scope', updateTransformScope);
 
 // Selection-dependent counts in the GENERATOR/EXPORTER panel headings. Cheap
@@ -2995,7 +3101,8 @@ function updatePanelCounts(count = selectedPaths().length) {
   el("export-count").textContent = count ? `· ${tn("count.selected", count)}` : "";
 }
 
-function selectRow(tr, e) {
+function selectRow(tr, e, { deferPanels = false } = {}) {
+  if (diffByPath && !isAutomaticTransformPreview()) { selectReviewRow(tr, e); return; }
   if (tr.classList.contains("unreadable")) return; // inert — can't be selected
   const path = tr.dataset.path;
   if (e.shiftKey && selAnchor) {
@@ -3009,52 +3116,58 @@ function selectRow(tr, e) {
     else selection.add(path);
     anchorSelection(path);
   } else {
-    selection.clear();
-    selection.add(path);
+    if (selection.size !== 1 || !selection.has(path)) { selection.clear(); selection.add(path); }
     anchorSelection(path);
   }
-  syncSelectionUI();
-  setActiveRow(tr, true); // clicking a row also makes it the keyboard-nav anchor
+  syncSelectionUI({deferPanels, refreshGrid:!deferPanels});
+  setActiveRow(tr, !deferPanels);
+  if (deferPanels) tr.focus({preventScroll:true}); // immediate focus without a window/layout pass
 }
 
-// Which selection gesture a group-header click carries: Shift = extend a range,
-// ⌘/Ctrl = remove this group, otherwise replace the selection.
-function groupSelectMode(e) {
-  if (e.shiftKey) return "range";
-  if (e.metaKey || e.ctrlKey) return "remove";
-  return "replace";
-}
-
-// Select a whole folder from its group header (#130, #131), by `mode`:
-//  - "replace": the selection becomes exactly this folder's files.
-//  - "remove" (⌘/Ctrl): deselect this folder, leaving other groups alone.
-//  - "range" (Shift): extend from the anchor row through this whole folder,
-//    selecting everything in between — the standard Shift-range behaviour.
-// Group membership comes from the model even when collapsed or off-screen.
-// Selection never implicitly expands a group; its caret remains the one toggle.
-function selectGroup(key, mode) {
-  const paths = groupPaths.get(key) || [];
-  if (paths.length === 0) return;
-  const gStart = viewPathIndex.get(paths[0]);
-  const gEnd = viewPathIndex.get(paths[paths.length - 1]);
-  if (mode === "range") {
-    let a = selAnchor && viewPathIndex.has(selAnchor) ? viewPathIndex.get(selAnchor) : -1;
-    if (a < 0) a = gStart;
-    // From the anchor through the whole folder, whichever side of it — or
-    // around it — the folder is.
-    selectRangeFromAnchor(Math.min(a, gStart), Math.max(a, gEnd));
-  } else if (mode === "remove") {
-    for (const path of paths) selection.delete(path);
+let reviewAnchor = null;
+let reviewBase = new Set();
+function selectReviewRow(tr, event) {
+  const path = tr.dataset.path;
+  if (!diffByPath.has(path)) return;
+  if (event.shiftKey && reviewAnchor && viewPathIndex.has(reviewAnchor)) {
+    const first = viewPathIndex.get(reviewAnchor), last = viewPathIndex.get(path);
+    const keep = [...reviewBase].filter(path => applySelection.has(path));
+    applySelection.clear();
+    for (const path of keep) applySelection.add(path);
+    for (const path of viewPaths.slice(Math.min(first,last), Math.max(first,last)+1)) if (diffByPath.has(path)) applySelection.add(path);
   } else {
-    selection.clear();
-    for (const p of paths) selection.add(p);
-    anchorSelection(paths[0]);
+    if (event.ctrlKey || event.metaKey) {
+      if (applySelection.has(path)) applySelection.delete(path); else applySelection.add(path);
+    } else { applySelection.clear(); applySelection.add(path); }
+    reviewAnchor = path; reviewBase = new Set(applySelection); reviewBase.delete(path);
   }
+  syncSelectionUI({refreshGrid:false});
+  setActiveRow(tr, false); tr.focus({preventScroll:true});
+}
+
+// A plain group right-click replaces; Ctrl/Cmd-click toggles the complete
+// filtered group, including collapsed/offscreen members, and preserves others.
+function selectGroup(key, mode = 'replace') {
+  const manual = diffByPath && !isAutomaticTransformPreview();
+  const paths = (groupPaths.get(key) || []).filter(path => !manual || diffByPath.has(path));
+  if (!paths.length) return;
+  const target = rowSelectionSet();
+  if (mode === 'toggle') {
+    const remove = paths.every(path => target.has(path));
+    for (const path of paths) { if (remove) target.delete(path); else target.add(path); }
+  } else {
+    if (target.size !== paths.length || paths.some(path => !target.has(path))) { target.clear(); for (const path of paths) target.add(path); }
+    if (manual) { reviewAnchor = paths[0]; reviewBase = new Set(target); reviewBase.delete(reviewAnchor); }
+    else anchorSelection(paths[0]);
+  }
+  spreadsheet?.clearRange({refresh:false});
   syncSelectionUI();
 }
 
 // Enter edit mode on a cell and select its text (double-click, per the hint).
 function beginCellEdit(cell) {
+  if (isAutomaticTransformPreview() && cell.dataset.field) cell.textContent = currentFieldValue(cell.dataset.path,cell.dataset.field);
+  cell.dataset.editOriginal = cell.textContent;
   cell.contentEditable = "true";
   cell.focus();
   // Read the library's values for this column once per edit, not per keystroke
@@ -3068,20 +3181,18 @@ function beginCellEdit(cell) {
 }
 
 tracksBody.addEventListener("click", (e) => {
-  if (diffByPath && !isAutomaticTransformPreview()) return; // manual review freezes its subject
   if (e.target.closest("button, input, textarea, select, a")) return;
   if (e.target.closest("td.sel")) return; // checkbox toggle → change listener
   const groupHead = e.target.closest("tr.group-head");
   if (groupHead) {
-    // The caret's separate listener owns collapse. A group name selects only
-    // on double-click, including modified clicks, so no first click toggles it.
+    // Group clicks have their own collapse/selection handler.
     return;
   }
   const tr = e.target.closest("tr");
   if (!tr || !tr.dataset.path) return;
   const cell = e.target.closest("td.editable");
   if (cell && cell.isContentEditable) return; // mid-edit: don't reselect
-  selectRow(tr, e);
+  if (e.detail === 0) selectRow(tr, e);
 });
 
 // A plain click in the empty area below the rows deselects, like a file manager
@@ -3090,12 +3201,13 @@ tracksBody.addEventListener("click", (e) => {
 // a real row, group header, checkbox or the column header are left to their own
 // handlers, and a modified click keeps the selection for range/add.
 el("files-view").addEventListener("click", (e) => {
-  if ((diffByPath && !isAutomaticTransformPreview()) || e.metaKey || e.ctrlKey || e.shiftKey) return;
+  if (diffByPath && !isAutomaticTransformPreview()) return;
+  if (e.metaKey || e.ctrlKey || e.shiftKey) return;
   if (e.target.closest("thead") || e.target.closest("td.sel")) return;
   const tr = e.target.closest("tr");
   if (tr && (tr.dataset.path || tr.classList.contains("group-head"))) return;
   if (selection.size) {
-    selection.clear();
+    rowSelectionSet().clear();
     selAnchor = null;
     syncSelectionUI();
   }
@@ -3121,34 +3233,38 @@ function marqueePaths(top, bottom) {
   return paths;
 }
 initRowSelection({
-  wrap: tableWrap, selection,
-  enabled: () => (!diffByPath || isAutomaticTransformPreview()) && !applying && !undoing,
-  pathsInRange: marqueePaths,
+  wrap: tableWrap, getSelection: rowSelectionSet,
+  enabled: () => !applying && !undoing,
+  pathsInRange: (top,bottom) => marqueePaths(top,bottom).filter(path => !diffByPath || isAutomaticTransformPreview() || diffByPath.has(path)),
+  onPress: (event) => {
+    const before = {selAnchor,selBase,reviewAnchor,reviewBase,activeRowPath};
+    const row = event.target.closest('tr[data-path]');
+    if (row) selectRow(row, event, {deferPanels:true});
+    else if (!diffByPath || isAutomaticTransformPreview()) { rowSelectionSet().clear(); syncSelectionUI({deferPanels:true,refreshGrid:false}); }
+    return before;
+  },
   onScroll: () => renderWindow(),
-  onChange: () => syncSelectionUI({ deferPanels: true }),
-  onCommit: ({ cancelled, paths, startPath, focusPath }) => {
+  onStart: () => spreadsheet?.clearRange(),
+  onChange: () => syncSelectionUI({ deferPanels: true, refreshGrid:false }),
+  onCommit: ({ cancelled, beforePress, paths, startPath, focusPath }) => {
+    if (cancelled && beforePress) {
+      ({selAnchor,selBase,reviewAnchor,reviewBase} = beforePress);
+      setActiveRowByPath(beforePress.activeRowPath, false);
+    }
     if (!cancelled && paths.length) {
-      anchorSelection(startPath || paths[0]);
+      if (diffByPath && !isAutomaticTransformPreview()) { reviewAnchor = startPath || paths[0]; reviewBase = new Set(applySelection); reviewBase.delete(reviewAnchor); }
+      else anchorSelection(startPath || paths[0]);
       setActiveRowByPath(focusPath, false);
       renderedRow(focusPath)?.focus({ preventScroll: true });
     }
-    if (!diffByPath || isAutomaticTransformPreview()) syncSelectionUI();
+    syncSelectionUI();
   },
 });
 
 tracksBody.addEventListener("dblclick", (e) => {
   if (diffByPath && !isAutomaticTransformPreview()) return;
   if (e.target.closest("button, input, textarea, select, a")) return;
-  const head = e.target.closest("tr.group-head");
-  if (head) {
-    // The caret remains collapse-only. A normal name double-click selects
-    // every model member; Ctrl/⌘ double-click removes every member.
-    if (!e.target.closest(".group-caret")) {
-      selectGroup(head.dataset.group, groupSelectMode(e));
-    }
-    return;
-  }
-  if (diffByPath) return; // automatic previews allow group selection, not editing
+  if (e.target.closest('tr.group-head') || e.ctrlKey || e.metaKey || e.shiftKey) return;
   // Double-clicking the file name plays the track (the per-row play button was
   // removed, #99 redesign); tag cells still double-click to edit.
   const fileCell = e.target.closest("td.file");
@@ -3170,10 +3286,10 @@ tracksBody.addEventListener("dblclick", (e) => {
 tracksBody.addEventListener(
   "blur",
   (e) => {
-    if (e.target.classList && e.target.classList.contains("editable")) {
+    if (e.target.classList?.contains("editable") && e.target.isContentEditable) {
       e.target.contentEditable = "false";
       endCellSuggest(); // the suggestion list belongs to the edit (#63)
-      commitCellEdit(e.target); // leaving the cell writes it (#507)
+      commitCellEdit(e.target);
     }
   },
   true,
@@ -3261,9 +3377,7 @@ tracksBody.addEventListener("keydown", (e) => {
       if (!diffByPath.has(path)) return; // untouched rows aren't tickable
       if (applySelection.has(path)) applySelection.delete(path);
       else applySelection.add(path);
-      const cb = tr.querySelector(".apply-tick");
-      if (cb) cb.checked = applySelection.has(path);
-      updateDiffBar();
+      syncSelectionUI();
       return;
     }
     if (selection.has(path)) selection.delete(path);
@@ -3302,14 +3416,18 @@ function sortTracks() {
   // Whatever was placed by hand is placed by the sort now (#198) — a re-read
   // from disk is where a hand-made order ends, and so is a fresh sort.
   setManualOrder(false);
-  tracks.sort((a, b) => {
-    if (sortKey === 'artwork') {
-      const unknownA = a.unreadable || typeof a.has_cover !== 'boolean';
-      const unknownB = b.unreadable || typeof b.has_cover !== 'boolean';
-      if (unknownA !== unknownB) return Number(unknownA) - Number(unknownB);
-    }
-    return numericCollator.compare(sortValue(a, sortKey), sortValue(b, sortKey)) * sortDir;
+  // Build expensive display keys once for this sort, without retaining stale
+  // keys after edits. Preserve the library array and each track object.
+  const keyed = tracks.map((track) => ({
+    track,
+    value: sortValue(track, sortKey),
+    unknown: sortKey === "artwork" && coverState(track) === "unknown",
+  }));
+  keyed.sort((a, b) => {
+    if (a.unknown !== b.unknown) return Number(a.unknown) - Number(b.unknown);
+    return numericCollator.compare(a.value, b.value) * sortDir;
   });
+  for (let i = 0; i < keyed.length; i++) tracks[i] = keyed[i].track;
   reindexTracks();
 }
 
@@ -3322,15 +3440,50 @@ el("tracks").querySelector("thead").addEventListener("click", (e) => {
 });
 
 // Column picker popover (#43): toggle, drag-reorder, and outside-click close.
-el("columns-btn").addEventListener("click", (e) => {
-  e.stopPropagation();
-  const menu = el("columns-menu");
-  if (menu.hidden) renderColumnsMenu();
-  menu.hidden = !menu.hidden;
+let columnsMenuOrigin = null;
+let columnsMenuResize = 0;
+function positionColumnsMenu() {
+  const menu = el('columns-menu');
+  if (menu.hidden || !columnsMenuOrigin) return;
+  placeFloating(menu, columnsMenuOrigin);
+  menu.style.setProperty('--column-menu-height', menu.style.maxHeight);
+}
+function openColumnsMenu(point = null, anchor = el('columns-btn')) {
+  const menu = el('columns-menu');
+  renderColumnsMenu();
+  document.body.append(menu);
+  menu.classList.add('columns-at-pointer');
+  menu.returnFocusTo = anchor;
+  menu.hidden = false;
+  columnsMenuOrigin = point ? {getBoundingClientRect:() => {
+    const x = Math.max(8, Math.min(point.x, innerWidth - 8));
+    const y = Math.max(8, Math.min(point.y, innerHeight - 8));
+    return {left:x,right:x,top:y,bottom:y};
+  }} : anchor;
+  queueMicrotask(positionColumnsMenu);
+}
+window.addEventListener('resize', () => {
+  if (el('columns-menu').hidden || columnsMenuResize) return;
+  columnsMenuResize = requestAnimationFrame(() => { columnsMenuResize = 0; positionColumnsMenu(); });
+}, {passive:true});
+el('columns-btn').addEventListener('click', event => {
+  event.stopPropagation();
+  if (el('columns-menu').hidden) openColumnsMenu(); else el('columns-menu').hidden = true;
+});
+el('tracks').tHead.addEventListener('keydown', event => {
+  const header = event.target.closest('th.sortable');
+  if (!header) return;
+  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+    event.preventDefault(); event.stopPropagation(); openColumnsMenu(null, header);
+  } else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault(); sortBy(header.dataset.sort);
+  }
 });
 document.addEventListener("click", (e) => {
   const menu = el("columns-menu");
-  if (!menu.hidden && !menu.contains(e.target) && e.target !== el("columns-btn")) {
+  // A visibility toggle rebuilds its row during this click. The original event
+  // path still identifies an inside click after its target is disconnected.
+  if (!menu.hidden && !e.composedPath().includes(menu) && e.target !== el("columns-btn")) {
     menu.hidden = true;
   }
 });
@@ -3359,21 +3512,32 @@ document.addEventListener("keydown", (e) => {
 // question now (#189): a collapsed folder's tracks leave the rendered list
 // entirely rather than being rows with `display: none`. The selection is a set,
 // so it survives the rebuild untouched.
+const groupMotion = createGroupMotion(tableWrap, tracksBody);
 function toggleGroup(key) {
   const collapse = !collapsedGroups.has(key);
-  if (collapse) collapsedGroups.add(key);
-  else collapsedGroups.delete(key);
-  buildViewModel();
-  renderWindow({ force: true });
-  syncGroupToggle();
+  groupMotion.run(() => {
+    spreadsheet?.clearRange({refresh:false});
+    if (collapse) collapsedGroups.add(key); else collapsedGroups.delete(key);
+    buildViewModel(); renderWindow({force:true}); syncGroupToggle();
+    [...tracksBody.querySelectorAll('tr.group-head')].find(row => row.dataset.group === key)?.focus({preventScroll:true});
+  }, {group:key, collapsing:collapse});
 }
-// Collapse/expand only via the caret at the start of the header, so a click on
-// the group name is free to (double-)select the group instead.
-tracksBody.addEventListener("click", (e) => {
-  const caret = e.target.closest(".group-caret");
-  if (!caret) return;
-  const head = caret.closest("tr.group-head");
-  if (head) toggleGroup(head.dataset.group);
+tracksBody.addEventListener('click', event => {
+  const head = event.target.closest('tr.group-head');
+  if (!head || applying || undoing) return;
+  if (event.ctrlKey || event.metaKey) selectGroup(head.dataset.group, 'toggle');
+  else toggleGroup(head.dataset.group);
+});
+tracksBody.addEventListener('keydown', event => {
+  const head = event.target.closest('tr.group-head');
+  if (!head || applying || undoing) return;
+  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+    event.preventDefault(); event.stopPropagation(); selectGroup(head.dataset.group, 'replace');
+  } else if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault(); event.stopPropagation();
+    if (event.ctrlKey || event.metaKey) selectGroup(head.dataset.group, 'toggle');
+    else toggleGroup(head.dataset.group);
+  }
 });
 
 // Expand/collapse every group at once (#32), through the same model rebuild as
@@ -3407,6 +3571,7 @@ el("toggle-groups").addEventListener("click", () => {
 // usable until a complete latest-generation replacement is ready. Any table
 // mutation, query change or content revision cancels the pending derivation.
 async function renderFilteredTracks() {
+  if (filterError) { filterPending = false; publishFilterState(); updateDiffBar(); return; }
   if (tracks.length < 3000) { renderTracks(); return; }
   const version = ++filterRenderVersion;
   const source = tracks;
@@ -3437,9 +3602,26 @@ el("filter").addEventListener("input", (e) => {
   filterRenderVersion++;
   setFilterText(e.target.value.trim());
   syncFilterControls();
-  clearTimeout(filterTimer);
-  filterTimer = setTimeout(renderFilteredTracks, 120);
+  scheduleFilterRender();
 });
+function scheduleFilterRender() {
+  filterRenderVersion++;
+  filterPending = !filterError;
+  clearTimeout(filterTimer);
+  publishFilterState();
+  updateDiffBar();
+  filterTimer = setTimeout(renderFilteredTracks, 120);
+}
+document.addEventListener('tagrex:filter-conditions', event => {
+  try {
+    const conditions = normalizeConditions(event.detail.conditions);
+    filterConditions = conditions;
+    filterConditionMode = event.detail.mode === 'any' ? 'any' : 'all';
+    syncFilterControls();
+    scheduleFilterRender();
+  } catch (error) { toast(error.message, true); }
+});
+document.addEventListener('tagrex:request-filter-state', publishFilterState);
 // The field's clear button (#547): the same as deleting the text by hand.
 el("filter-clear").addEventListener("click", () => {
   const box = el("filter");
@@ -3484,6 +3666,8 @@ tracksBody.addEventListener("input", (e) => {
 // Enter commits a cell instead of inserting a newline, and leaves edit mode.
 tracksBody.addEventListener("keydown", (e) => {
   if (!e.target.classList.contains("editable")) return;
+  // Enter can confirm an IME composition; let it finish before cell shortcuts.
+  if (e.isComposing || e.keyCode === 229) return;
   // The suggestion list gets first refusal on the arrows, and on Enter/Escape
   // only once an arrow has stepped into it (#63) — so a cell nobody is reading
   // suggestions for still commits on Enter exactly as it always has.
@@ -3492,7 +3676,7 @@ tracksBody.addEventListener("keydown", (e) => {
     e.preventDefault();
     // Escape is the cell's own: it must not also stop a search or close
     // something else.
-    if (e.key === "Escape") e.stopPropagation();
+    e.stopPropagation(); // the grid must not re-enter edit on the same Enter
     // Ending the edit ends the suggestions with it, said here rather than left
     // to the blur listener below: turning contentEditable off moves focus to
     // the body WITHOUT firing a blur on the cell, so the list would stay on
@@ -3517,7 +3701,6 @@ function spreadsheetBatchProblem() {
 }
 
 async function stageSpreadsheetEdits(list, kind) {
-  await cellWrites;
   const problem = spreadsheetBatchProblem();
   if (problem) throw new Error(problem);
   const origin = tracks;
@@ -3569,7 +3752,10 @@ spreadsheet = initSpreadsheet({
   label: columnLabel,
   value: (path, field) => {
     const track = trackAt(path);
-    return track ? edits.get(path)?.get(field) ?? fieldValue(track, field) : "";
+    if (!track) return "";
+    if (field === 'file' || customColumnOf(field) || VIRTUAL_COLUMNS.some(([key]) => key === field)) return fieldValue(track, field);
+    const changed = diffByPath?.get(path)?.tag_changes.find(change => change.field === field);
+    return changed ? changed.new ?? '' : currentFieldValue(path, field);
   },
   readOnly: (field) => {
     if (isFieldLocked(field)) return `${columnLabel(field)} is locked. Unlock it before batch editing.`;
@@ -3579,7 +3765,7 @@ spreadsheet = initSpreadsheet({
     return "";
   },
   validate: (field, value, path) => validateFieldValue(field, value, [path]),
-  isReviewing: () => !!diffByPath,
+  isReviewing: () => !!diffByPath && !isAutomaticTransformPreview(),
   batchProblem: spreadsheetBatchProblem,
   stage: stageSpreadsheetEdits,
   beginEdit: beginCellEdit,
@@ -3698,7 +3884,21 @@ initUpdateCheck();
 // Open whatever the OS handed the app on the way in (#51) — a folder from
 // "Open With", from the Dock icon, or from a second launch. After the hooks
 // above, since it opens through the same one a drop does.
-initLaunchOpen();
+initLaunchOpen().then(async handedOver => {
+  if (handedOver || openVersion !== 0) return;
+  const saved = readSession(sessionStorage());
+  if (!saved) return;
+  if (!beginResume(sessionStorage(), saved.root)) {
+    rootInput.value = saved.root;
+    rootInput.hidden = false;
+    el('root-box').hidden = true;
+    updateLibAction();
+    toast(msg('session.interrupted', { folder: folderName(saved.root) }), true);
+    return;
+  }
+  rootInput.value = saved.root;
+  await openLibrary({ restore: saved });
+});
 // Put the transform chain where the saved preference says it belongs (#233):
 // nothing calls setMode at startup, so without this a pinned chain would come
 // back unpinned after a restart.
@@ -3727,3 +3927,11 @@ window.tagrex = {
     return previewPlan;
   },
 };
+
+// Outside editable fields Ctrl/Cmd+Z first reverts an un-applied import choice.
+document.addEventListener('keydown', event => {
+  if (applying || undoing) return;
+  if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return;
+  if (event.target.closest('input,textarea,[contenteditable="true"]')) return;
+  if (undoLiveImport()) { event.preventDefault(); event.stopImmediatePropagation(); refreshFieldEditor({force:true}); }
+}, true);

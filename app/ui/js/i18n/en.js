@@ -228,6 +228,7 @@ export const en = {
   "editor.coverArt": "Cover art",
   "editor.clearTags": "Clear tags",
   "editor.clearTagsTitle": "Clears every text tag on the selected files. Cover art and DJ cue points are kept. Undo restores them.",
+  "editor.livePreview": "Changes preview automatically",
   "editor.stageFields": "Stage",
   "fromName.heading": "Tags from the file name",
   "fromName.hintSummary": "How the mask is read",
@@ -573,6 +574,7 @@ export const en = {
   "cover.frontCover": "Front cover",
   "cover.sharedAcross": "shared across {files}",
   "cover.replace": "Replace",
+  "cover.exportSaved": "Export saved cover",
   "cover.export": "Export",
   "cover.multiple": "Multiple covers",
   "cover.withCover": "{with_cover}/{n} with a cover",
@@ -1213,4 +1215,7 @@ export const en = {
   "settings.general": "General",
   "settings.tagsAndCovers": "Tags and covers",
   "workspace.transformations": "Transformations",
+  "session.unavailable": "Couldn’t reopen {folder}. Reconnect it, retry above, or open another folder.",
+  "session.slow": "{folder} is taking too long. Retry above or open another folder. The earlier read may still finish.",
+  "session.interrupted": "Auto-resume paused for {folder}. Retry above or open another folder.",
 };

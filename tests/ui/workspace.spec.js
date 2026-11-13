@@ -122,7 +122,7 @@ test('generated tag fields stage edits without changing files until Apply', asyn
   const title = page.locator('#fields-body input[data-key="title"]');
   await expect(title).toHaveValue('Desert Rain');
   await title.fill('Restored Desert Rain');
-  await page.locator('#fields-apply').click();
+  await expect(page.locator('#diff-apply')).toBeEnabled();
   await expect(page.locator('#diff-actionbar')).toBeVisible();
   await expect(page.locator('#tracks-body')).toContainText('Restored Desert Rain');
   expect(await page.evaluate(() => window.tagrex.tracks[0].tags.title)).toBe('Desert Rain');

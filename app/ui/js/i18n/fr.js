@@ -202,6 +202,7 @@ export const fr = {
   "editor.coverArt": "Pochette",
   "editor.clearTags": "Effacer les tags",
   "editor.clearTagsTitle": "Effacer tous les tags texte des fichiers sélectionnés pour repartir de zéro (la pochette et les cue points DJ sont conservés). Réversible par annulation.",
+  "editor.livePreview": "Aperçu automatique des modifications",
   "editor.stageFields": "Mettre en attente les champs",
   "fromName.heading": "Tags depuis le nom de fichier",
   "fromName.hintSummary": "Comment lire le masque",
@@ -544,6 +545,7 @@ export const fr = {
   "cover.frontCover": "Pochette avant",
   "cover.sharedAcross": "commune à {files}",
   "cover.replace": "Remplacer…",
+  "cover.exportSaved": "Exporter la pochette enregistrée",
   "cover.export": "Exporter",
   "cover.multiple": "Plusieurs pochettes",
   "cover.withCover": "{with_cover}/{n} avec pochette",
@@ -1213,4 +1215,7 @@ export const fr = {
   "artwork.chosen": "Pochette {number} sélectionnée",
   "apply.checking": "Vérification des fichiers…",
   "workspace.transformations": "Transformations",
+  "session.unavailable": "Impossible de rouvrir {folder}. Reconnectez-le, réessayez ci-dessus ou ouvrez un autre dossier.",
+  "session.slow": "{folder} prend trop de temps. Réessayez ci-dessus ou ouvrez un autre dossier. La lecture précédente peut continuer.",
+  "session.interrupted": "Reprise automatique suspendue pour {folder}. Réessayez ci-dessus ou ouvrez un autre dossier.",
 };

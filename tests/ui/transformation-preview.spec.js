@@ -49,13 +49,13 @@ test.beforeEach(async ({ page }) => {
       if (path.endsWith('.js')) {
         let source = body.toString();
         const state = source.match(/case([`"'])list_tracks\1:\s*return Promise\.resolve\(([\w$]+)\.tracks\)/)?.[2];
-        const transform = source.match(/case([`"'])preview_transform_groups\1:/);
+        const transform = source.match(/case([`"'])preview_live_edits\1:/);
         const args = transform && source.slice(transform.index, transform.index + 1200).match(/([\w$]+)\.paths/)?.[1];
         if (transform && (!state || !args)) throw new Error('Could not instrument transformation mock');
         if (transform) {
-          source = source.replace(/case([`"'])(preview_transform_groups|preview_transform_over_plan|preview_tag_edits|apply_plan|undo|set_locked_fields)\1:/g, (match, _quote, command) => {
+          source = source.replace(/case([`"'])(preview_live_edits|preview_transform_over_plan|preview_tag_edits|apply_plan|undo|set_locked_fields)\1:/g, (match, _quote, command) => {
             let trace = `window.transformCalls['${command}']=(window.transformCalls['${command}']||0)+1;`;
-            if (command === 'preview_transform_groups') trace += `window.transformRequests.push(structuredClone(${args}));`;
+            if (command === 'preview_live_edits') trace += `window.transformRequests.push(structuredClone(${args}));`;
             if (command === 'apply_plan') trace += `window.transformUndo.push(structuredClone(${state}.tracks));`;
             if (command === 'undo') trace += `if(window.transformUndo.length)${state}.tracks=window.transformUndo.pop();`;
             if (command === 'set_locked_fields') trace += `window.transformLocked=[...${args}.fields];`;
@@ -90,7 +90,7 @@ async function tick(page, name, on = true) {
 }
 async function changed(page, count = 1) {
   await expect.poll(async () => (await plan(page))?.changes.length || 0).toBe(count);
-  await expect(page.locator('#status-transform-scope')).toContainText(`${count} will change`);
+  await expect(page.locator('#status-transform-scope')).toContainText(`${count} modified`);
   await expect(page.locator('#diff-apply')).toBeEnabled();
 }
 
@@ -109,7 +109,7 @@ for (const mode of ['tagger', 'renamer', 'generator', 'deduplicator', 'exporter'
   });
 }
 
-test('standalone rules can target filenames in Online while an actual import still filters its normal chain to tags', async ({ page }) => {
+test('the same active filename rules run after a chosen Online import', async ({ page }) => {
   await page.locator('.subtab[data-subtab="online"]').click();
   await tick(page, 'Upper filenames'); await changed(page);
   expect((await plan(page)).changes[0].rename_to).toContain('THE X FACTOR');
@@ -117,9 +117,9 @@ test('standalone rules can target filenames in Online while an actual import sti
   await page.locator('#discogs-query').fill('La Bush'); await page.locator('#discogs-search').click();
   const card = page.locator('.release-card').first(); await card.locator('.release-head').click();
   await expect(card).toHaveClass(/tracklist-loaded/); await card.locator('.release-import').click();
-  await expect.poll(() => calls(page, 'preview_tag_edits')).toBeGreaterThan(0);
+  await expect.poll(() => calls(page, 'preview_live_edits')).toBeGreaterThan(0);
   await expect.poll(async () => (await plan(page))?.changes.some(change => change.tag_changes.length > 0)).toBe(true);
-  expect((await plan(page)).changes.every(change => !change.rename_to)).toBe(true);
+  await expect.poll(async()=> (await plan(page))?.changes.some(change=>!!change.rename_to)).toBe(true);
   expect(await calls(page, 'preview_transform_over_plan')).toBe(0);
   expect(await calls(page, 'apply_plan')).toBe(0);
 });
@@ -199,40 +199,39 @@ test('slow previews coalesce to the newest selection and never enable a stale Ap
   expect((await plan(page)).changes[0].path).toContain('03 -');
 });
 
-test('manual staged work survives preset toggles and late transform responses', async ({ page }) => {
+test('manual values and active rules compose after late transform responses', async ({ page }) => {
   await page.evaluate(() => { window.transformHold = true; });
   await tick(page, 'Upper titles');
   await expect.poll(() => page.evaluate(() => window.transformHeld.length)).toBe(1);
   await page.locator('#fields-body input[data-key="artist"]').fill('Pending manual artist');
-  await page.locator('#fields-apply').click();
-  await expect.poll(() => page.evaluate(() => window.tagrex.previewPlan?.description || '')).not.toBe('');
-  const manual = await plan(page);
-  await page.evaluate(() => window.releaseTransform(0));
+  await expect(page.locator('#diff-apply')).toBeDisabled();
+  await page.evaluate(() => { window.transformHold = false; window.releaseTransform(0); });
+  await expect(page.locator('#diff-apply')).toBeEnabled();
+  expect((await plan(page)).changes[0].tag_changes.find(change => change.field === 'artist').new).toBe('Pending manual artist');
+  expect((await plan(page)).changes[0].tag_changes.find(change => change.field === 'title').new).toBe('DESERT RAIN');
   await tick(page, 'Upper titles', false);
-  expect(await plan(page)).toEqual(manual);
-  expect(manual.changes[0].tag_changes.find(change => change.field === 'artist').new).toBe('Pending manual artist');
+  await expect(page.locator('#diff-apply')).toBeEnabled();
+  await expect.poll(async()=> (await plan(page)).changes[0].tag_changes.some(change=>change.field==='title')).toBe(false);
   expect(await calls(page, 'apply_plan')).toBe(0);
 });
 
-test('typing while an automatic preview is visible preserves the editor buffer and removes only that preview', async ({ page }) => {
+test('typing while rules are active retains raw input and previews transformations after it', async ({ page }) => {
   await tick(page, 'Append title mark'); await changed(page);
-  const artist = page.locator('#fields-body input[data-key="artist"]');
-  await artist.fill('Keep my typing');
-  await expect.poll(() => plan(page)).toBe(null);
-  await expect(artist).toHaveValue('Keep my typing');
-  await expect(artist).toHaveClass(/dirty/);
-  await expect(page.locator('#status-transform-scope')).toContainText('Preview paused');
+  const title = page.locator('#fields-body input[data-key="title"]');
+  await title.fill('Keep my typing');
+  await expect(title).toHaveValue('Keep my typing');
+  await expect(title).toHaveClass(/dirty/);
+  await expect.poll(async()=> (await plan(page))?.changes[0]?.tag_changes.find(field=>field.field==='title')?.new).toBe('Keep my typing!');
   await tick(page, 'Append title mark', false);
-  await expect(artist).toHaveValue('Keep my typing');
-  await page.locator('#fields-apply').click();
-  await expect.poll(async () => (await plan(page))?.changes[0]?.tag_changes.find(change => change.field === 'artist')?.new).toBe('Keep my typing');
+  await expect.poll(async()=> (await plan(page))?.changes[0]?.tag_changes.find(field=>field.field==='title')?.new).toBe('Keep my typing');
+  await expect(title).toHaveValue('Keep my typing');
   expect(await calls(page, 'apply_plan')).toBe(0);
 });
 
 test('field locks are honored and changing a lock recomputes the checked preset', async ({ page }) => {
   const lock = page.locator('#fields-body .fe-row').filter({ has: page.locator('input[data-key="title"]') }).locator('.fe-lock');
   await lock.click(); await tick(page, 'Upper titles');
-  await expect.poll(() => calls(page, 'preview_transform_groups')).toBe(1);
+  await expect.poll(() => calls(page, 'preview_live_edits')).toBe(1);
   await expect.poll(() => page.evaluate(() => document.getElementById('status-transform-scope').getAttribute('aria-busy'))).toBe('false');
   expect(await plan(page)).toBe(null);
   expect(await page.evaluate(() => window.tagrex.tracks[0].tags.title)).toBe('Desert Rain');

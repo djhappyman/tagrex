@@ -50,19 +50,24 @@ function applyValueFont(mode) {
 // optional convenience rather than the primary affordance.
 const CHECKBOX_COL_STORAGE_KEY = "tagrex.checkboxCol";
 function checkboxColEnabled() {
-  try {
-    return localStorage.getItem(CHECKBOX_COL_STORAGE_KEY) === "1";
-  } catch (e) {
-    return false;
-  }
+  return false; // Legacy setting retained for older saved settings; rows use highlight.
 }
 function applyCheckboxCol(on) {
-  document.body.classList.toggle("show-checkbox", on);
+  document.body.classList.remove("show-checkbox");
   try {
-    localStorage.setItem(CHECKBOX_COL_STORAGE_KEY, on ? "1" : "0");
+    localStorage.setItem(CHECKBOX_COL_STORAGE_KEY, "0");
   } catch (e) {
     /* localStorage unavailable — preference just won't persist */
   }
+}
+
+function showOldValues() {
+  try { return localStorage.getItem('tagrex.showOldValues') === '1'; }
+  catch { return false; }
+}
+function saveShowOldValues(on) {
+  try { localStorage.setItem('tagrex.showOldValues', on ? '1' : '0'); }
+  catch { /* View preferences remain optional when storage is unavailable. */ }
 }
 
 // Filter mode prefs (#44): regex on/off and case sensitivity. Pure view choices,
@@ -315,10 +320,8 @@ function accentColor() {
 // stored colour) just clears the override so the stylesheet's own palette shows.
 function applyAccent() {
   stampAccent();
-  // Anything that paints with a theme colour outside CSS — the player's
-  // waveform reads --accent at draw time — repaints on this, so it does not sit
-  // on the old colour until its next tick (#433). Also fires on a theme change,
-  // since that re-derives the accent.
+  // Notify theme-aware integrations after updating the CSS colour tokens.
+  // A theme change also re-derives the accent.
   document.dispatchEvent(new CustomEvent("tagrex:appearance"));
 }
 function stampAccent() {
@@ -451,6 +454,8 @@ function saveGroupBy(value) {
 }
 
 export {
+  showOldValues,
+  saveShowOldValues,
   clampTableFont,
   clampTracklistFont,
   valueFont,

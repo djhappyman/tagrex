@@ -1,3 +1,4 @@
+import "./horizontal-scroll.js";
 // Table gestures done by hand (#76, #143 split them out of app.js).
 //
 // The panel splitter and the column resize both drag with plain mouse events

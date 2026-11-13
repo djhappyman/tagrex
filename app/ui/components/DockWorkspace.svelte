@@ -73,7 +73,10 @@
   function resizeKey(event: KeyboardEvent, area: 'left' | 'top' | 'bottom') {
     const delta = area === 'left' ? 2 : 16;
     if (event.key === 'Home') layout.resize(area, area === 'left' ? 72 : area === 'top' ? 138 : 190);
-    else if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) layout.resize(area, view[area] + (['ArrowRight', 'ArrowDown'].includes(event.key) ? delta : -delta));
+    else if (['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown'].includes(event.key)) {
+      const direction = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : -1;
+      layout.resize(area, view[area] + direction * delta * (area === 'bottom' ? -1 : 1));
+    }
     else return;
     event.preventDefault(); event.stopPropagation();
   }

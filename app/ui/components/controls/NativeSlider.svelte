@@ -41,7 +41,7 @@
   }
 </script>
 
-<span class={['compat-slider-wrap', { 'waveform-slider': id === 'pl-seek' }]} {@attach attach}>
+<span class="compat-slider-wrap" {@attach attach}>
   {#if !input}<input {id} type="range" {value} {min} {max} {step} {disabled} class={className} {...rest} hidden aria-hidden="true" tabindex="-1" data-native-proxy />{/if}
   <Slider id={`${id}-control`} type="single" value={current} min={minimum} max={maximum} step={increment} disabled={unavailable}
     onValueChange={change} onValueCommit={complete} class="compat-slider" data-proxy-id={id} />
@@ -54,10 +54,5 @@
   .compat-slider-wrap :global([data-slot='slider-range']) { background: var(--accent); }
   .compat-slider-wrap :global([data-slot='slider-thumb']) { width: 13px; height: 13px; border: 2px solid var(--accent); border-radius: 50%; background: var(--bg); transition: box-shadow 120ms; }
   .compat-slider-wrap :global([data-slot='slider-thumb']:focus-visible) { outline: 2px solid var(--ring-color); outline-offset: 3px; }
-  .waveform-slider { position: absolute; inset: 0; width: 100%; }
-  .waveform-slider :global(.compat-slider) { height: 100%; }
-  .waveform-slider :global([data-slot='slider-track']) { background: transparent; }
-  .waveform-slider :global([data-slot='slider-range']) { opacity: .18; }
-  .waveform-slider :global([data-slot='slider-thumb']) { width: 4px; height: 19px; border: 0; background: var(--accent); border-radius: 2px; }
   @media (prefers-reduced-motion: reduce) { .compat-slider-wrap :global([data-slot='slider-thumb']) { transition: none; } }
 </style>

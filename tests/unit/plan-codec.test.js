@@ -66,3 +66,18 @@ test('conflicting inline and referenced bytes are rejected and metadata stays pe
   assert.equal(hydrated.changes[0].cover_change.new[0].kind, 'back');
   assert.equal(hydrated.changes[0].cover_change.old[0].kind, 'front');
 });
+
+
+test('live base plans pool repeated artwork before IPC without changing raw pending images', () => {
+  const codec = createPlanCodec();
+  const original = plan();
+  const request = {basePlan:original,edits:[{path:'/music/0.flac',field:'title',value:'New title'}]};
+  assert.equal(codec.prepare(request),request);
+  codec.accept({changes:[],cover_assets:[]});
+  const wire = codec.prepare(request);
+  assert.deepEqual(wire.basePlan.cover_assets,[art.data_base64]);
+  assert.equal(wire.basePlan.changes[1].cover_change.new[0].data_base64,'');
+  assert.equal(original.changes[1].cover_change.new[0].data_base64,art.data_base64);
+  assert.deepEqual(hydratePlan(wire.basePlan).changes,original.changes);
+  assert.equal(wire.edits,request.edits);
+});

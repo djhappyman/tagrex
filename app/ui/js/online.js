@@ -1,3 +1,4 @@
+import { beginLiveImport, finishLiveImport, isLiveImportCurrent, replaceLiveImport, adoptLiveCoverPlan } from "./live-preview.js";
 import { createComponentElement, upgradeComponentMarkup } from "../lib/component-elements.js";
 // The ONLINE sub-tab of TAGGER (#27, #143 split it out of app.js).
 //
@@ -10,7 +11,6 @@ import { confirmDialog, el, escapeHtml, fileName, ico, placeFloating, toast } fr
 import { t, tn } from "./i18n.js";
 import { chooseArtwork } from "./artworkpicker.js";
 import { invoke } from "./invoke.js";
-import { runChainOverPlan } from "./chains.js";
 import { hooks } from "./hooks.js";
 import { fmtTime } from "./player.js";
 import { refreshFieldEditor } from "./editor.js";
@@ -19,6 +19,8 @@ import { MEDIA_GLYPH_SETS } from "./mediaglyphs.js";
 import { mediaGlyphSet } from "./prefs.js";
 import {
   edits,
+  captureSelection,
+  isSelectionCurrent,
   previewPlan,
   savedSettings,
   selectedPaths,
@@ -641,6 +643,12 @@ function roundArtInset(img) {
   return inset / n;
 }
 
+// Sources whose search hits cannot say whether a release has cover art (#748).
+// Their thumbnail URL is only where the art would be, so a card loads it once
+// the release lookup (the count sweep runs one per card) confirms a front cover;
+// a release without art then costs no request that could only answer 404.
+const THUMB_AFTER_LOOKUP = new Set(["musicbrainz"]);
+
 // Show the release's cover thumbnail, fetching + caching it once. Cached data
 // URIs are reused, so a re-render never re-hits Discogs.
 async function applyImage(c) {
@@ -651,21 +659,31 @@ async function applyImage(c) {
     return;
   }
   const gen = searchGen;
+  const source = releaseSource;
   const kind = "thumb";
   const url = c.thumb_url || c.cover_url;
   if (!url) return;
   const cached = imageCache.get(c.id) || {};
   let dataUri = cached[kind];
+  if (!dataUri && THUMB_AFTER_LOOKUP.has(source)) {
+    const release = releaseCache.get(c.id);
+    if (!release || !release.cover_image_url) return;
+  }
   if (!dataUri) {
-    const token = await providerToken(releaseSource);
+    const token = await providerToken(source);
+    if (gen !== searchGen) return;
     try {
-      const img = await invoke("provider_fetch_image", { source: releaseSource, token, url });
+      const img = await invoke("provider_fetch_image", { source, token, url });
+      if (gen !== searchGen) return;
       dataUri = `data:${img.mime};base64,${img.data_base64}`;
       cached[kind] = dataUri;
       imageCache.set(c.id, cached);
     } catch (e) {
       return; // leave the striped placeholder
     }
+    // A thumbnail that arrives after the card was expanded must not cover up
+    // the full-size image that came in first (#748 loads thumbnails later).
+    if (coverCache.has(c.id)) return;
   }
   if (gen !== searchGen) return;
   const chosen = coverCache.get(c.id);
@@ -703,7 +721,9 @@ function rateLimitPauseMs(e) {
 }
 
 async function prefetchReleaseCounts(items, gen) {
-  const token = await providerToken(releaseSource);
+  const source = releaseSource;
+  const token = await providerToken(source);
+  if (gen !== undefined && gen !== searchGen) return;
   const queue = (items || releaseCandidates).filter((c) => !releaseCache.has(c.id));
   if (queue.length === 0) return;
   // The sweep is interruptible background work — show Stop while it runs (#108).
@@ -725,10 +745,13 @@ async function prefetchReleaseCounts(items, gen) {
       const c = queue.shift();
       if (!c || releaseCache.has(c.id)) continue;
       try {
-        releaseCache.set(c.id, await invoke("provider_fetch_release", { source: releaseSource, token, releaseId: c.id }));
+        const release = await invoke("provider_fetch_release", { source, token, releaseId: c.id });
+        if (gen !== undefined && gen !== searchGen) return;
+        releaseCache.set(c.id, release);
         const pill = countPillOf(c.id);
         if (pill) pill.textContent = countLabel(c.id);
         updateMediaBadge(c); // fill the badge's ×N now that disc count is known
+        applyImage(c); // a thumbnail that waited for this lookup (#748)
         limitsInARow = 0;
       } catch (e) {
         // A rate limit pauses the sweep and retries this release after it.
@@ -1790,6 +1813,8 @@ async function pickReleaseArtwork(card) {
 }
 
 async function embedCoverFrom(card) {
+  const subject = captureSelection();
+  const paths = subject.paths;
   const release = releaseCache.get(card.dataset.id);
   await loadFullCover(card.dataset.id, release?.cover_image_url, card);
   const cover = coverCache.get(card.dataset.id);
@@ -1797,18 +1822,17 @@ async function embedCoverFrom(card) {
     toast(t("toast.online.noCover"), true);
     return;
   }
-  const paths = selectedPaths();
   if (paths.length === 0) {
     toast(t("toast.cover.selectEmbed"), true);
     return;
   }
   try {
-    setPreviewPlan(await invoke("preview_cover_embed", { paths, cover }));
-    setPreviewSource("cover");
-    hooks.renderPreview(previewPlan);
+    const plan = await invoke("preview_cover_embed", { paths, cover });
+    if (!isSelectionCurrent(subject)) return;
+    adoptLiveCoverPlan(plan, paths);
     toast(
-      previewPlan.changes.length
-        ? t("toast.online.previewCover", { files: tn("unit.file", previewPlan.changes.length) })
+      plan.changes.length
+        ? t("toast.online.previewCover", { files: tn("unit.file", plan.changes.length) })
         : t("toast.cover.sameCover"),
     );
   } catch (e) {
@@ -1852,12 +1876,33 @@ async function saveReleaseImages(card, all) {
   }
 }
 
+let importPreviewActive = false;
+let waitingImportPreview = null;
+async function requestImportPreview(args, version, subject) {
+  if (importPreviewActive) {
+    const proceed = await new Promise(resolve => {
+      waitingImportPreview?.(false);
+      waitingImportPreview = resolve;
+    });
+    if (!proceed) return null;
+  }
+  if (!isLiveImportCurrent(version) || !isSelectionCurrent(subject)) return null;
+  importPreviewActive = true;
+  try { return await invoke('preview_import', args); }
+  finally {
+    importPreviewActive = false;
+    const next = waitingImportPreview; waitingImportPreview = null; next?.(true);
+  }
+}
+
 async function importRelease(card) {
-  const paths = selectedPaths();
+  const subject = captureSelection();
+  const paths = subject.paths;
   if (paths.length === 0) {
     toast(t("toast.online.selectImport"), true);
     return;
   }
+  const version = beginLiveImport();
   const release = releaseCache.get(card.dataset.id);
   // Prefer Discogs styles over coarse genres. Use the writer's multi-value
   // codec (default "; ") so these stay separate native values, while a slash
@@ -1893,30 +1938,12 @@ async function importRelease(card) {
     media_type: mediaTagValue(release.format),
   };
   try {
-    const imported = await invoke("preview_import", {
+    const imported = await requestImportPreview({
       paths,
       selection,
       vinylSidesToDisc: el("import-vinyl-disc").checked,
-    });
-    // ONLINE's chain runs on what the provider gave, before any of it reaches
-    // the edit buffer (#237). This is where the shipped "Discogs cleanup" group
-    // was always meant to be used: trusting a source is not the same as taking
-    // its disambiguators verbatim.
-    const plan = await runChainOverPlan(imported, "online");
-    // Merge into the pending-edits buffer; a field the user already edited by
-    // hand wins (we don't overwrite an existing entry).
-    let merged = 0;
-    for (const change of plan.changes) {
-      if (!edits.has(change.path)) edits.set(change.path, new Map());
-      const fields = edits.get(change.path);
-      for (const tc of change.tag_changes) {
-        if (!fields.has(tc.field)) {
-          fields.set(tc.field, tc.new ?? "");
-          merged += 1;
-        }
-      }
-      if (fields.size === 0) edits.delete(change.path);
-    }
+    }, version, subject);
+    if (!imported || !isSelectionCurrent(subject) || !isLiveImportCurrent(version)) return;
     // Hand the release's cover to the staging step (#207) so the tags and the
     // artwork become ONE plan — one Apply, one undo. Whether any of it is
     // written is the backend's call: the import-cover setting decides, per
@@ -1926,29 +1953,13 @@ async function importRelease(card) {
     // importing straight after expanding would otherwise race it and drop the
     // artwork silently, which is the one failure this feature must not have.
     await loadFullCover(card.dataset.id, release.cover_image_url, card);
-    setPendingImportCover(coverCache.get(card.dataset.id) || null);
-    // No plain render here: `previewEdits` stages the plan and repaints the
-    // table as a diff a moment later, so rendering first only builds a few
-    // thousand rows to throw them away (#186).
-    refreshFieldEditor();
+    if (!isSelectionCurrent(subject) || !isLiveImportCurrent(version)) return;
+    if (!replaceLiveImport(imported, coverCache.get(card.dataset.id) || null, paths, version)) return;
+    refreshFieldEditor({force:true});
     await hooks.previewEdits();
-    // The cover has to be named. The table shows changes per column and
-    // artwork has none, so a file that only gains a cover is a staged row that
-    // says nothing — this line is the only place a few hundred KB about to be
-    // written gets announced (#207).
-    const covered = (previewPlan?.changes || []).filter((c) => c.cover_change).length;
-    const coverNote = covered ? ", " + t("import.coverOn", { files: tn("unit.file", covered) }) : "";
-    toast(
-      merged || covered
-        ? t("toast.import.merged", {
-            changes: tn("unit.fieldChange", merged),
-            cover: coverNote,
-          })
-        : t("toast.import.nothingNew"),
-    );
   } catch (e) {
-    toast(String(e), true);
-  }
+    if (isLiveImportCurrent(version)) toast(String(e), true);
+  } finally { finishLiveImport(version); }
 }
 
 // ---- wire up ----

@@ -6,7 +6,9 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   root: 'app/ui',
   base: './',
-  plugins: [tailwindcss(), svelte({ configFile: fileURLToPath(new URL('./svelte.config.js', import.meta.url)) })],
+  // Controllers retain DOM references; component saves reload to rebind them.
+  // CSS still updates live through Vite without restarting the native shell.
+  plugins: [tailwindcss(), svelte({ compilerOptions: { hmr: false }, configFile: fileURLToPath(new URL('./svelte.config.js', import.meta.url)) })],
   resolve: { alias: { $lib: fileURLToPath(new URL('./app/ui/lib', import.meta.url)) } },
   build: {
     outDir: '../dist',

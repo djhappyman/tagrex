@@ -2,7 +2,7 @@
  * this scope follows the existing .mode-col subtree when it is docked. */
 .mode-col {
   --inspector-inset: 6px;
-  --inspector-label: 84px;
+  --inspector-label: 80px;
   --ctl-h: 32px;
   --ctl-h-sm: 28px;
   --panel-inset: var(--inspector-inset);
@@ -51,8 +51,8 @@ body .mode-col button[data-slot='button'].subtab {
 .mode-col .blocks-convert { gap: 3px; padding: 4px; border-radius: 3px; }
 
 /* Label/value rows share a fixed label rail, including the number pairs. */
-.mode-col .fe { gap: 4px; }
-.mode-col .fe-group { gap: 1px; }
+.mode-col .fe { gap:8px; }
+.mode-col .fe-group { gap:4px; }
 .mode-col .fe-group-head,
 body .mode-col button.fe-group-head {
   min-height: 21px;
@@ -71,22 +71,22 @@ body .mode-col button.fe-group-head {
 }
 .mode-col .fe-group-count { font-weight: 400; font-size: 10px; }
 .mode-col .fe-row {
-  grid-template-columns: 3px minmax(100px, 32%) minmax(0, 1fr) 16px;
+  grid-template-columns: 3px var(--inspector-label) minmax(0, 1fr) 16px;
   column-gap: 4px;
-  min-height: 34px;
+  min-height: 36px;
   padding: 0;
   margin: 0;
-  border-radius: 2px;
+  border-radius: 6px;
 }
 .mode-col .fe-row + .fe-row { margin-top: 0; }
 .mode-col .fe-label { font-size: 11px; line-height: 1.15; color: var(--muted); }
 body .mode-col .fe .field-input { height:var(--ctl-h); min-height:var(--ctl-h); padding:4px var(--input-inset); border-radius:var(--input-radius); font-size:var(--text-sm); }
-.mode-col .fe-cell.num { align-items: flex-start; }
-.mode-col .field-input.num { width: 62px; }
-.mode-col .fe-pair { gap: 4px; max-width: 100%; }
-body .mode-col .fe-pair .field-input { width: 36px; }
-.mode-col .fe-duo { gap: 8px; }
-.mode-col .fe-duo-unit { gap: 4px; min-width: 0; max-width: 100%; flex-wrap: wrap; }
+.mode-col .fe-cell.num { align-items: stretch; }
+.mode-col .field-input.num { width: 100%; }
+.mode-col .fe-pair { gap: 6px; width:100%; max-width:100%; }
+body .mode-col .fe-pair .field-input { flex:1 1 0; width:0; min-width:0; }
+.mode-col .fe-duo { gap: 8px; width:100%; }
+.mode-col .fe-duo-unit { gap:4px; min-width:0; width:100%; max-width:100%; }
 .mode-col .fe-duo-label { font-size: 10.5px; }
 body .mode-col button[data-slot='button'].fe-lock {
   width: 16px;
@@ -221,7 +221,6 @@ body .mode-col button[data-slot='button'].release-import { top: 5px; right: 0; w
 .mode-col :is(#panel-renamer, #panel-deduplicator, #panel-exporter) .panel-actions { margin-top: auto; padding-top: 5px; }
 
 @media (max-width: 760px) {
-  .mode-col { --inspector-label: 80px; }
   .mode-col .online-head-row { flex-wrap: wrap; }
   .mode-col .source-label { flex: 1 1 auto; }
 }
@@ -238,12 +237,6 @@ body .mode-col button[data-slot='button'].release-import { top: 5px; right: 0; w
   .mode-col .online-head-row { flex-wrap:wrap; }
   .mode-col .source-label { flex:1 1 140px; }
   .mode-col .online-head-row > .app-select:has(#search-format) { flex:1 1 98px; max-width:none; }
-  .mode-col .fe-row { grid-template-columns:3px 88px minmax(0,1fr) 16px; column-gap:3px; }
-}
-body .mode-col .fe-pair .field-input { width:44px; }
-@container tag-inspector (max-width:400px) {
-  .mode-col .fe-row { grid-template-columns:3px 88px minmax(0,1fr) 16px; }
-  body .mode-col .fe-pair .field-input { width:40px; padding-inline:6px; }
 }
 
 /* Inspector content belongs to the same workbench as its header and footer;
@@ -257,3 +250,22 @@ body .mode-col .fe-group-count { margin-left:auto; opacity:.72; }
 
 .mode-col .fe-group-caret { transition:transform 165ms var(--workbench-ease); }
 @media(prefers-reduced-motion:reduce) { .mode-col .fe-group-caret { transition:none; } }
+
+/* Numeric metadata shares compact rows; names keep the full value rail. */
+.mode-col .fe-duo { gap:8px 14px; }
+.mode-col .fe-duo-unit { width:auto; flex:0 0 auto; flex-wrap:nowrap; }
+.mode-col .fe-duo .fe-pair { width:auto; gap:4px; }
+body .mode-col .fe-duo .fe-pair .field-input { flex:0 0 34px; width:34px; padding-inline:4px; }
+.mode-col .fe-duo-label { width:28px; flex:none; }
+.mode-col .fe-inline-fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
+.mode-col .fe-inline-fields > .fe-row + .fe-row { grid-template-columns:3px 30px minmax(0,1fr) 16px; }
+.mode-col .fe-cell.num { align-items:flex-start; }
+.mode-col .fe-cell.num > .field-input { max-width:92px; }
+body .mode-col .fe textarea.field-input { height:74px; min-height:74px; max-height:50vh; resize:vertical; padding-block:7px; line-height:1.45; }
+.mode-col .fe-comment { align-items:start; padding-block:2px; }
+.mode-col .fe-comment > .fe-label { padding-top:8px; }
+.mode-col .fe-comment > .fe-lock { margin-top:4px; }
+@container tag-inspector (max-width:300px) {
+  .mode-col .fe-inline-fields { grid-template-columns:minmax(0,1fr); gap:0; }
+  .mode-col .fe-inline-fields > .fe-row + .fe-row { grid-template-columns:3px var(--inspector-label) minmax(0,1fr) 16px; }
+}

@@ -198,6 +198,7 @@ export const de = {
   "editor.coverArt": "Cover",
   "editor.clearTags": "Tags löschen",
   "editor.clearTagsTitle": "Alle Text-Tags der ausgewählten Dateien für einen Neuanfang löschen (Cover und DJ-Cue-Points bleiben). Lässt sich rückgängig machen.",
+  "editor.livePreview": "Änderungen werden automatisch angezeigt",
   "editor.stageFields": "Feldänderungen vormerken",
   "fromName.heading": "Tags aus dem Dateinamen",
   "fromName.hintSummary": "So wird die Maske gelesen",
@@ -540,6 +541,7 @@ export const de = {
   "cover.frontCover": "Vorderseite",
   "cover.sharedAcross": "gemeinsam für {files}",
   "cover.replace": "Ersetzen…",
+  "cover.exportSaved": "Gespeichertes Cover exportieren",
   "cover.export": "Exportieren",
   "cover.multiple": "Mehrere Cover",
   "cover.withCover": "{with_cover}/{n} mit Cover",
@@ -1209,4 +1211,7 @@ export const de = {
   "artwork.chosen": "Cover {number} ausgewählt",
   "apply.checking": "Dateien werden geprüft…",
   "workspace.transformations": "Transformationen",
+  "session.unavailable": "{folder} konnte nicht geöffnet werden. Verbinden und oben erneut versuchen oder einen anderen Ordner öffnen.",
+  "session.slow": "{folder} braucht zu lange. Oben erneut versuchen oder einen anderen Ordner öffnen. Der vorige Lesevorgang kann noch laufen.",
+  "session.interrupted": "Automatisches Fortsetzen für {folder} pausiert. Oben erneut versuchen oder einen anderen Ordner öffnen.",
 };

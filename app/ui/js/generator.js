@@ -1,3 +1,4 @@
+import { hasLiveInputs, isLiveImportBusy, liveInputs, liveInputRevision, hasInvalidLiveFields, hasInvalidPreview, optimisticLivePlan } from "./live-preview.js";
 // The GENERATOR mode (#143 split it out of app.js).
 //
 // Everything that mass-produces values for the selection: the transformation
@@ -16,7 +17,7 @@ import { invoke } from "./invoke.js";
 import { hooks } from "./hooks.js";
 import { createPresetChecklist, renderAllGroupsMenus } from "./chain.js";
 import { onPresetsChanged, openPresetEditor } from "./presets.js";
-import { currentFieldValue, hasEditorDraft } from "./editor.js";
+import { currentFieldValue } from "./editor.js";
 import { groupKeyOf } from "./grouping.js";
 import { parseVinylPosition } from "./vinyl.js";
 import { lockedFieldKeys } from "./locks.js";
@@ -29,6 +30,7 @@ import {
   setPreviewPlan,
   setPreviewSource,
   tracks,
+  trackAt,
 } from "./state.js";
 import {
   activeRuleCount,
@@ -74,10 +76,6 @@ function isAutomaticTransformRefresh() {
   return automaticPainting;
 }
 
-function hasPendingTransformEdits() {
-  return edits.size > 0 || hasEditorDraft();
-}
-
 function paintAutomaticPlan(plan) {
   automaticPainting = true;
   try { hooks.renderPreview(plan); }
@@ -85,13 +83,17 @@ function paintAutomaticPlan(plan) {
 }
 
 function automaticTransformScope() {
+  // Request-local only: plans and live inputs can mutate between events.
+  const planInvalid = hasInvalidPreview(previewPlan);
   return {
     enabled: presetsFor(chainContext(), { allScopes: true }).length > 0,
-    busy: automaticBusy,
+    busy: automaticBusy || isLiveImportBusy(),
     blocked: automaticBlocked,
     failed: automaticFailed,
     dismissed: automaticKey !== null && automaticKey === dismissedKey,
     changes: isAutomaticTransformPreview() ? previewPlan.changes.length : 0,
+    planInvalid,
+    invalid: hasInvalidLiveFields(lockedFieldKeys()) || planInvalid,
   };
 }
 
@@ -107,7 +109,9 @@ function automaticSnapshot() {
   const context = chainContext();
   const paths = selectedPaths();
   const groups = presetsFor(context, { allScopes: true });
-  return { paths, groups, key: JSON.stringify([context, paths, groups, lockedFieldKeys(), modelRevision]) };
+  const input = liveInputs();
+  const scope = [...new Set([...paths, ...input.paths])];
+  return { paths:scope, groups, input, key: JSON.stringify([context, scope, groups, lockedFieldKeys(), modelRevision, liveInputRevision()]) };
 }
 
 function cancelAutomaticRequest() {
@@ -132,36 +136,33 @@ function clearAutomaticPlan() {
 function scheduleAutomaticTransformPreview({ modelChanged = false } = {}) {
   if (modelChanged) modelRevision++;
   const snapshot = automaticSnapshot();
-  // Pending typed/import values belong to their own explicit Stage action.
-  // The independent selection preview cannot consume or discard that buffer.
-  if (automaticPaused || hasPendingTransformEdits() || (previewPlan && !isAutomaticTransformPreview())) {
+  if (isLiveImportBusy()) { cancelAutomaticRequest(); automaticBusy = true; announceAutomaticScope(); return; }
+  if (automaticPaused || (previewPlan && !isAutomaticTransformPreview())) {
     cancelAutomaticRequest();
     automaticBlocked = true;
-    if (hasPendingTransformEdits() && isAutomaticTransformPreview()) clearAutomaticPlan();
     if (previewPlan && !isAutomaticTransformPreview()) automaticPlan = null;
     announceAutomaticScope();
     return;
   }
   if (snapshot.key === automaticKey && !automaticBlocked) return;
   automaticBlocked = false;
-  // Dismissal lasts until the next real selection/preset change. Returning to
-  // the same checked set after unticking it must still preview again.
   if (snapshot.key !== automaticKey && automaticKey === dismissedKey) dismissedKey = null;
   automaticKey = snapshot.key;
   cancelAutomaticRequest();
   automaticFailed = false;
-  if (!snapshot.groups.length || !snapshot.paths.length) {
-    clearAutomaticPlan();
-    announceAutomaticScope();
-    return;
+  if ((!snapshot.groups.length && !hasLiveInputs()) || !snapshot.paths.length) {
+    clearAutomaticPlan(); announceAutomaticScope(); return;
   }
-  if (snapshot.key === dismissedKey) {
-    announceAutomaticScope();
-    return;
-  }
+  if (snapshot.key === dismissedKey) { announceAutomaticScope(); return; }
   const version = automaticVersion;
-  const previous = previewPlan;
   automaticBusy = true;
+  // Raw typed values appear immediately. Apply remains disabled until the
+  // current native result validates and transforms this exact revision.
+  if (hasLiveInputs()) {
+    automaticPlan = optimisticLivePlan();
+    setPreviewPlan(automaticPlan); setPreviewSource('edits');
+    paintAutomaticPlan(automaticPlan);
+  }
   announceAutomaticScope();
   const run = async () => {
     automaticTimer = null;
@@ -169,38 +170,29 @@ function scheduleAutomaticTransformPreview({ modelChanged = false } = {}) {
     if (automaticInFlight) { automaticQueuedRun = run; return; }
     automaticInFlight = true;
     try {
-      const plan = await invoke('preview_transform_groups', { paths: snapshot.paths, groups: snapshot.groups });
-      if (version !== automaticVersion || automaticPaused || hasPendingTransformEdits() || previewPlan !== previous || automaticSnapshot().key !== snapshot.key) return;
+      const plan = await invoke('preview_live_edits', { ...snapshot.input, paths:snapshot.paths, groups:snapshot.groups });
+      if (version !== automaticVersion || automaticPaused || automaticSnapshot().key !== snapshot.key || (previewPlan && !isAutomaticTransformPreview())) return;
       automaticPlan = plan;
-      setPreviewPlan(plan);
-      // Distinct from contextual rename/import sources, whose existing change
-      // listeners regenerate their own mask/import rather than this selection.
-      setPreviewSource('transform');
+      setPreviewPlan(plan); setPreviewSource(hasLiveInputs() ? 'edits' : 'transform');
       automaticBusy = false;
       paintAutomaticPlan(plan);
-      if (previewPlan !== plan) automaticPlan = null; // empty/fully locked plan
+      if (previewPlan !== plan) automaticPlan = null;
     } catch (error) {
-      if (version !== automaticVersion || previewPlan !== previous) return;
+      if (version !== automaticVersion) return;
       automaticBusy = false;
-      clearAutomaticPlan();
       automaticFailed = true;
       toast(String(error), true);
     } finally {
       automaticInFlight = false;
-      const queued = automaticQueuedRun;
-      automaticQueuedRun = null;
+      const queued = automaticQueuedRun; automaticQueuedRun = null;
       if (queued) void queued();
-      if (version === automaticVersion) {
-        automaticBusy = false;
-        announceAutomaticScope();
-      }
+      if (version === automaticVersion) { automaticBusy = false; announceAutomaticScope(); }
     }
   };
-  automaticTimer = setTimeout(run, 75);
+  automaticTimer = setTimeout(run, hasLiveInputs() ? 35 : 60);
 }
 
 function dismissAutomaticTransformPreview() {
-  if (!isAutomaticTransformPreview()) return;
   dismissedKey = automaticSnapshot().key;
   cancelAutomaticRequest();
   automaticPlan = null;
@@ -317,14 +309,13 @@ async function numberTracks() {
   }
   const disc = discRaw ? String(Number(discRaw)) : "";
 
-  const trackByPath = new Map(tracks.map((t) => [t.path, t]));
   // Assign a number to each writable file. A preserved vinyl side neither gets a
   // number nor consumes one, so the rest stay contiguous.
   const assigned = []; // { path, number, gkey }
   const groupNext = new Map(); // groupKey -> next number
   let flat = start;
   for (const path of paths) {
-    const track = trackByPath.get(path);
+    const track = trackAt(path);
     if (!track) continue;
     if (keepSides && isVinylSide(track.tags.track)) continue;
     const gkey = perGroup ? groupKeyOf(track) : "";
@@ -468,11 +459,7 @@ function chainContext() {
   if (currentMode === "generator") return "generator";
   if (currentMode === "renamer") return "renamer";
   if (currentMode !== "tagger") return "generator";
-  const sub = document.querySelector(".subtab.active")?.dataset.subtab;
-  // FROM TEXT (#61) reads values out of a string with a mask too, and takes
-  // FROM NAME's chain rather than a third one.
-  if (sub === "filename" || sub === "fromtext") return "fromname";
-  if (sub === "online") return "online";
+
   return "generator";
 }
 
@@ -612,8 +599,18 @@ for (const context of ['generator', 'online', 'fromname', 'renamer']) {
 }
 // Saved/built-in preset shelves arrive asynchronously on startup.
 new MutationObserver(() => scheduleAutomaticTransformPreview()).observe(el('groups-menu'), { childList: true });
-document.addEventListener('input', event => {
-  if (event.target.closest('#fields-body')) scheduleAutomaticTransformPreview();
+document.addEventListener('tagrex:live-input', () => {
+  // Tag-only previews (paste, clear, FROM NAME) can become the raw input of
+  // the same pipeline. Preserve an explicit rename/block/artwork operation
+  // instead of silently losing its non-tag effects.
+  if (previewPlan && !isAutomaticTransformPreview() && previewPlan.changes.every(change => !change.rename_to && !change.cover_change && !change.block_changes?.length)) {
+    for (const change of previewPlan.changes) {
+      if (!edits.has(change.path)) edits.set(change.path, new Map());
+      for (const field of change.tag_changes || []) if (!edits.get(change.path).has(field.field)) edits.get(change.path).set(field.field, field.new ?? '');
+    }
+    setPreviewPlan(null); setPreviewSource(null);
+  }
+  scheduleAutomaticTransformPreview();
 });
 window.addEventListener('pagehide', pauseAutomaticTransformPreview, { once: true });
 // A preset changed in the editor: keep a renamed one ticked, then let every job

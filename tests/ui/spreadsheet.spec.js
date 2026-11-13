@@ -18,7 +18,7 @@ test.beforeEach(async ({ page }) => {
         // Instrument only the browser fixture's mock switch, in memory. This
         // counts real controller requests without changing production sources
         // or ever invoking a native filesystem command.
-        body = Buffer.from(body.toString().replace(/case([`"'])((?:preview_tag_edits|apply_plan|undo))\1:/g,
+        body = Buffer.from(body.toString().replace(/case([`"'])((?:preview_tag_edits|preview_live_edits|apply_plan|undo))\1:/g,
           (match, _quote, command) => `${match}window.sheetCalls??={};window.sheetCalls['${command}']=(window.sheetCalls['${command}']||0)+1;`));
       }
       const contentType = path.endsWith('.js') ? 'text/javascript' : path.endsWith('.css') ? 'text/css' : path.endsWith('.woff2') ? 'font/woff2' : 'text/html';
@@ -92,7 +92,7 @@ test('the keyboard splitter resizes the workspace and remembers the layout on re
   await expect.poll(async () => Number(await splitter.getAttribute('aria-valuenow'))).toBe(before);
 });
 
-test('cell keyboard navigation, direct edit, cancellation and row selection remain separate', async ({ page }) => {
+test('cell keyboard navigation, live preview, cancellation and row selection remain separate', async ({ page }) => {
   await cell(page, 'artist').click();
   await expect(cell(page, 'artist')).toBeFocused();
   await page.keyboard.press('ArrowRight');
@@ -101,11 +101,16 @@ test('cell keyboard navigation, direct edit, cancellation and row selection rema
   await expect(cell(page, 'title')).toHaveAttribute('contenteditable', 'true');
   await cell(page, 'title').fill('Direct cell title');
   await page.keyboard.press('Enter');
+  await expect(page.locator('#diff-apply')).toBeEnabled();
+  expect(await page.evaluate(() => window.tagrex.tracks[0].tags.title)).toBe('Desert Rain');
+  expect(await calls(page, 'preview_live_edits')).toBeGreaterThan(0);
+  expect(await calls(page, 'apply_plan')).toBe(0);
+  await expect(cell(page, 'title')).toBeFocused();
+  await page.locator('#diff-apply').click();
   await expect.poll(() => page.evaluate(() => window.tagrex.tracks[0].tags.title)).toBe('Direct cell title');
   await expect(page.locator('#diff-actionbar')).toBeHidden();
-  expect(await calls(page, 'preview_tag_edits')).toBe(1);
   expect(await calls(page, 'apply_plan')).toBe(1);
-  await expect(cell(page, 'title')).toBeFocused();
+  await cell(page, 'title').click();
   await page.keyboard.press('Tab');
   await expect(cell(page, 'album')).toBeFocused();
   await page.keyboard.press('Shift+Tab');
@@ -256,6 +261,21 @@ test('TSV paste creates one review plan and one Apply/Undo journal batch', async
   // restoration is covered by the core journal tests, not asserted here.
 });
 
+test('manual review applies only highlighted files without row checkboxes', async ({ page }) => {
+  const original = await page.evaluate(() => window.tagrex.tracks[0].tags.artist);
+  await cell(page, 'artist').click();
+  await paste(page, 'Artist A\nArtist B');
+  await expect(page.locator('#diff-actionbar')).toBeVisible();
+  await expect(page.locator('#tracks-body tr[data-path].selected')).toHaveCount(2);
+  await page.locator('#tracks-body tr[data-path] td.file').first().click({ modifiers: ['Control'] });
+  await expect(page.locator('#tracks-body tr[data-path].selected')).toHaveCount(1);
+  await expect(page.locator('#tracks-body input[type="checkbox"]')).toHaveCount(0);
+  await page.locator('#diff-apply').click();
+  await expect(page.locator('#diff-actionbar')).toBeHidden();
+  expect(await page.evaluate(() => window.tagrex.tracks.slice(0, 2).map(track => track.tags.artist))).toEqual([original, 'Artist B']);
+  expect(await calls(page, 'apply_plan')).toBe(1);
+});
+
 for (const [name, value, field, expected] of [
   ['ragged rows', 'A\tB\nC', 'artist', 'rectangular'],
   ['invalid numeric value', 'New artist\tNew title\tNew album\tbad-year', 'artist', 'Nothing was staged'],
@@ -322,7 +342,10 @@ test('range selection and fill work across rows outside the virtual window', asy
   const target = page.locator('#tracks-body td[data-field="artist"]').last();
   const lastPath = await target.getAttribute('data-path');
   const end = Number(lastPath.match(/track-(\d+)/)[1]);
-  await target.click({ modifiers: ['Shift'] });
+  // Mouse Shift-click ranges tracks; keyboard Shift+arrows ranges cells.
+  await page.keyboard.down('Shift');
+  for (let index=0;index<end;index++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.up('Shift');
   expect((await copy(page)).split('\r\n')).toHaveLength(end + 1);
   await paste(page, 'Unified artist');
   await expect(page.locator('#diff-actionbar')).toBeVisible();
@@ -394,7 +417,7 @@ test('wheel scrolling can unmount the focused row while keyboard navigation rema
 });
 
 for (const selectionMode of ['hidden checkboxes', 'optional checkboxes', 'staged preview']) {
-  test(`the sticky artwork, filename and selection columns stay contiguous with ${selectionMode}`, async ({ page }) => {
+  test(`artwork and selection stay pinned while Filename scrolls with ${selectionMode}`, async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 800 });
     if (selectionMode === 'optional checkboxes') await page.evaluate(() => document.body.classList.add('show-checkbox'));
     else if (selectionMode === 'staged preview') {
@@ -402,8 +425,17 @@ for (const selectionMode of ['hidden checkboxes', 'optional checkboxes', 'staged
       await paste(page, '1998');
       await expect(page.locator('#diff-actionbar')).toBeVisible();
     }
-    await page.locator('#files-view').evaluate((element) => { element.scrollLeft = 120; });
-    await expect.poll(() => page.locator('#files-view').evaluate((element) => element.scrollLeft)).toBeGreaterThan(50);
+    // Sample the geometry and actual clamped scroll in one frame. Viewport
+    // resizing and review focus can otherwise shift columns between reads.
+    const movement = await page.locator('#files-view').evaluate(wrap => {
+      wrap.scrollLeft = 0;
+      const file = wrap.querySelector('tr[data-path] td.file');
+      const before = file.getBoundingClientRect().left;
+      wrap.scrollLeft = 120;
+      return {file:before - file.getBoundingClientRect().left, scroll:wrap.scrollLeft};
+    });
+    expect(movement.scroll).toBeGreaterThan(50);
+    expect(movement.file).toBeCloseTo(movement.scroll, 0);
     await expect.poll(() => page.evaluate(() => {
       const wrap = document.getElementById('files-view').getBoundingClientRect();
       const row = document.querySelector('#tracks-body tr[data-path]');
@@ -412,7 +444,7 @@ for (const selectionMode of ['hidden checkboxes', 'optional checkboxes', 'staged
       const artwork = row.querySelector('td.artwork-col').getBoundingClientRect();
       const file = row.querySelector('td.file').getBoundingClientRect();
       const leadingEdge = getComputedStyle(selectionCell).display === 'none' ? wrap.left : selection.right;
-      return artwork.left >= wrap.left && Math.abs(artwork.left - leadingEdge) < 0.25 && Math.abs(file.left - artwork.right) < 0.25;
+      return artwork.left >= wrap.left && Math.abs(artwork.left - leadingEdge) < 0.25 && getComputedStyle(row.querySelector("td.file")).position !== "sticky";
     })).toBe(true);
   });
 }
@@ -464,7 +496,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 844, height: 390 }
   test(`every mode keeps its primary actions reachable at ${viewport.width}×${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     const actions = {
-      tagger: ['fields-apply'], renamer: ['preview'],
+      tagger: ['fields-clear'], renamer: ['preview'],
       generator: ['presets-edit', 'autonum-run', 'vinyl-split'],
       deduplicator: ['dup-scan'], exporter: ['export-run'],
     };

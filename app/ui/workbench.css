@@ -434,9 +434,8 @@ body button[data-slot="button"].release-import { border: 1px solid var(--accent)
 }
 body button[data-slot="button"].seg-btn { border-radius: 999px; background: transparent; padding: 4px 10px; }
 body button[data-slot="button"].seg-btn.active { background: var(--accent); color: var(--accent-text); }
-.statusbar { padding-block: 6px; min-height: 54px; border-top: 0; }
+.statusbar { padding-block: 3px; min-height: 36px; border-top: 0; }
 .sb-right { min-width: 0; }
-.pl-cover { border-radius: 8px; overflow: hidden; }
 .diff-actionbar { border-radius: 20px; }
 .compact-actions { display: none; }
 .compact-actions #diff-actionbar {
@@ -540,13 +539,11 @@ body button[data-slot="button"]:is(.ph-row, .pe-list-row) {
   .subtabs { padding: 6px; }
   body button[data-slot="button"].subtab { flex: 1 0 auto; padding-inline: 10px; }
   .online-head { padding-block: 8px; }
-  .statusbar { min-height: 44px; gap: 0; padding: 4px 0; }
+  .statusbar { min-height: 36px; gap: 0; padding: 3px 0; }
   .sb-left, .sb-right { padding-inline: 9px; }
-  .sb-right { width: auto; max-width: 45%; }
-  .sb-left:has(#player[hidden]):has(#sb-play[hidden]) { padding: 0; }
+  .sb-right { width: auto; max-width: none; }
   .pl-transport { gap: 1px; }
   #player { gap: 5px; }
-  #pl-cover, #pl-repeat { display: none; }
   .settings-sheet { width: calc(100vw - 16px); height: calc(100dvh - 16px); border-radius: 18px; }
   .settings-main { flex-direction: column; }
   .settings-nav { width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
@@ -655,7 +652,7 @@ body button[data-slot="button"]:is(.ph-row, .pe-list-row) {
   body button[data-slot="button"].subtab { padding-block: 5px; }
   .online-head { padding-block: 7px; gap: 6px; }
   .view-tabs { padding-block: 6px; }
-  .statusbar { min-height: 44px; }
+  .statusbar { min-height: 36px; }
 }
 @media (max-height: 520px) and (max-width: 760px) {
   /* The pane switch already gives the tool the full height on very short

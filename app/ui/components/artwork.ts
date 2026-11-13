@@ -36,11 +36,13 @@ export async function decodeArtwork(cover: CoverArt): Promise<HTMLImageElement> 
   return image;
 }
 
-/** Rotate the original pixels, independent of preview zoom/pan. */
-export async function rotateArtwork(cover: CoverArt, degrees: number): Promise<CoverArt> {
+/** Rotate the original pixels, independent of preview zoom/pan. `decoded` is
+ * the same cover already decoded for display; passing it avoids decoding the
+ * artwork twice on the way to Apply. */
+export async function rotateArtwork(cover: CoverArt, degrees: number, decoded?: HTMLImageElement | null): Promise<CoverArt> {
   const angle = ((degrees % 360) + 360) % 360;
   if (!angle) return cover;
-  const image = await decodeArtwork(cover);
+  const image = decoded || await decodeArtwork(cover);
   const canvas = document.createElement('canvas');
   const swapped = angle === 90 || angle === 270;
   canvas.width = swapped ? image.naturalHeight : image.naturalWidth;

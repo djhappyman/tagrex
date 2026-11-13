@@ -202,6 +202,7 @@ export const it = {
   "editor.coverArt": "Copertina",
   "editor.clearTags": "Pulisci tag",
   "editor.clearTagsTitle": "Elimina tutti i tag di testo dai file selezionati per ripartire da zero (copertina e cue point DJ vengono mantenuti). Reversibile con annulla.",
+  "editor.livePreview": "Anteprima automatica delle modifiche",
   "editor.stageFields": "Prepara modifiche campi",
   "fromName.heading": "Tag dal nome file",
   "fromName.hintSummary": "Come si legge la maschera",
@@ -544,6 +545,7 @@ export const it = {
   "cover.frontCover": "Copertina frontale",
   "cover.sharedAcross": "condivisa su {files}",
   "cover.replace": "Sostituisci…",
+  "cover.exportSaved": "Esporta copertina salvata",
   "cover.export": "Esporta",
   "cover.multiple": "Copertine multiple",
   "cover.withCover": "{with_cover}/{n} con copertina",
@@ -1213,4 +1215,7 @@ export const it = {
   "artwork.chosen": "Copertina {number} selezionata",
   "apply.checking": "Verifica dei file…",
   "workspace.transformations": "Trasformazioni",
+  "session.unavailable": "Impossibile riaprire {folder}. Ricollegala, riprova sopra o apri un’altra cartella.",
+  "session.slow": "{folder} impiega troppo tempo. Riprova sopra o apri un’altra cartella. La lettura precedente potrebbe continuare.",
+  "session.interrupted": "Ripristino automatico sospeso per {folder}. Riprova sopra o apri un’altra cartella.",
 };

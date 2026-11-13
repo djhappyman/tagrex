@@ -33,6 +33,15 @@
   let disposed = false;
   // Promise cache is deliberately nonreactive; templates read thumbs/displayed.
   const pending = new Map<number, Promise<CoverArt>>();
+  // Decodes that have started but not settled, by image index. Rapid browsing
+  // asks for the same image again before its first decode has finished; the
+  // second selection waits on the decode already running instead of starting
+  // another. Only in-flight work is remembered — once it settles, the browser
+  // owns the pixels and the entry goes.
+  const decoding: Record<number, Promise<HTMLImageElement>> = {};
+  // The pixels of the image currently on show, so committing it does not decode
+  // the same artwork a second time.
+  let displayedImage: HTMLImageElement | null = null;
   const dataUri = (cover: CoverArt) => `data:${cover.mime};base64,${cover.data_base64}`;
   const ready = $derived(!loading && !failure && displayed?.index === active);
   const dimensions = $derived.by(() => {
@@ -53,15 +62,25 @@
   }
 
   async function select(index: number) {
+    // The image is already on show, decoded and enabled: re-selecting it (the
+    // active tile, Home/End on the current index, an arrow wrapping a one-image
+    // release) has nothing to fetch and nothing to decode.
+    if (active === index && displayed?.index === index && !loading && !failure) return;
     const gen = ++generation;
     active = index;
     loading = true;
     failure = '';
     try {
       const cover = await load(index);
-      const image = await decodeArtwork(cover);
+      // A fetch can outlive the selection that asked for it. Decoding is the
+      // expensive half, so stop as soon as the answer can no longer be used;
+      // the post-decode check still covers a close or supersede during the
+      // decode itself.
+      if (disposed || gen !== generation || !open) return;
+      const image = await decodeOnce(index, cover);
       if (disposed || gen !== generation || !open) return;
       displayed = { index, cover, serial: gen, width: image.naturalWidth, height: image.naturalHeight };
+      displayedImage = image;
       frames = [...frames, displayed];
       loading = false;
     } catch (error) {
@@ -69,6 +88,16 @@
       failure = String(error);
       loading = false;
     }
+  }
+
+  function decodeOnce(index: number, cover: CoverArt): Promise<HTMLImageElement> {
+    const running = decoding[index];
+    if (running) return running;
+    const started = decodeArtwork(cover);
+    decoding[index] = started;
+    const settle = () => { if (decoding[index] === started) delete decoding[index]; };
+    started.then(settle, settle);
+    return started;
   }
 
   function close(choice: ArtworkChoice | null = null) {
@@ -88,7 +117,10 @@
     saving = true;
     const gen = generation;
     try {
-      const cover = await rotateArtwork(choice.cover, rotations[choice.index] || 0);
+      // The image on show has already been decoded once for the preview; the
+      // rotation uses those pixels instead of decoding the base64 a second time.
+      const pixels = choice === displayed ? displayedImage : null;
+      const cover = await rotateArtwork(choice.cover, rotations[choice.index] || 0, pixels);
       if (open && gen === generation) close({ index: choice.index, cover, rotation: ((rotations[choice.index] || 0) % 360 + 360) % 360 });
     } catch (error) {
       failure = String(error);
@@ -97,8 +129,9 @@
 
   function navigateTo(index: number) {
     select(index);
-    rail?.querySelector<HTMLButtonElement>(`[data-index="${index}"]`)?.focus({ preventScroll: true });
-    rail?.querySelector(`[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: prefersReducedMotion.current ? 'instant' : 'smooth' });
+    const tile = rail?.querySelector<HTMLButtonElement>(`[data-index="${index}"]`);
+    tile?.focus({ preventScroll: true });
+    tile?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: prefersReducedMotion.current ? 'instant' : 'smooth' });
   }
 
   function onKey(event: KeyboardEvent) {

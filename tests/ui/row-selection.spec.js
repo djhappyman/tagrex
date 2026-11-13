@@ -109,27 +109,14 @@ test('Escape cancels a marquee and restores the previous selection', async ({ pa
   await expect(page.locator('.row-selection-rectangle')).toBeHidden();
 });
 
-test('group single clicks are inert; double click selects collapsed full-model members and Ctrl double click deselects them', async ({ page }) => {
-  const entries = [...Array.from({ length: 200 }, (_, i) => `A/track-${String(i).padStart(3, '0')}.mp3`), 'B/other-1.mp3', 'B/other-2.mp3'];
-  await many(page, entries, 'folder');
-  const group = page.locator('#tracks-body tr.group-head').first();
-  const label = group.locator('.group-label');
-  const initial = await selected(page);
-  await label.click();
-  await label.click({ modifiers: ['Control'] });
-  expect(await selected(page)).toEqual(initial);
-  await group.locator('.group-caret').click();
-  await expect(group).toHaveClass(/collapsed/);
-  await label.dblclick();
-  expect((await selected(page)).length).toBe(200);
-  expect((await selected(page)).every(path => path.startsWith('/dropped/A/'))).toBe(true);
-  await expect(group).toHaveClass(/collapsed/);
-  await rows(page).first().locator('td.file').click({ modifiers: ['Control'] });
-  const other = (await selected(page)).find(path => path.startsWith('/dropped/B/'));
-  expect(other).toBeTruthy();
-  await label.dblclick({ modifiers: ['Control'] });
-  expect(await selected(page)).toEqual([other]);
-  await expect(group).toHaveClass(/collapsed/);
+test('group left-click folds, right-click replaces selection and Ctrl-click removes only that group', async ({ page }) => {
+  const entries=[...Array.from({length:200},(_,i)=>`A/track-${String(i).padStart(3,'0')}.mp3`),'B/other-1.mp3','B/other-2.mp3'];
+  await many(page,entries,'folder');const group=page.locator('#tracks-body tr.group-head').first();const label=group.locator('.group-label');const initial=await selected(page);
+  await label.click();await expect(group).toHaveClass(/collapsed/);expect(await selected(page)).toEqual(initial);
+  await label.click({button:'right'});expect((await selected(page)).length).toBe(200);expect((await selected(page)).every(path=>path.startsWith('/dropped/A/'))).toBe(true);await expect(group).toHaveClass(/collapsed/);
+  await rows(page).first().locator('td.file').click({modifiers:['Control']});const other=(await selected(page)).find(path=>path.startsWith('/dropped/B/'));expect(other).toBeTruthy();
+  await label.click({modifiers:['Control']});expect(await selected(page)).toEqual([other]);await expect(group).toHaveClass(/collapsed/);
+  await label.click({button:'right'});expect((await selected(page)).length).toBe(200);expect((await selected(page)).includes(other)).toBe(false);await expect(page.locator('#file-ctx')).toBeHidden();
 });
 
 test('marquee autoscroll spans rows outside the original virtual window', async ({ page }) => {

@@ -31,9 +31,9 @@ async function settings(page) {
 
 test('shadcn switches track silent native property writes and emit one change per user action', async ({ page }) => {
   await settings(page);
-  const toggle = page.locator('#set-checkbox-col-control');
+  const toggle = page.locator('#set-check-updates-control');
   await page.evaluate(() => {
-    const input = document.getElementById('set-checkbox-col');
+    const input = document.getElementById('set-check-updates');
     window.controlEvents = [];
     window.controlClicks = 0;
     input.addEventListener('click', () => window.controlClicks++);
@@ -45,28 +45,28 @@ test('shadcn switches track silent native property writes and emit one change pe
   expect(await page.evaluate(() => window.controlEvents)).toEqual([]);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  expect(await page.locator('#set-checkbox-col').isChecked()).toBe(false);
+  expect(await page.locator('#set-check-updates').isChecked()).toBe(false);
   expect(await page.evaluate(() => window.controlEvents)).toEqual(['input', 'change']);
   expect(await page.evaluate(() => window.controlClicks)).toBe(1);
-  await page.locator('label[for="set-checkbox-col-control"]').click();
+  await page.locator('label[for="set-check-updates-control"]').click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await expect(toggle).toBeFocused();
   await page.keyboard.press('Space');
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  await page.evaluate(() => { document.getElementById('set-checkbox-col').disabled = true; });
+  await page.evaluate(() => { document.getElementById('set-check-updates').disabled = true; });
   await expect(toggle).toBeDisabled();
 });
 
 test('select-all tri-state and wrapping checkbox labels stay synchronized with native controllers', async ({ page }) => {
   await settings(page);
-  await page.locator('#set-checkbox-col-control').click();
   await page.locator('#settings-save').click();
   await page.locator('#root-display').click();
   await page.locator('#root').fill('/music');
   await page.locator('#root').press('Enter');
   const header = page.locator('#select-all-control');
   await expect(header).toHaveAttribute('aria-checked', 'mixed');
-  await header.click();
+  await page.locator('#tracks-body tr[data-path] td.file').first().click();
+  await page.keyboard.press('Control+a');
   await expect(page.locator('#tracks-body tr.selected')).toHaveCount(3);
   await expect(header).toHaveAttribute('aria-checked', 'true');
   await page.locator('.mode-tab[data-mode="generator"]').click();
@@ -122,7 +122,7 @@ test('native form reset synchronizes the rendered checkbox and slider', async ({
     const form = document.createElement('form');
     form.hidden = true;
     document.body.append(form);
-    const checkbox = document.getElementById('set-checkbox-col');
+    const checkbox = document.getElementById('set-check-updates');
     const slider = document.getElementById('set-table-font');
     form.append(checkbox, slider);
     checkbox.defaultChecked = true;
@@ -131,34 +131,19 @@ test('native form reset synchronizes the rendered checkbox and slider', async ({
     slider.value = '18';
     form.reset();
   });
-  await expect(page.locator('#set-checkbox-col-control')).toHaveAttribute('aria-checked', 'true');
+  await expect(page.locator('#set-check-updates-control')).toHaveAttribute('aria-checked', 'true');
   await page.locator('#settings-search').fill('Table font size');
   await expect(page.locator('#set-table-font-control [role="slider"]')).toHaveAttribute('aria-valuenow', '15');
 });
 
-test('dynamic row checkboxes preserve additive selection without invoking row clicks', async ({ page }) => {
-  await settings(page);
-  await page.locator('#set-checkbox-col-control').click();
-  await page.locator('#settings-save').click();
-  await page.locator('#root-display').click();
-  await page.locator('#root').fill('/music');
-  await page.locator('#root').press('Enter');
-  const row = page.locator('#tracks-body tr[data-path]').nth(1);
-  const checkbox = row.getByRole('checkbox');
-  await expect(checkbox).toBeVisible();
-  await row.evaluate(node => {
-    window.rowClicks = 0;
-    window.rowChanges = 0;
-    node.addEventListener('click', event => { if (event.target.closest('button')) window.rowClicks++; });
-    node.addEventListener('change', () => window.rowChanges++);
-  });
-  await checkbox.click();
-  await expect(page.locator('#tracks-body tr.selected')).toHaveCount(2);
-  await expect(checkbox).toHaveAttribute('aria-checked', 'true');
-  expect(await page.evaluate(() => [window.rowClicks, window.rowChanges])).toEqual([0, 1]);
-  await row.locator('input[type=checkbox]').evaluate(input => { input.checked = false; });
-  await expect(checkbox).toHaveAttribute('aria-checked', 'false');
-  expect(await page.evaluate(() => window.rowChanges)).toBe(1);
+test('row highlights preserve additive selection without checkbox mounts', async ({ page }) => {
+  await page.locator('#root-display').click();await page.locator('#root').fill('/music');await page.locator('#root').press('Enter');
+  const row=page.locator('#tracks-body tr[data-path]').nth(1);
+  await expect(row.locator('input[type="checkbox"], [role="checkbox"]')).toHaveCount(0);
+  await row.locator('td.file').click({modifiers:['Control']});
+  await expect(page.locator('#tracks-body tr.selected')).toHaveCount(2);await expect(row).toHaveAttribute('aria-selected','true');
+  await row.locator('td.file').click({modifiers:['Control']});
+  await expect(page.locator('#tracks-body tr.selected')).toHaveCount(1);await expect(row).toHaveAttribute('aria-selected','false');
 });
 
 test('mounted shadcn editor controls preserve legacy values, content and single click handlers', async ({ page }) => {
