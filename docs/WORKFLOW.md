@@ -109,8 +109,15 @@ A green PR proves its checked scope. A merged `main` commit also needs its
 [Build and release](BUILDING.md) validation and package matrix checked before
 installers are described as available or a release milestone is complete.
 
-Use independent numeric app versions and `personal-v<VERSION>` tags. Publish a
-release only when requested; a normal merge produces development artifacts.
+Use independent numeric app versions and `personal-v<VERSION>` tags. When Mike
+requests a build, prepare a personal release by default. Check whether the
+configured version is already released: if so, prepare a patch-version bump in
+the app config, workspace manifest/lockfile and changelog as a release checkpoint,
+then apply the normal review/CI/merge gates. Dispatch **Build and release** on the
+merged fork `main` with `publish_release` enabled. This validates and publishes
+the full platform matrix. Use artifact-only mode only when requested. A normal
+main push continues producing development artifacts without publishing a release.
+Never overwrite an existing version's source tag or published assets.
 Keep existing portable releases and state intact. After outputs are verified,
 remove task-owned disposable build/probe output and retain compact evidence.
 

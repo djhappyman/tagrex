@@ -10,8 +10,8 @@ A push to `main` runs those same reusable CI checks through **Build and release*
 
 1. Set matching personal versions in `Cargo.toml`, workspace entries in `Cargo.lock`, and `app/tauri.conf.json`. Add a matching changelog heading.
 2. Merge the reviewed change only after applicable checks pass.
-3. Push a matching tag, for example `personal-v1.4.1`. Alternatively publish a GitHub release using that personal tag. A published release triggers the same validation/package path.
-4. Wait for all validation and all package jobs. The publication job attaches packages only after the complete build matrix succeeds; it is not marked Latest and does not generate an updater manifest.
+3. Run **Actions → Build and release → Run workflow**, leaving **publish_release** enabled. The workflow derives `personal-v<VERSION>` from the checked-out app configuration. Pushing a matching personal tag also works. Each new release needs a fresh numeric version; an existing release or a tag pointing to different code is rejected.
+4. Wait for all validation and all package jobs. The publication job verifies all eight installers, uploads them with SHA-256 checksums and source/build provenance into a draft, verifies remote asset sizes and digests, and only then publishes it as a prerelease. It is not marked Latest and does not generate an updater manifest.
 
 Do not create an upstream-style `v*` tag for personal builds. The tag version is checked against the app configuration before packaging.
 
@@ -39,3 +39,5 @@ GitHub documentation: [workflow triggers](https://docs.github.com/en/actions/ref
 
 For feature checkpoints, paired upstream contributions and branch retirement,
 see the [contribution workflow](WORKFLOW.md).
+
+Uncheck **publish_release** for an artifact-only manual build. Main pushes remain artifact-only. An upstream repository is rejected by the release planner; all publication targets `djhappyman/tagrex` explicitly.

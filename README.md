@@ -30,7 +30,7 @@ The build pipeline is designed to produce:
 | Linux x64 | `.deb`, `.rpm`, AppImage |
 | Linux ARM64 | `.deb`, `.rpm` |
 
-Pushes to `main` run checks first, then produce downloadable development artifacts. A `personal-v<VERSION>` tag or published personal release runs the same gates before attaching packages to the release. See [build and release instructions](docs/BUILDING.md). Until these workflows finish successfully on GitHub, the outputs are configured targets rather than verified available downloads.
+Pushes to `main` run checks first, then produce downloadable development artifacts. A manual **Build and release** request publishes a new personal prerelease after all checks and packages pass; a `personal-v<VERSION>` tag follows the same gates. See [build and release instructions](docs/BUILDING.md). Until these workflows finish successfully on GitHub, the outputs are configured targets rather than verified available downloads.
 
 The app uses a separate identifier, `com.djhappyman.tagrex.personal`, and its own personal version line. **In-app update checking and installation are disabled** until a fork-specific service is introduced. Existing upstream installations and their settings/Undo history are kept separate. Initial packages are not notarized or signed with paid desktop certificates.
 

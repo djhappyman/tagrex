@@ -6,9 +6,12 @@ on:
   push:
     branches: [main]
     tags: ["personal-v*"]
-  release:
-    types: [published]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish a new personal prerelease after all packages pass
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -19,12 +22,16 @@ concurrency:
 
 jobs:
   validation:
+    if: github.repository == 'djhappyman/tagrex'
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
 
   packages:
+    if: github.repository == 'djhappyman/tagrex'
     needs: validation
     uses: ./.github/workflows/release.yml
+    with:
+      publish_release: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release || startsWith(github.ref, 'refs/tags/personal-v') }}
     permissions:
       contents: write
