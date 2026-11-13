@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- File and library commands no longer run on the interface thread: they go to a background worker, so the window keeps responding while a long one runs. Each online source keeps its own queue, and quick successive clicks on field locks are applied in the order they were made ([#737](https://github.com/tagrex/tagrex/pull/737)).
+- The Undo history list reads only each batch's description and file paths, not the full tag, artwork and block snapshots behind it, so it opens quickly even with a long history. The snapshots are loaded when a batch is actually undone ([#739](https://github.com/tagrex/tagrex/pull/739)).
+- The README's screenshots and demo animation show the mode switcher as the segmented pill the app now opens with, in both the light and the dark theme ([#754](https://github.com/tagrex/tagrex/issues/754)).
+- Online sources reuse their connection between requests instead of building a new client for each one; a changed token or proxy setting still takes effect at once. Finding duplicates by content reads each file through a small buffer instead of loading the whole file into memory ([#740](https://github.com/tagrex/tagrex/pull/740)).
+
+### Fixed
+
+- When a write fails and the rollback cannot restore every file, the batch's record is kept, marked as interrupted, instead of being deleted, so the files that were changed can still be found and undone. The check that runs before a write also reports its progress and can be cancelled ([#738](https://github.com/tagrex/tagrex/pull/738)).
+
+## [1.5.0] - 2026-11-13
+
+A release about the online sources and the top bar. MusicBrainz release
+cards now show their cover without being expanded, large Cover Art Archive
+originals download instead of failing, covers no longer hold up searches,
+and a short rate-limit refusal is retried once instead of failing the
+request. The mode tabs become one segmented pill, and the earlier
+underlined tabs stay one click away in Settings.
+
+### Added
+
+- A setting for how the mode switcher in the top bar looks, in Settings › General: the segmented pill or the earlier underlined tabs, each shown as a small drawing beside its radio button. The top bar follows the choice at once, and resetting the group brings back the pill ([#753](https://github.com/tagrex/tagrex/issues/753)).
+
+### Changed
+
+- The mode tabs in the top bar are one segmented control: a rounded track holding the five modes, the active one a soft pill in the accent colour instead of an underline. The segments line up with the buttons beside them and the path field below, and turn into round icon-only buttons when the window gets narrow ([#752](https://github.com/tagrex/tagrex/issues/752)).
+
+### Fixed
+
+- A cover image larger than 10 MB downloads instead of failing with "the response body is larger than request limit". Cover Art Archive originals are often bigger, so such a MusicBrainz release card showed no cover and the image could not be embedded or saved. Images are now accepted up to 64 MB ([#746](https://github.com/tagrex/tagrex/issues/746)).
+- A search, release or cover request that a provider turns away with a short rate-limit wait is tried once more after that wait, instead of failing at once. MusicBrainz does this whenever it is shedding load, answering part of its requests with a refusal that the same request a second later gets past. A longer stated wait, such as a minute from Discogs, is still reported straight away ([#747](https://github.com/tagrex/tagrex/issues/747)).
+- MusicBrainz release cards show a cover thumbnail without being expanded. A MusicBrainz search says nothing about cover art, so a card now loads the archive's small 250 px front image once the release lookup the picker already runs confirms there is one; releases without art cost no extra request. A release that has no front cover also no longer offers a cover link that could only fail ([#748](https://github.com/tagrex/tagrex/issues/748)).
+- Cover images download alongside searches and release lookups instead of holding them up. Every provider request used to wait for the image in front of it, so cover thumbnails slowed the track counts on the release cards, and expanding a card with a large cover stalled the picker until it had arrived. MusicBrainz covers also no longer wait out the MusicBrainz request spacing, which does not apply to the Cover Art Archive. Up to six images download at once ([#749](https://github.com/tagrex/tagrex/issues/749)).
+
+## [1.4.0] - 2026-11-12
+
+A release about the file table. A new Cover column shows at a glance which
+files have embedded cover art and which do not, and sorts the ones without
+together; switched on, it stands first, in front of File. Files can now be
+selected by dragging over the table. The app also gets a redrawn icon, which
+no longer sits on a grey plate on macOS 26.
+
 ### Added
 
 - A Cover column for the file table: a glyph for a file with embedded cover art, a red struck-through one for a file without, and sorting that brings the files without a cover together. Turn it on from the Columns menu ([#730](https://github.com/tagrex/tagrex/issues/730)).

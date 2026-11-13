@@ -26,7 +26,7 @@ use thiserror::Error;
 
 use base64::Engine as _;
 use tagrex_core::export::{self, CueTrack, PlaylistTrack};
-use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
+use tagrex_core::journal::{BatchHeader, BatchId, SqliteJournal};
 use tagrex_core::mask::{portable_file_name, FileContext, Mask, MaskError};
 use tagrex_core::matching::{self, MatchOptions, TrackRef};
 use tagrex_core::model::{
@@ -1755,6 +1755,12 @@ fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
 /// the four commands that talk to a provider.
 #[derive(Default)]
 pub struct ProviderHub {
+    discogs: RefCell<Option<(String, DiscogsProvider)>>,
+    musicbrainz: RefCell<Option<MusicBrainzProvider>>,
+    beatport: RefCell<Option<(String, BeatportProvider)>>,
+    bandcamp: RefCell<Option<BandcampProvider>>,
+    soundeo: RefCell<Option<SoundeoProvider>>,
+
     /// Live proxy URL (None = direct), from settings.
     proxy: RefCell<Option<String>>,
     /// Minimum spacing between requests (None = no throttle), from the
@@ -1790,6 +1796,14 @@ impl ProviderHub {
     /// across libraries (#166).
     pub fn apply_settings(&self, settings: &SettingsDto) {
         let proxy = settings.proxy.trim();
+        let next_proxy = (!proxy.is_empty()).then(|| proxy.to_string());
+        if *self.proxy.borrow() != next_proxy {
+            self.discogs.borrow_mut().take();
+            self.musicbrainz.borrow_mut().take();
+            self.beatport.borrow_mut().take();
+            self.bandcamp.borrow_mut().take();
+            self.soundeo.borrow_mut().take();
+        }
         *self.proxy.borrow_mut() = (!proxy.is_empty()).then(|| proxy.to_string());
         self.min_interval.set(
             (settings.rate_limit_per_min > 0)
@@ -1799,19 +1813,26 @@ impl ProviderHub {
 
     /// Build a Discogs provider using the current proxy setting.
     fn discogs_provider(&self, token: &str) -> Result<DiscogsProvider, AppError> {
-        Ok(DiscogsProvider::with_proxy(
-            token,
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some((key, provider)) = self.discogs.borrow().as_ref() {
+            if key == token {
+                return Ok(provider.clone());
+            }
+        }
+        let provider = DiscogsProvider::with_proxy(token, self.proxy.borrow().as_deref())?;
+        *self.discogs.borrow_mut() = Some((token.to_string(), provider.clone()));
+        Ok(provider)
     }
 
     /// Build a MusicBrainz provider using the current proxy setting (#33). No
     /// token — MusicBrainz is unauthenticated. Reuses the same network proxy the
     /// Discogs provider uses.
     fn musicbrainz_provider(&self) -> Result<MusicBrainzProvider, AppError> {
-        Ok(MusicBrainzProvider::with_proxy(
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some(provider) = self.musicbrainz.borrow().as_ref() {
+            return Ok(provider.clone());
+        }
+        let provider = MusicBrainzProvider::with_proxy(self.proxy.borrow().as_deref())?;
+        *self.musicbrainz.borrow_mut() = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Build a Beatport provider (#162). The "token" is the OAuth access token
@@ -1819,24 +1840,36 @@ impl ProviderHub {
     /// the credential behind it is a different animal. Reuses the same network
     /// proxy as the other two.
     fn beatport_provider(&self, access_token: &str) -> Result<BeatportProvider, AppError> {
-        Ok(BeatportProvider::with_proxy(
-            access_token,
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some((key, provider)) = self.beatport.borrow().as_ref() {
+            if key == access_token {
+                return Ok(provider.clone());
+            }
+        }
+        let provider = BeatportProvider::with_proxy(access_token, self.proxy.borrow().as_deref())?;
+        *self.beatport.borrow_mut() = Some((access_token.to_string(), provider.clone()));
+        Ok(provider)
     }
 
     /// Build a Bandcamp provider. No token — Bandcamp needs none. Reuses the same
     /// network proxy as the others.
     fn bandcamp_provider(&self) -> Result<BandcampProvider, AppError> {
-        Ok(BandcampProvider::with_proxy(
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some(provider) = self.bandcamp.borrow().as_ref() {
+            return Ok(provider.clone());
+        }
+        let provider = BandcampProvider::with_proxy(self.proxy.borrow().as_deref())?;
+        *self.bandcamp.borrow_mut() = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Build a Soundeo provider. No token — Soundeo's pages are anonymous.
     /// Reuses the same network proxy as the others.
     fn soundeo_provider(&self) -> Result<SoundeoProvider, AppError> {
-        Ok(SoundeoProvider::with_proxy(self.proxy.borrow().as_deref())?)
+        if let Some(provider) = self.soundeo.borrow().as_ref() {
+            return Ok(provider.clone());
+        }
+        let provider = SoundeoProvider::with_proxy(self.proxy.borrow().as_deref())?;
+        *self.soundeo.borrow_mut() = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Throttle the next provider request for `source`.
@@ -1954,15 +1987,16 @@ impl ProviderHub {
         token: &str,
         query: &SearchQueryDto,
     ) -> Result<Vec<CandidateDto>, AppError> {
-        self.throttle(source);
         let search = query.to_search_query();
-        let candidates = match source {
-            "musicbrainz" => self.musicbrainz_provider()?.search(&search)?,
-            "beatport" => self.beatport_provider(token)?.search(&search)?,
-            "bandcamp" => self.bandcamp_provider()?.search(&search)?,
-            "soundeo" => self.soundeo_provider()?.search(&search)?,
-            _ => self.discogs_provider(token)?.search(&search)?,
-        };
+        let candidates = self.with_retry(source, || {
+            Ok(match source {
+                "musicbrainz" => self.musicbrainz_provider()?.search(&search)?,
+                "beatport" => self.beatport_provider(token)?.search(&search)?,
+                "bandcamp" => self.bandcamp_provider()?.search(&search)?,
+                "soundeo" => self.soundeo_provider()?.search(&search)?,
+                _ => self.discogs_provider(token)?.search(&search)?,
+            })
+        })?;
         let mut results: Vec<CandidateDto> = candidates.iter().map(CandidateDto::from).collect();
 
         let wanted = [
@@ -1991,15 +2025,16 @@ impl ProviderHub {
         token: &str,
         id: &str,
     ) -> Result<ReleaseDto, AppError> {
-        self.throttle(source);
         let rid = ReleaseId(id.to_string());
-        let release = match source {
-            "musicbrainz" => self.musicbrainz_provider()?.fetch_release(&rid)?,
-            "beatport" => self.beatport_provider(token)?.fetch_release(&rid)?,
-            "bandcamp" => self.bandcamp_provider()?.fetch_release(&rid)?,
-            "soundeo" => self.soundeo_provider()?.fetch_release(&rid)?,
-            _ => self.discogs_provider(token)?.fetch_release(&rid)?,
-        };
+        let release = self.with_retry(source, || {
+            Ok(match source {
+                "musicbrainz" => self.musicbrainz_provider()?.fetch_release(&rid)?,
+                "beatport" => self.beatport_provider(token)?.fetch_release(&rid)?,
+                "bandcamp" => self.bandcamp_provider()?.fetch_release(&rid)?,
+                "soundeo" => self.soundeo_provider()?.fetch_release(&rid)?,
+                _ => self.discogs_provider(token)?.fetch_release(&rid)?,
+            })
+        })?;
         Ok(ReleaseDto::from(&release))
     }
 
@@ -2015,14 +2050,7 @@ impl ProviderHub {
         token: &str,
         url: &str,
     ) -> Result<CoverArtDto, AppError> {
-        self.throttle(source);
-        let image = match source {
-            "musicbrainz" => self.musicbrainz_provider()?.fetch_image(url)?,
-            "beatport" => self.beatport_provider(token)?.fetch_image(url)?,
-            "bandcamp" => self.bandcamp_provider()?.fetch_image(url)?,
-            "soundeo" => self.soundeo_provider()?.fetch_image(url)?,
-            _ => self.discogs_provider(token)?.fetch_image(url)?,
-        };
+        let image = self.fetch_image_bytes(source, token, url)?;
         Ok(CoverArtDto {
             mime: display_safe_mime(&image.mime, &image.data),
             data_base64: base64::engine::general_purpose::STANDARD.encode(&image.data),
@@ -2040,13 +2068,155 @@ impl ProviderHub {
         token: &str,
         url: &str,
     ) -> Result<FetchedImage, AppError> {
+        self.with_retry(source, || {
+            Ok(match source {
+                "musicbrainz" => self.musicbrainz_provider()?.fetch_image(url)?,
+                "beatport" => self.beatport_provider(token)?.fetch_image(url)?,
+                "bandcamp" => self.bandcamp_provider()?.fetch_image(url)?,
+                "soundeo" => self.soundeo_provider()?.fetch_image(url)?,
+                _ => self.discogs_provider(token)?.fetch_image(url)?,
+            })
+        })
+    }
+
+    /// Run one provider request, spaced by [`throttle`](Self::throttle), and
+    /// try it once more after a short rate-limit refusal (#747). A provider
+    /// shedding load (MusicBrainz answers `503` with `Retry-After: 0`) usually
+    /// serves the same request a second later. A longer stated wait is reported
+    /// at once, so the interface's own pause-and-resume handling stays in charge.
+    fn with_retry<T>(
+        &self,
+        source: &str,
+        request: impl FnMut() -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
         self.throttle(source);
-        Ok(match source {
-            "musicbrainz" => self.musicbrainz_provider()?.fetch_image(url)?,
-            "beatport" => self.beatport_provider(token)?.fetch_image(url)?,
-            "bandcamp" => self.bandcamp_provider()?.fetch_image(url)?,
-            "soundeo" => self.soundeo_provider()?.fetch_image(url)?,
-            _ => self.discogs_provider(token)?.fetch_image(url)?,
+        retry_after_short_limit(request, || self.throttle(source))
+    }
+
+    /// Take an image download out of the hub (#749). Building the fetcher is
+    /// all that needs the hub, and it takes an instant; the caller runs the
+    /// download without holding the provider lock, so a slow image no longer
+    /// holds up every search, lookup and other image behind it.
+    ///
+    /// MusicBrainz images come from the Cover Art Archive, which the
+    /// MusicBrainz API spacing does not cover, so they are not throttled. Every
+    /// other source keeps its spacing, taken here before the fetcher is handed
+    /// out.
+    pub fn image_fetch(&self, source: &str, token: &str) -> Result<ImageFetch, AppError> {
+        if source != "musicbrainz" {
+            self.throttle(source);
+        }
+        Ok(ImageFetch(match source {
+            "musicbrainz" => ImageProvider::MusicBrainz(self.musicbrainz_provider()?),
+            "beatport" => ImageProvider::Beatport(self.beatport_provider(token)?),
+            "bandcamp" => ImageProvider::Bandcamp(self.bandcamp_provider()?),
+            "soundeo" => ImageProvider::Soundeo(self.soundeo_provider()?),
+            _ => ImageProvider::Discogs(self.discogs_provider(token)?),
+        }))
+    }
+}
+
+/// Run a provider request and try it once more after a short rate-limit
+/// refusal (#747): wait what the provider asked (at least a second), call
+/// `before_retry` (the throttle, for an API request), then send it again. A
+/// longer stated wait goes back to the caller at once.
+fn retry_after_short_limit<T>(
+    mut request: impl FnMut() -> Result<T, AppError>,
+    before_retry: impl FnOnce(),
+) -> Result<T, AppError> {
+    match request() {
+        Err(AppError::Provider(tagrex_core::provider::ProviderError::RateLimited {
+            retry_after_secs,
+        })) if retry_after_secs <= SHORT_RATE_LIMIT_SECS => {
+            std::thread::sleep(Duration::from_secs(retry_after_secs.max(1)));
+            before_retry();
+            request()
+        }
+        other => other,
+    }
+}
+
+/// The longest stated rate-limit wait a provider request is retried after
+/// (#747); anything longer goes back to the caller as it always did.
+const SHORT_RATE_LIMIT_SECS: u64 = 5;
+
+/// One provider's image download, taken out of the [`ProviderHub`] by
+/// [`ProviderHub::image_fetch`] so it can run without the provider lock (#749).
+pub struct ImageFetch(ImageProvider);
+
+enum ImageProvider {
+    MusicBrainz(MusicBrainzProvider),
+    Beatport(BeatportProvider),
+    Bandcamp(BandcampProvider),
+    Soundeo(SoundeoProvider),
+    Discogs(DiscogsProvider),
+}
+
+/// How many image downloads may run at once (#749). Out of the provider lock
+/// they would otherwise all go together: a page of Discogs cards asks for its
+/// thumbnails at once, and two dozen simultaneous requests to one image host
+/// is a good way to get refused. Six is what browsers allow per host.
+const MAX_IMAGE_DOWNLOADS: usize = 6;
+static IMAGE_DOWNLOADS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+static IMAGE_DOWNLOAD_FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// A held image-download slot; dropping it frees the slot for the next one.
+struct ImageDownloadSlot;
+
+impl ImageDownloadSlot {
+    /// Wait for a free slot. Blocking, like the download it guards, so call it
+    /// off the async runtime.
+    fn acquire() -> Self {
+        let mut running = IMAGE_DOWNLOADS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *running >= MAX_IMAGE_DOWNLOADS {
+            running = IMAGE_DOWNLOAD_FREED
+                .wait(running)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *running += 1;
+        ImageDownloadSlot
+    }
+}
+
+impl Drop for ImageDownloadSlot {
+    fn drop(&mut self) {
+        let mut running = IMAGE_DOWNLOADS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *running -= 1;
+        IMAGE_DOWNLOAD_FREED.notify_one();
+    }
+}
+
+impl ImageFetch {
+    /// Download the image as raw bytes, retrying once after a short rate-limit
+    /// refusal (#747). Blocking: run it off the async runtime.
+    pub fn fetch_bytes(&self, url: &str) -> Result<FetchedImage, AppError> {
+        let _slot = ImageDownloadSlot::acquire();
+        retry_after_short_limit(
+            || {
+                Ok(match &self.0 {
+                    ImageProvider::MusicBrainz(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Beatport(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Bandcamp(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Soundeo(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Discogs(provider) => provider.fetch_image(url)?,
+                })
+            },
+            || {},
+        )
+    }
+
+    /// Download the image as the cover DTO the cover well and the release
+    /// cards take, like [`ProviderHub::provider_fetch_image`].
+    pub fn fetch_cover(&self, url: &str) -> Result<CoverArtDto, AppError> {
+        let image = self.fetch_bytes(url)?;
+        Ok(CoverArtDto {
+            mime: display_safe_mime(&image.mime, &image.data),
+            data_base64: base64::engine::general_purpose::STANDARD.encode(&image.data),
+            ..CoverArtDto::default()
         })
     }
 }
@@ -2481,14 +2651,26 @@ impl App {
                     (duration > 0).then(|| (format!("duration:{duration}"), format!("{duration}s")))
                 }
                 "size" => (size > 0).then(|| (format!("size:{size}"), format!("{size} bytes"))),
-                "hash" => std::fs::read(&path).ok().map(|bytes| {
+                "hash" => (|| -> std::io::Result<_> {
+                    use std::io::Read;
+                    let mut file = std::fs::File::open(&path)?;
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    bytes.hash(&mut hasher);
-                    (
+                    let length = file.metadata()?.len();
+                    length.hash(&mut hasher);
+                    let mut buffer = [0u8; 64 * 1024];
+                    loop {
+                        let read = file.read(&mut buffer)?;
+                        if read == 0 {
+                            break;
+                        }
+                        hasher.write(&buffer[..read]);
+                    }
+                    Ok((
                         format!("hash:{:016x}", hasher.finish()),
                         "identical bytes".to_string(),
-                    )
-                }),
+                    ))
+                })()
+                .ok(),
                 // default: artist + title
                 _ => {
                     let (a, t) = (norm_key(&artist), norm_key(&title));
@@ -4952,22 +5134,10 @@ impl App {
                 roots.push(canon);
             }
         }
-        let under_root = |path: &std::path::Path| roots.iter().any(|r| path.starts_with(r));
         Ok(self
             .journal
-            .batches()?
+            .headers(&roots)?
             .iter()
-            // Judged by where the files CAME FROM, not where they went (#153):
-            // a reorganize can now file them into a folder outside the library,
-            // and testing the destination would hide exactly the batch the user
-            // is most likely to want back.
-            .filter(|batch| {
-                batch
-                    .plan
-                    .changes
-                    .iter()
-                    .all(|change| under_root(&change.path))
-            })
             .map(BatchDto::from)
             .collect())
     }
@@ -6791,6 +6961,19 @@ impl PlanDto {
 
 impl From<&tagrex_core::journal::AppliedBatch> for BatchDto {
     fn from(batch: &tagrex_core::journal::AppliedBatch) -> Self {
+        Self::from(&BatchHeader {
+            id: batch.id,
+            description: batch.description.clone(),
+            message: batch.message.clone(),
+            applied_at: batch.applied_at,
+            interrupted: batch.interrupted,
+            paths: Vec::new(),
+        })
+    }
+}
+
+impl From<&BatchHeader> for BatchDto {
+    fn from(batch: &BatchHeader) -> Self {
         let stored = decode_plan_message(batch.message.as_deref());
         let mut notes = stored.as_ref().map(|s| s.notes.clone()).unwrap_or_default();
         let mut description = batch.description.clone();
@@ -7906,6 +8089,107 @@ mod tests {
         hub.apply_settings(&SettingsDto::default());
         assert!(hub.proxy.borrow().is_none());
         assert!(hub.min_interval.get().is_none());
+    }
+
+    /// A short rate-limit refusal is waited out and the request tried once more;
+    /// a long stated wait goes straight back to the caller (#747).
+    #[test]
+    fn a_musicbrainz_image_fetch_does_not_spend_the_api_spacing() {
+        // Cover Art Archive images are not MusicBrainz API requests (#749).
+        let hub = ProviderHub::default();
+        hub.image_fetch("musicbrainz", "").unwrap();
+        assert!(hub.last_musicbrainz_request.get().is_none());
+        // Any other source keeps its spacing.
+        hub.image_fetch("bandcamp", "").unwrap();
+        assert!(hub.last_bandcamp_request.get().is_some());
+    }
+
+    #[test]
+    fn no_more_than_six_image_downloads_run_at_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let running = Arc::new(AtomicUsize::new(0));
+        let most = Arc::new(AtomicUsize::new(0));
+        let workers: Vec<_> = (0..MAX_IMAGE_DOWNLOADS * 2)
+            .map(|_| {
+                let (running, most) = (Arc::clone(&running), Arc::clone(&most));
+                std::thread::spawn(move || {
+                    let _slot = ImageDownloadSlot::acquire();
+                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(200));
+                    running.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        // Capped, but still in parallel up to the cap (#749).
+        assert_eq!(most.load(Ordering::SeqCst), MAX_IMAGE_DOWNLOADS);
+        assert_eq!(*IMAGE_DOWNLOADS.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_short_rate_limit_is_retried_once_and_a_long_one_is_reported() {
+        use tagrex_core::provider::ProviderError;
+        let limited = |secs| {
+            Err::<u32, _>(AppError::Provider(ProviderError::RateLimited {
+                retry_after_secs: secs,
+            }))
+        };
+        let hub = ProviderHub::default();
+
+        // Refused once with `Retry-After: 0`, then served: one retry, after at
+        // least a second.
+        let calls = Cell::new(0);
+        let started = Instant::now();
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 {
+                limited(0)
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(calls.get(), 2);
+        assert!(started.elapsed() >= Duration::from_secs(1));
+
+        // Refused twice: only one retry, then the refusal is reported.
+        let calls = Cell::new(0);
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            limited(0)
+        });
+        assert!(matches!(
+            result,
+            Err(AppError::Provider(ProviderError::RateLimited { .. }))
+        ));
+        assert_eq!(calls.get(), 2);
+
+        // A minute's wait is not sat out here: the caller decides.
+        let calls = Cell::new(0);
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            limited(60)
+        });
+        assert!(matches!(
+            result,
+            Err(AppError::Provider(ProviderError::RateLimited {
+                retry_after_secs: 60
+            }))
+        ));
+        assert_eq!(calls.get(), 1);
+
+        // Any other failure is never retried.
+        let calls = Cell::new(0);
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            Err::<u32, _>(AppError::Provider(ProviderError::NotFound))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]
@@ -11396,6 +11680,79 @@ mod tests {
         let a = dir.tagged_flac("a.flac", "Artist", "Title");
         let app = open_app(&dir);
         assert!(app.read_external_cover(&[a]).unwrap().is_none());
+    }
+
+    #[test]
+    fn provider_clients_are_retained_and_invalidated_by_connection_settings() {
+        let hub = ProviderHub::default();
+        hub.discogs_provider("first-token").unwrap();
+        hub.musicbrainz_provider().unwrap();
+        hub.beatport_provider("access-token").unwrap();
+        hub.bandcamp_provider().unwrap();
+        hub.soundeo_provider().unwrap();
+        assert!(hub.discogs.borrow().is_some());
+        assert!(hub.musicbrainz.borrow().is_some());
+        assert!(hub.beatport.borrow().is_some());
+        assert!(hub.bandcamp.borrow().is_some());
+        assert!(hub.soundeo.borrow().is_some());
+        hub.apply_settings(&SettingsDto {
+            rate_limit_per_min: 30,
+            ..Default::default()
+        });
+        assert!(
+            hub.musicbrainz.borrow().is_some(),
+            "rate changes keep the client"
+        );
+        hub.discogs_provider("replacement-token").unwrap();
+        assert_eq!(
+            hub.discogs.borrow().as_ref().unwrap().0,
+            "replacement-token"
+        );
+        hub.apply_settings(&SettingsDto {
+            proxy: "http://localhost:3128".into(),
+            ..Default::default()
+        });
+        assert!(hub.discogs.borrow().is_none());
+        assert!(hub.musicbrainz.borrow().is_none());
+        assert!(hub.beatport.borrow().is_none());
+        assert!(hub.bandcamp.borrow().is_none());
+        assert!(hub.soundeo.borrow().is_none());
+        hub.musicbrainz_provider().unwrap();
+        assert!(hub.musicbrainz.borrow().is_some());
+    }
+
+    #[test]
+    fn streaming_hash_groups_identical_files_across_buffer_boundaries() {
+        let dir = TempDir::new("streaming-hash");
+        let a = dir.tagged_flac("a.flac", "Artist", "Title");
+        let b = dir.0.join("b.flac");
+        let c = dir.0.join("c.flac");
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&a)
+            .unwrap()
+            .write_all(&vec![7; 192 * 1024 + 17])
+            .unwrap();
+        std::fs::copy(&a, &b).unwrap();
+        std::fs::copy(&a, &c).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&c)
+            .unwrap()
+            .write_all(&[8])
+            .unwrap();
+        let app = open_app(&dir);
+        let groups = app.find_duplicates("hash").unwrap();
+        assert_eq!(groups.len(), 1);
+        let paths: std::collections::HashSet<_> =
+            groups[0].files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [a.to_str().unwrap(), b.to_str().unwrap()]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]

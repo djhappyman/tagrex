@@ -19,6 +19,18 @@ use crate::plan::{BlockChange, ChangePlan, CoverChange, FieldChange, FileChange}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BatchId(pub i64);
 
+/// History metadata with source paths only. Listing this never hydrates tag,
+/// cover or block snapshots; those are fetched only for an actual Undo.
+#[derive(Debug, Clone)]
+pub struct BatchHeader {
+    pub id: BatchId,
+    pub description: String,
+    pub message: Option<String>,
+    pub applied_at: i64,
+    pub interrupted: bool,
+    pub paths: Vec<PathBuf>,
+}
+
 /// A batch that has been applied to disk, as recorded in the journal.
 #[derive(Debug, Clone)]
 pub struct AppliedBatch {
@@ -183,6 +195,16 @@ pub trait UndoJournal {
     /// stamps, the values it left) and clear its `interrupted` mark.
     fn finish(&mut self, id: BatchId, batch: &AppliedBatch) -> Result<(), JournalError>;
 
+    /// Preserve execution facts after a failed rollback. The original record
+    /// must survive even if this best-effort update fails.
+    fn retain_interrupted(
+        &mut self,
+        _id: BatchId,
+        _batch: &AppliedBatch,
+    ) -> Result<(), JournalError> {
+        Ok(())
+    }
+
     /// Roll back a whole batch as a unit.
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError>;
 }
@@ -232,6 +254,24 @@ impl UndoJournal for VecJournal {
         *stored = AppliedBatch {
             id,
             interrupted: false,
+            ..batch.clone()
+        };
+        Ok(())
+    }
+
+    fn retain_interrupted(
+        &mut self,
+        id: BatchId,
+        batch: &AppliedBatch,
+    ) -> Result<(), JournalError> {
+        let stored = self
+            .batches
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or(JournalError::UnknownBatch(id))?;
+        *stored = AppliedBatch {
+            id,
+            interrupted: true,
             ..batch.clone()
         };
         Ok(())
@@ -704,14 +744,46 @@ impl UndoJournal for SqliteJournal {
         Ok(())
     }
 
+    fn retain_interrupted(
+        &mut self,
+        id: BatchId,
+        batch: &AppliedBatch,
+    ) -> Result<(), JournalError> {
+        let tx = self.conn.transaction()?;
+        if tx.execute(
+            "UPDATE batches SET interrupted = 1 WHERE id = ?1",
+            rusqlite::params![id.0],
+        )? == 0
+        {
+            return Err(JournalError::UnknownBatch(id));
+        }
+        // Replace outcome rows, rather than duplicating facts recorded before
+        // the write began. Snapshot payloads are left untouched.
+        for table in [
+            "created_dirs",
+            "removed_dirs",
+            "allowed_roots",
+            "copy_stamps",
+            "applied_values",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE batch_id = ?1"),
+                rusqlite::params![id.0],
+            )?;
+        }
+        insert_outcome(&tx, id.0, batch)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError> {
         // Children cascade away via the foreign keys enabled in `open`.
-        let affected = self
-            .conn
-            .execute("DELETE FROM batches WHERE id = ?1", rusqlite::params![id.0])?;
+        let tx = self.conn.transaction()?;
+        let affected = tx.execute("DELETE FROM batches WHERE id = ?1", rusqlite::params![id.0])?;
         if affected == 0 {
             return Err(JournalError::UnknownBatch(id));
         }
+        tx.commit()?;
         Ok(())
     }
 }
@@ -770,6 +842,45 @@ fn insert_outcome(
 }
 
 impl SqliteJournal {
+    /// Fetch history in one metadata-only query. Path membership stays exact
+    /// (`Path::starts_with`, not SQL wildcard/prefix matching), including empty
+    /// batches and symlink-root spellings supported by the command layer.
+    pub fn headers(&self, roots: &[PathBuf]) -> Result<Vec<BatchHeader>, JournalError> {
+        let mut statement = self.conn.prepare("SELECT b.id, b.description, b.message, b.applied_at, b.interrupted, f.path FROM batches b LEFT JOIN file_changes f ON f.batch_id = b.id ORDER BY b.id DESC, f.id")?;
+        let mut rows = statement.query([])?;
+        let mut headers: Vec<BatchHeader> = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id = BatchId(row.get(0)?);
+            if headers.last().is_none_or(|h| h.id != id) {
+                headers.push(BatchHeader {
+                    id,
+                    description: row.get(1)?,
+                    message: row.get(2)?,
+                    applied_at: row.get(3)?,
+                    interrupted: row.get(4)?,
+                    paths: Vec::new(),
+                });
+            }
+            if let Some(path) = row.get::<_, Option<String>>(5)? {
+                headers
+                    .last_mut()
+                    .expect("header inserted above")
+                    .paths
+                    .push(PathBuf::from(path));
+            }
+        }
+        // #153: membership is judged by where the files CAME FROM, not where
+        // they went. A reorganize can move files outside the library; its batch
+        // must still appear in history so those changes can be undone.
+        headers.retain(|header| {
+            header
+                .paths
+                .iter()
+                .all(|path| roots.iter().any(|root| path.starts_with(root)))
+        });
+        Ok(headers)
+    }
+
     /// One of the batch's plain path lists, in insertion order. `table` is a
     /// literal from this module, never anything a caller supplies.
     fn load_paths(&self, table: &str, batch_id: i64) -> Result<Vec<PathBuf>, JournalError> {

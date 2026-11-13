@@ -1104,6 +1104,35 @@
               </div>
             </div>
             <p class="settings-hint" data-i18n="settings.accentHint">Colours buttons, selections, links and the focus ring. Text on the accent is kept readable, and the green of confirmed states and the red of errors do not change.</p>
+            <div class="settings-row col">
+              <label data-i18n="settings.modeTabs">Mode switcher</label>
+              <!-- Each card draws the switcher in markup, not an image, so the
+                   drawing follows the theme and the accent. The mode names read
+                   the same in every language (#424). -->
+              <div class="tabs-style-picker" id="set-tabs-style" role="radiogroup" data-i18n-aria-label="settings.modeTabs" aria-label="Mode switcher">
+                <label class="tabs-style-opt">
+                  <span class="tabs-sample pill" aria-hidden="true">
+                    <span class="tabs-sample-track">
+                      <span class="tabs-sample-tab on"><svg class="ico"><use href="#i-tag"/></svg>TAGGER</span>
+                      <span class="tabs-sample-tab"><svg class="ico"><use href="#i-rename"/></svg>RENAMER</span>
+                      <span class="tabs-sample-tab"><svg class="ico"><use href="#i-wand"/></svg>GENERATOR</span>
+                    </span>
+                  </span>
+                  <span class="tabs-style-name"><input type="radio" name="tabs-style" value="pill" /><span data-i18n="settings.modeTabs.pill">Segmented</span></span>
+                </label>
+                <label class="tabs-style-opt">
+                  <span class="tabs-sample classic" aria-hidden="true">
+                    <span class="tabs-sample-track">
+                      <span class="tabs-sample-tab on"><svg class="ico"><use href="#i-tag"/></svg>TAGGER</span>
+                      <span class="tabs-sample-tab"><svg class="ico"><use href="#i-rename"/></svg>RENAMER</span>
+                      <span class="tabs-sample-tab"><svg class="ico"><use href="#i-wand"/></svg>GENERATOR</span>
+                    </span>
+                  </span>
+                  <span class="tabs-style-name"><input type="radio" name="tabs-style" value="classic" /><span data-i18n="settings.modeTabs.classic">Underlined tabs</span></span>
+                </label>
+              </div>
+            </div>
+            <p class="settings-hint" data-i18n="settings.modeTabsHint">How the TAGGER / RENAMER / … switcher in the top bar looks. Either way it drops to icons only when the window gets narrow.</p>
             <div class="settings-row">
               <label for="set-checkbox-col" data-i18n="settings.checkboxCol">Selection checkbox column</label>
               <input id="set-checkbox-col" type="checkbox" />
