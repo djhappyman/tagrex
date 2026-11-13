@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - When a write fails and the rollback cannot restore every file, the batch's record is kept, marked as interrupted, instead of being deleted, so the files that were changed can still be found and undone. The check that runs before a write also reports its progress and can be cancelled ([#738](https://github.com/tagrex/tagrex/pull/738)).
+- On a FAT or exFAT volume such as a USB stick, the hidden `._` companion files macOS writes next to every file are no longer listed as extra, unreadable tracks ([#755](https://github.com/tagrex/tagrex/issues/755)).
 
 ## [1.5.0] - 2026-11-13
 
