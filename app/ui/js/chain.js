@@ -1,3 +1,4 @@
+import { createComponentElement } from "../lib/component-elements.js";
 // The transformation rule chain and the action groups behind it (#144 lifted
 // this out of generator.js, where it was wired to that panel's element ids).
 //
@@ -116,8 +117,7 @@ function smallWordsControl(rule) {
   box.className = "rule-small";
   const tick = document.createElement("label");
   tick.className = "rule-flag";
-  const check = document.createElement("input");
-  check.type = "checkbox";
+  const check = createComponentElement("input", { type: "checkbox" });
   check.checked = Array.isArray(rule.small_words);
   const text = document.createElement("span");
   text.textContent = t("chain.smallWords");
@@ -139,7 +139,7 @@ function smallWordsControl(rule) {
 
   const field = document.createElement("div");
   field.className = "field sm rule-small-words";
-  const words = document.createElement("input");
+  const words = createComponentElement("input");
   words.type = "text";
   words.spellcheck = false;
   words.setAttribute("aria-label", t("chain.smallWords"));
@@ -265,7 +265,7 @@ function createRuleChain({ ids }) {
   }
 
   function mkRuleIcon(iconName, title, disabled, onClick) {
-    const b = document.createElement("button");
+    const b = createComponentElement("button");
     b.className = "icon";
     b.innerHTML = ico(iconName);
     b.title = title;
@@ -339,8 +339,7 @@ function createRuleChain({ ids }) {
       // Enable/disable this step (#57): kept in the chain either way, skipped
       // when off. A checkbox (#556): it answers yes or no about the step, where
       // the tick button it replaces read as one more action beside ↑ ↓ ✕.
-      const toggle = document.createElement("input");
-      toggle.type = "checkbox";
+      const toggle = createComponentElement("input", { type: "checkbox" });
       toggle.className = "rule-toggle";
       toggle.checked = rule.enabled !== false;
       toggle.title = rule.enabled === false ? t("chain.stepOff") : t("chain.stepOn");
@@ -404,13 +403,13 @@ function createRuleChain({ ids }) {
         b.className = "rule-body";
         const fields = document.createElement("div");
         fields.className = "rule-fields";
-        const from = document.createElement("input");
+        const from = createComponentElement("input");
         from.type = "text";
         from.placeholder = t("chain.find");
         from.value = rule.from;
         from.spellcheck = false;
         from.addEventListener("input", () => (rule.from = from.value));
-        const to = document.createElement("input");
+        const to = createComponentElement("input");
         to.type = "text";
         // A read-only built-in says what an empty replacement does (#556).
         to.placeholder = el(ids.set)?.disabled ? t("chain.replaceNothing") : t("chain.replaceWith");
@@ -437,7 +436,7 @@ function createRuleChain({ ids }) {
           ["case_sensitive", "Aa", t("chain.flagMatchCaseTitle"), ""],
           ["whole_word", "ab", t("chain.flagWholeWordTitle"), "flag-word"],
         ].map(([key, text, hint, extra]) => {
-          const flag = document.createElement("button");
+          const flag = createComponentElement("button");
           flag.type = "button";
           flag.className = `field-flag ${extra}`.trim();
           flag.textContent = text;
@@ -468,7 +467,7 @@ function createRuleChain({ ids }) {
           ["upper", t("chain.caseUpper")],
           ["sentence", t("chain.caseSentence")],
         ]) {
-          const btn = document.createElement("button");
+          const btn = createComponentElement("button");
           btn.type = "button";
           btn.className = "seg-btn" + (rule.style === value ? " active" : "");
           btn.textContent = text;
@@ -497,7 +496,7 @@ function createRuleChain({ ids }) {
           ["openkey", "Open Key"],
           ["musical", t("chain.keyMusical")],
         ]) {
-          const btn = document.createElement("button");
+          const btn = createComponentElement("button");
           btn.type = "button";
           btn.className = "seg-btn" + (rule.style === value ? " active" : "");
           btn.textContent = text;
@@ -604,8 +603,7 @@ function createPresetChecklist({ menu, context, isActive, setActive, appliesTo, 
     const applies = appliesTo(group, context());
     label.classList.toggle("off", !applies);
 
-    const tick = document.createElement("input");
-    tick.type = "checkbox";
+    const tick = createComponentElement("input", { type: "checkbox" });
     tick.className = "group-tick";
     tick.checked = isActive(group);
     // Each job has its own set (#555): a preset with nothing for this one can't
@@ -624,7 +622,7 @@ function createPresetChecklist({ menu, context, isActive, setActive, appliesTo, 
     const count = document.createElement("span");
     count.className = "group-rules";
     count.textContent = applies ? tn("unit.rule", ruleCount(group, context())) : t("presets.notForJob");
-    const open = document.createElement("button");
+    const open = createComponentElement("button");
     open.type = "button";
     open.className = "icon preset-open";
     open.innerHTML = ico("chevron-right");

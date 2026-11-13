@@ -1,3 +1,4 @@
+import { createComponentElement } from "../lib/component-elements.js";
 // The preset editor (#391): where presets are made, not where they are used.
 //
 // A preset is a named rule chain (an "action group", #57). The transform
@@ -196,7 +197,7 @@ async function renderSample() {
 }
 
 function presetRow(group) {
-  const row = document.createElement("button");
+  const row = createComponentElement("button");
   row.type = "button";
   row.className = "pe-list-row";
   const open = current && current.name === group.name && current.builtin === !!group.builtin;

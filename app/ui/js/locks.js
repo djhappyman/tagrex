@@ -1,3 +1,4 @@
+import { createComponentElement } from "../lib/component-elements.js";
 // Field locks (#48).
 //
 // A lock marks a field as not-to-be-touched, and every plan the backend builds
@@ -83,7 +84,7 @@ export async function toggleFieldLock(keys, onChanged) {
 // field in the tooltip, and `onChanged` re-renders the surface it sits on.
 export function lockButton(keys, label, onChanged) {
   const on = keys.every((key) => locked.has(key));
-  const button = document.createElement("button");
+  const button = createComponentElement("button");
   button.type = "button";
   // Not the shared `.icon` class: that is a full control-height square with the
   // button chrome, and a column of those beside every field would shout. This

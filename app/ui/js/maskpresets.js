@@ -1,3 +1,4 @@
+import { upgradeComponentMarkup } from "../lib/component-elements.js";
 // Named mask presets (#360).
 //
 // A small pool of saved mask patterns the user can drop into any mask input —
@@ -63,6 +64,7 @@ function render() {
       </div>`,
     )
     .join("");
+  upgradeComponentMarkup(list);
 }
 
 // Place the popover against its button, mirroring the placeholder reference: a
@@ -177,12 +179,12 @@ export async function initMaskPresets() {
       saveCurrent();
       return;
     }
-    const del = e.target.closest?.(".preset-del");
+    const del = e.target.closest?.("#preset-menu .preset-del");
     if (del) {
       deletePreset(del.dataset.name);
       return;
     }
-    const apply = e.target.closest?.(".preset-apply");
+    const apply = e.target.closest?.("#preset-menu .preset-apply");
     if (apply) {
       const row = apply.closest(".preset-row");
       applyPreset(row.dataset.mask, row.querySelector(".preset-del").dataset.name);

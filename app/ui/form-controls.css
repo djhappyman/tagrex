@@ -1,0 +1,27 @@
+/* Inputs share a modest corner. Pill geometry belongs to action buttons. */
+:root { --input-radius:6px; --input-inset:9px; --input-text-size:var(--text-sm); --input-line-height:var(--lh-tight); }
+body input[data-slot='input'], body textarea[data-slot='textarea'],
+body select[data-slot='native-select'], body .field,
+body button.app-select-trigger, body .lib .path-open,
+body .mode-col .fe .field-input,
+body .filter-panel .filter-ctl,
+body .filter-panel .filter-ctl input[data-slot='input'] { border-radius:var(--input-radius); }
+body :is(input[data-slot='input'],textarea[data-slot='textarea'],button.app-select-trigger):focus-visible { outline:1px solid var(--accent); outline-offset:1px; }
+
+/* Shadcn text boxes, app selects and compound-field text use the same normal
+   control metrics. Palette and validation states remain owned by the theme. */
+body :is(input[data-slot='input'], button.app-select-trigger),
+body .settings-row input[data-slot='input'],
+body input[data-slot='input']:not(.field > *):not(.field-input) {
+  height:var(--ctl-h);
+  padding:4px var(--input-inset);
+  font-size:var(--input-text-size);
+  line-height:var(--input-line-height);
+}
+body .field { line-height:var(--input-line-height); }
+body .field > input[data-slot='input'] {
+  height:auto;
+  min-height:0;
+  padding:4px var(--input-inset);
+  font:inherit;
+}

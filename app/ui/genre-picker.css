@@ -1,0 +1,11 @@
+.genre-picker-host, .genre-native { display:block; min-width:0; width:100%; }
+.genre-combobox { position:relative; display:block; min-width:0; width:100%; }
+body .mode-col .genre-combobox .field-input { padding-right:30px; }
+body .mode-col button.genre-toggle { position:absolute; inset:0 0 0 auto; display:grid; place-items:center; width:30px; height:32px; min-height:0; padding:6px; border:0; border-radius:0 6px 6px 0; box-shadow:none; background:transparent; color:var(--muted); }
+.genre-toggle svg { width:14px; height:14px; }
+body .mode-col button.genre-toggle:hover:not(:disabled) { color:var(--text); background:var(--row-hover); }
+[data-slot='popover-content'].genre-options { width:var(--bits-popover-anchor-width); min-width:140px; max-width:calc(100vw - 24px); max-height:min(280px,var(--bits-popover-content-available-height)); overflow:auto; padding:4px; gap:0; border:1px solid var(--border); border-radius:8px; color:var(--text); background:var(--panel); box-shadow:var(--ui-menu-shadow); }
+body button.genre-option { display:block; width:100%; min-height:28px; height:auto; padding:5px 8px; border:0; border-radius:4px; background:transparent; box-shadow:none; color:var(--text); font-size:12px; text-align:left; white-space:normal; overflow-wrap:anywhere; }
+body button.genre-option:hover, body button.genre-option.active { background:var(--sel-tint); }
+.genre-no-results { padding:5px 8px; color:var(--muted); font-size:11px; }
+@media(prefers-reduced-motion:reduce) { [data-slot='popover-content'].genre-options { animation:none!important; transition:none!important; } }

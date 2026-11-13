@@ -1,3 +1,4 @@
+import { createComponentElement } from "../lib/component-elements.js";
 // The settings slide-over (#79, #143 split it out of app.js).
 //
 // App-wide preferences, opened from the top-bar gear: the Discogs token,
@@ -136,7 +137,7 @@ function buildAccentSwatches() {
   const group = el("set-accent");
   const custom = group.querySelector(".accent-custom");
   ACCENT_PRESETS.forEach((preset) => {
-    const b = document.createElement("button");
+    const b = createComponentElement("button");
     b.type = "button";
     b.className = "accent-swatch";
     b.dataset.accent = preset.hex || "";
@@ -284,12 +285,17 @@ async function renderImportFields(skip) {
     }
   }
   const denied = new Set(skip || []);
+  const existing = [...host.querySelectorAll('input[type="checkbox"]')];
+  if (existing.length === importFieldRows.length && existing.every((box, i) => box.dataset.keys === importFieldRows[i].keys.join(" "))) {
+    existing.forEach((box, i) => { box.checked = !importFieldRows[i].keys.every((key) => denied.has(key)); });
+    relabelImportFields();
+    return;
+  }
   host.innerHTML = "";
   for (const field of importFieldRows) {
     const row = document.createElement("label");
     row.className = "import-field";
-    const box = document.createElement("input");
-    box.type = "checkbox";
+    const box = createComponentElement("input", { type: "checkbox" });
     // A row is on unless every key it governs is denied — the release-id row
     // covers both provider keys.
     box.checked = !field.keys.every((k) => denied.has(k));
@@ -468,36 +474,42 @@ function shortcutMessage(text) {
   msg.hidden = !text;
 }
 
+const shortcutRows = new Map();
 function renderShortcuts() {
   const host = el("set-shortcuts");
-  host.innerHTML = "";
   for (const action of ACTIONS) {
-    const row = document.createElement("div");
-    row.className = "shortcut-row";
-    const label = document.createElement("span");
-    label.className = "shortcut-label";
+    let controls = shortcutRows.get(action.id);
+    if (!controls || !host.contains(controls.row)) {
+      const row = document.createElement("div");
+      row.className = "shortcut-row";
+      const label = document.createElement("span");
+      label.className = "shortcut-label";
+      const combo = createComponentElement("button");
+      combo.type = "button";
+      combo.className = "shortcut-combo";
+      combo.dataset.action = action.id;
+      combo.addEventListener("click", () => startCapture(action.id));
+      const reset = createComponentElement("button");
+      reset.type = "button";
+      reset.className = "text-btn shortcut-reset";
+      reset.addEventListener("click", () => {
+        const result = resetShortcut(action.id);
+        shortcutMessage(result.ok ? "" : result.error);
+        renderShortcuts();
+      });
+      row.append(label, combo, reset);
+      host.appendChild(row);
+      controls = { row, label, combo, reset };
+      shortcutRows.set(action.id, controls);
+    }
+    const { label, combo, reset } = controls;
     label.textContent = actionLabel(action.id);
-    const combo = document.createElement("button");
-    combo.type = "button";
-    combo.className = "shortcut-combo";
-    combo.dataset.action = action.id;
     const capturingThis = capturingId === action.id;
     combo.classList.toggle("capturing", capturingThis);
     combo.textContent = capturingThis ? t("shortcuts.press") : formatCombo(comboOf(action.id));
-    combo.addEventListener("click", () => startCapture(action.id));
-    const reset = document.createElement("button");
-    reset.type = "button";
-    reset.className = "text-btn shortcut-reset";
     reset.textContent = t("settings.reset");
     reset.title = t("shortcuts.resetOne", { combo: formatCombo(action.combo) });
     reset.style.visibility = isDefault(action.id) ? "hidden" : "";
-    reset.addEventListener("click", () => {
-      const result = resetShortcut(action.id);
-      shortcutMessage(result.ok ? "" : result.error);
-      renderShortcuts();
-    });
-    row.append(label, combo, reset);
-    host.appendChild(row);
   }
 }
 

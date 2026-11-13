@@ -15,9 +15,39 @@ use crate::model::{
 };
 use crate::plan::{BlockChange, ChangePlan, CoverChange, FieldChange, FileChange};
 
+/// One load owns one image pool. Reference rows never select the BLOB again;
+/// legacy inline rows are interned after reading so their plans also share data.
+#[derive(Default)]
+struct LoadedImages {
+    by_id: std::collections::HashMap<i64, std::sync::Arc<[u8]>>,
+    inline: std::collections::HashSet<std::sync::Arc<[u8]>>,
+}
+impl LoadedImages {
+    fn intern(&mut self, bytes: Vec<u8>) -> std::sync::Arc<[u8]> {
+        if let Some(existing) = self.inline.get(bytes.as_slice()) {
+            return existing.clone();
+        }
+        let shared: std::sync::Arc<[u8]> = bytes.into();
+        self.inline.insert(shared.clone());
+        shared
+    }
+}
+
 /// Identifier of an applied batch, stable across restarts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BatchId(pub i64);
+
+/// History metadata with source paths only. Listing this never hydrates tag,
+/// cover or block snapshots; those are fetched only for an actual Undo.
+#[derive(Debug, Clone)]
+pub struct BatchHeader {
+    pub id: BatchId,
+    pub description: String,
+    pub message: Option<String>,
+    pub applied_at: i64,
+    pub interrupted: bool,
+    pub paths: Vec<PathBuf>,
+}
 
 /// A batch that has been applied to disk, as recorded in the journal.
 #[derive(Debug, Clone)]
@@ -183,6 +213,16 @@ pub trait UndoJournal {
     /// stamps, the values it left) and clear its `interrupted` mark.
     fn finish(&mut self, id: BatchId, batch: &AppliedBatch) -> Result<(), JournalError>;
 
+    /// Preserve execution facts after a failed rollback. The original record
+    /// must survive even if this best-effort update fails.
+    fn retain_interrupted(
+        &mut self,
+        _id: BatchId,
+        _batch: &AppliedBatch,
+    ) -> Result<(), JournalError> {
+        Ok(())
+    }
+
     /// Roll back a whole batch as a unit.
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError>;
 }
@@ -232,6 +272,24 @@ impl UndoJournal for VecJournal {
         *stored = AppliedBatch {
             id,
             interrupted: false,
+            ..batch.clone()
+        };
+        Ok(())
+    }
+
+    fn retain_interrupted(
+        &mut self,
+        id: BatchId,
+        batch: &AppliedBatch,
+    ) -> Result<(), JournalError> {
+        let stored = self
+            .batches
+            .iter_mut()
+            .find(|b| b.id == id)
+            .ok_or(JournalError::UnknownBatch(id))?;
+        *stored = AppliedBatch {
+            id,
+            interrupted: true,
             ..batch.clone()
         };
         Ok(())
@@ -458,6 +516,20 @@ impl SqliteJournal {
                 "ALTER TABLE block_changes ADD COLUMN text_to_unicode INTEGER NOT NULL DEFAULT 0",
             )?;
         }
+        // New snapshots share immutable image bytes across files and batches.
+        // Inline rows from older journals remain readable; migration never
+        // rewrites or discards their recovery material. New rows keep a TEXT
+        // sentinel in the old BLOB column so an older reader fails closed;
+        // it must never interpret pooled bytes as an empty original image.
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS journal_image_blobs (id INTEGER PRIMARY KEY AUTOINCREMENT, hash INTEGER NOT NULL, size INTEGER NOT NULL, data BLOB NOT NULL); CREATE INDEX IF NOT EXISTS idx_journal_image_blobs_hash ON journal_image_blobs(hash, size);")?;
+        for table in ["cover_images", "block_change_images"] {
+            if !column_exists(&conn, table, "blob_id")? {
+                conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN blob_id INTEGER REFERENCES journal_image_blobs(id)"))?;
+            }
+            conn.execute_batch(&format!(
+                "CREATE INDEX IF NOT EXISTS idx_{table}_blob ON {table}(blob_id)"
+            ))?;
+        }
         // Every child table is read and deleted by its parent's id, and SQLite
         // does not index a foreign key by itself. Without these, each of the
         // lookups below — one per file, several per file — scanned its whole
@@ -489,6 +561,7 @@ impl SqliteJournal {
 
 impl UndoJournal for SqliteJournal {
     fn record(&mut self, batch: &AppliedBatch) -> Result<BatchId, JournalError> {
+        let mut image_ids = ImageIds::new();
         let tx = self.conn.transaction()?;
         tx.execute(
             "INSERT INTO batches (description, message, applied_at, interrupted) \
@@ -539,15 +612,16 @@ impl UndoJournal for SqliteJournal {
                     for image in images {
                         tx.execute(
                             "INSERT INTO cover_images \
-                             (file_change_id, side, kind, description, mime, data) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                             (file_change_id, side, kind, description, mime, data, blob_id) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                             rusqlite::params![
                                 file_change_id,
                                 side,
                                 image.kind.to_storage_key(),
                                 image.description,
                                 image.mime,
-                                image.data,
+                                "tagrex:pooled-artwork:upgrade-required",
+                                intern_image(&tx, &image.data, &mut image_ids)?,
                             ],
                         )?;
                     }
@@ -602,15 +676,16 @@ impl UndoJournal for SqliteJournal {
                     for image in &content.covers {
                         tx.execute(
                             "INSERT INTO block_change_images \
-                             (block_change_id, side, kind, description, mime, data) \
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                             (block_change_id, side, kind, description, mime, data, blob_id) \
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                             rusqlite::params![
                                 block_change_id,
                                 side,
                                 image.kind.to_storage_key(),
                                 image.description,
                                 image.mime,
-                                image.data,
+                                "tagrex:pooled-artwork:upgrade-required",
+                                intern_image(&tx, &image.data, &mut image_ids)?,
                             ],
                         )?;
                     }
@@ -704,16 +779,84 @@ impl UndoJournal for SqliteJournal {
         Ok(())
     }
 
+    fn retain_interrupted(
+        &mut self,
+        id: BatchId,
+        batch: &AppliedBatch,
+    ) -> Result<(), JournalError> {
+        let tx = self.conn.transaction()?;
+        if tx.execute(
+            "UPDATE batches SET interrupted = 1 WHERE id = ?1",
+            rusqlite::params![id.0],
+        )? == 0
+        {
+            return Err(JournalError::UnknownBatch(id));
+        }
+        // Replace outcome rows, rather than duplicating facts recorded before
+        // the write began. Snapshot payloads are left untouched.
+        for table in [
+            "created_dirs",
+            "removed_dirs",
+            "allowed_roots",
+            "copy_stamps",
+            "applied_values",
+        ] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE batch_id = ?1"),
+                rusqlite::params![id.0],
+            )?;
+        }
+        insert_outcome(&tx, id.0, batch)?;
+        tx.commit()?;
+        Ok(())
+    }
+
     fn rollback(&mut self, id: BatchId) -> Result<(), JournalError> {
         // Children cascade away via the foreign keys enabled in `open`.
-        let affected = self
-            .conn
-            .execute("DELETE FROM batches WHERE id = ?1", rusqlite::params![id.0])?;
+        let tx = self.conn.transaction()?;
+        let affected = tx.execute("DELETE FROM batches WHERE id = ?1", rusqlite::params![id.0])?;
         if affected == 0 {
             return Err(JournalError::UnknownBatch(id));
         }
+        tx.execute("DELETE FROM journal_image_blobs WHERE NOT EXISTS (SELECT 1 FROM cover_images WHERE blob_id = journal_image_blobs.id) AND NOT EXISTS (SELECT 1 FROM block_change_images WHERE blob_id = journal_image_blobs.id)", [])?;
+        tx.commit()?;
         Ok(())
     }
+}
+
+/// Hash narrows the lookup only. Exact byte equality decides reuse, so even
+/// a collision cannot replace an Undo snapshot with another image. A future
+/// std hasher change can reduce reuse across versions, never correctness.
+type ImageIds = std::collections::HashMap<(*const u8, usize), i64>;
+fn intern_image(
+    tx: &rusqlite::Transaction<'_>,
+    bytes: &std::sync::Arc<[u8]>,
+    ids: &mut ImageIds,
+) -> Result<i64, JournalError> {
+    // Every pointer key remains owned by the immutably borrowed batch until
+    // record() returns. Repeated shared artwork avoids rehashing/querying its
+    // complete bytes per file; distinct allocations still use exact SQL equality.
+    let identity = (bytes.as_ptr(), bytes.len());
+    if let Some(id) = ids.get(&identity) {
+        return Ok(*id);
+    }
+    use rusqlite::OptionalExtension;
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hash);
+    let hash = hash.finish() as i64;
+    let existing = tx.query_row("SELECT id FROM journal_image_blobs WHERE hash = ?1 AND size = ?2 AND data = ?3 LIMIT 1", rusqlite::params![hash,bytes.len() as i64,bytes], |row| row.get(0)).optional()?;
+    let id = if let Some(id) = existing {
+        id
+    } else {
+        tx.execute(
+            "INSERT INTO journal_image_blobs (hash,size,data) VALUES (?1,?2,?3)",
+            rusqlite::params![hash, bytes.len() as i64, bytes],
+        )?;
+        tx.last_insert_rowid()
+    };
+    ids.insert(identity, id);
+    Ok(id)
 }
 
 /// The rows only the end of a batch's write knows (#659): the folders it
@@ -770,6 +913,42 @@ fn insert_outcome(
 }
 
 impl SqliteJournal {
+    /// Fetch history in one metadata-only query. Path membership stays exact
+    /// (`Path::starts_with`, not SQL wildcard/prefix matching), including empty
+    /// batches and symlink-root spellings supported by the command layer.
+    pub fn headers(&self, roots: &[PathBuf]) -> Result<Vec<BatchHeader>, JournalError> {
+        let mut statement = self.conn.prepare("SELECT b.id, b.description, b.message, b.applied_at, b.interrupted, f.path FROM batches b LEFT JOIN file_changes f ON f.batch_id = b.id ORDER BY b.id DESC, f.id")?;
+        let mut rows = statement.query([])?;
+        let mut headers: Vec<BatchHeader> = Vec::new();
+        while let Some(row) = rows.next()? {
+            let id = BatchId(row.get(0)?);
+            if headers.last().is_none_or(|h| h.id != id) {
+                headers.push(BatchHeader {
+                    id,
+                    description: row.get(1)?,
+                    message: row.get(2)?,
+                    applied_at: row.get(3)?,
+                    interrupted: row.get(4)?,
+                    paths: Vec::new(),
+                });
+            }
+            if let Some(path) = row.get::<_, Option<String>>(5)? {
+                headers
+                    .last_mut()
+                    .expect("header inserted above")
+                    .paths
+                    .push(PathBuf::from(path));
+            }
+        }
+        headers.retain(|header| {
+            header
+                .paths
+                .iter()
+                .all(|path| roots.iter().any(|root| path.starts_with(root)))
+        });
+        Ok(headers)
+    }
+
     /// One of the batch's plain path lists, in insertion order. `table` is a
     /// literal from this module, never anything a caller supplies.
     fn load_paths(&self, table: &str, batch_id: i64) -> Result<Vec<PathBuf>, JournalError> {
@@ -790,7 +969,7 @@ impl SqliteJournal {
         message: Option<String>,
         applied_at: i64,
     ) -> Result<AppliedBatch, JournalError> {
-        let changes = self.load_file_changes(id)?;
+        let changes = self.load_file_changes(id, &mut LoadedImages::default())?;
         Ok(AppliedBatch {
             id: BatchId(id),
             description: description.clone(),
@@ -863,7 +1042,11 @@ impl SqliteJournal {
         Ok(revisions)
     }
 
-    fn load_file_changes(&self, batch_id: i64) -> Result<Vec<FileChange>, JournalError> {
+    fn load_file_changes(
+        &self,
+        batch_id: i64,
+        images: &mut LoadedImages,
+    ) -> Result<Vec<FileChange>, JournalError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, path, rename_to, copied FROM file_changes WHERE batch_id = ?1 ORDER BY id",
         )?;
@@ -882,11 +1065,11 @@ impl SqliteJournal {
             changes.push(FileChange {
                 path: PathBuf::from(path),
                 tag_changes: self.load_field_changes(file_change_id)?,
-                cover_change: self.load_cover_change(file_change_id)?,
+                cover_change: self.load_cover_change(file_change_id, images)?,
                 rename_to: rename_to.map(PathBuf::from),
                 copy: copied,
                 sidecar_renames: self.load_sidecar_renames(file_change_id)?,
-                block_changes: self.load_block_changes(file_change_id)?,
+                block_changes: self.load_block_changes(file_change_id, images)?,
             });
         }
         Ok(changes)
@@ -918,7 +1101,11 @@ impl SqliteJournal {
     /// rolls back. A file change with no rows here falls back to the legacy
     /// removal-only tables, so a batch recorded before conversion landed can
     /// still be undone.
-    fn load_block_changes(&self, file_change_id: i64) -> Result<Vec<BlockChange>, JournalError> {
+    fn load_block_changes(
+        &self,
+        file_change_id: i64,
+        images: &mut LoadedImages,
+    ) -> Result<Vec<BlockChange>, JournalError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, kind, revision, old_revision, old_bytes, has_old, has_new, \
              text_to_unicode FROM block_changes WHERE file_change_id = ?1 ORDER BY id",
@@ -945,13 +1132,13 @@ impl SqliteJournal {
             let Some(kind) = TagBlockKind::from_storage_key(&kind) else {
                 continue;
             };
-            let side = |side: &str, present: bool| -> Result<_, JournalError> {
+            let mut side = |side: &str, present: bool| -> Result<_, JournalError> {
                 if !present {
                     return Ok(None);
                 }
                 Ok(Some(TagBlockContent {
                     tags: self.load_block_change_fields(id, side)?,
-                    covers: self.load_block_change_images(id, side)?,
+                    covers: self.load_block_change_images(id, side, images)?,
                 }))
             };
             changes.push(BlockChange {
@@ -971,7 +1158,7 @@ impl SqliteJournal {
         if any {
             return Ok(changes);
         }
-        self.load_legacy_block_removals(file_change_id)
+        self.load_legacy_block_removals(file_change_id, images)
     }
 
     fn load_block_change_fields(&self, id: i64, side: &str) -> Result<TagMap, JournalError> {
@@ -990,9 +1177,38 @@ impl SqliteJournal {
         Ok(tags)
     }
 
-    fn load_block_change_images(&self, id: i64, side: &str) -> Result<Vec<CoverArt>, JournalError> {
+    fn load_image_bytes(
+        &self,
+        row: &rusqlite::Row<'_>,
+        data_column: usize,
+        id_column: usize,
+        images: &mut LoadedImages,
+    ) -> Result<std::sync::Arc<[u8]>, rusqlite::Error> {
+        if let Some(id) = row.get::<_, Option<i64>>(id_column)? {
+            if let Some(bytes) = images.by_id.get(&id) {
+                return Ok(bytes.clone());
+            }
+            let bytes = self.conn.query_row(
+                "SELECT data FROM journal_image_blobs WHERE id = ?1",
+                rusqlite::params![id],
+                |row| row.get::<_, Vec<u8>>(0),
+            )?;
+            let bytes = images.intern(bytes);
+            images.by_id.insert(id, bytes.clone());
+            Ok(bytes)
+        } else {
+            Ok(images.intern(row.get::<_, Vec<u8>>(data_column)?))
+        }
+    }
+
+    fn load_block_change_images(
+        &self,
+        id: i64,
+        side: &str,
+        images: &mut LoadedImages,
+    ) -> Result<Vec<CoverArt>, JournalError> {
         let mut stmt = self.conn.prepare(
-            "SELECT kind, description, mime, data FROM block_change_images \
+            "SELECT kind, description, mime, data, blob_id FROM block_change_images \
              WHERE block_change_id = ?1 AND side = ?2 ORDER BY id",
         )?;
         let rows = stmt.query_map(rusqlite::params![id, side], |row| {
@@ -1000,7 +1216,7 @@ impl SqliteJournal {
                 kind: CoverKind::from_storage_key(&row.get::<_, String>(0)?),
                 description: row.get::<_, String>(1)?,
                 mime: row.get::<_, String>(2)?,
-                data: row.get::<_, Vec<u8>>(3)?,
+                data: self.load_image_bytes(row, 3, 4, images)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
@@ -1012,6 +1228,7 @@ impl SqliteJournal {
     fn load_legacy_block_removals(
         &self,
         file_change_id: i64,
+        images: &mut LoadedImages,
     ) -> Result<Vec<BlockChange>, JournalError> {
         let mut stmt = self
             .conn
@@ -1037,17 +1254,17 @@ impl SqliteJournal {
                 let (field, value) = row?;
                 tags.insert(TagField::from_storage_key(&field), value);
             }
-            let mut images = self.conn.prepare(
+            let mut image_statement = self.conn.prepare(
                 "SELECT kind, description, mime, data FROM block_removal_images \
                  WHERE block_removal_id = ?1 ORDER BY id",
             )?;
-            let covers = images
+            let covers = image_statement
                 .query_map(rusqlite::params![removal_id], |row| {
                     Ok(CoverArt {
                         kind: CoverKind::from_storage_key(&row.get::<_, String>(0)?),
                         description: row.get::<_, String>(1)?,
                         mime: row.get::<_, String>(2)?,
-                        data: row.get::<_, Vec<u8>>(3)?,
+                        data: images.intern(row.get::<_, Vec<u8>>(3)?),
                     })
                 })?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1060,9 +1277,13 @@ impl SqliteJournal {
     /// none. Reads the current `cover_images` rows; a file change with none of
     /// those falls back to the legacy single-pair `cover_changes` row, so a
     /// batch recorded before the set model can still be rolled back.
-    fn load_cover_change(&self, file_change_id: i64) -> Result<Option<CoverChange>, JournalError> {
+    fn load_cover_change(
+        &self,
+        file_change_id: i64,
+        images: &mut LoadedImages,
+    ) -> Result<Option<CoverChange>, JournalError> {
         let mut stmt = self.conn.prepare(
-            "SELECT side, kind, description, mime, data FROM cover_images \
+            "SELECT side, kind, description, mime, data, blob_id FROM cover_images \
              WHERE file_change_id = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map(rusqlite::params![file_change_id], |row| {
@@ -1072,7 +1293,7 @@ impl SqliteJournal {
                     kind: CoverKind::from_storage_key(&row.get::<_, String>(1)?),
                     description: row.get::<_, String>(2)?,
                     mime: row.get::<_, String>(3)?,
-                    data: row.get::<_, Vec<u8>>(4)?,
+                    data: self.load_image_bytes(row, 4, 5, images)?,
                 },
             ))
         })?;
@@ -1090,12 +1311,13 @@ impl SqliteJournal {
         if any {
             return Ok(Some(change));
         }
-        self.load_legacy_cover_change(file_change_id)
+        self.load_legacy_cover_change(file_change_id, images)
     }
 
     fn load_legacy_cover_change(
         &self,
         file_change_id: i64,
+        images: &mut LoadedImages,
     ) -> Result<Option<CoverChange>, JournalError> {
         let mut stmt = self.conn.prepare(
             "SELECT old_mime, old_data, new_mime, new_data FROM cover_changes \
@@ -1114,10 +1336,10 @@ impl SqliteJournal {
         };
         let (old_mime, old_data, new_mime, new_data) = row?;
         // A pre-#56 pair: one front cover, or none on that side.
-        let cover = |mime: Option<String>, data: Option<Vec<u8>>| match (mime, data) {
+        let mut cover = |mime: Option<String>, data: Option<Vec<u8>>| match (mime, data) {
             (Some(mime), Some(data)) => vec![CoverArt {
                 mime,
-                data,
+                data: images.intern(data),
                 kind: CoverKind::Front,
                 description: String::new(),
             }],

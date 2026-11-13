@@ -1,12 +1,16 @@
 [package]
 name = "tagrex-player"
-description = "The TagRex preview player: a rodio Sink on its own thread, plus the waveform and tempo analysis of the decoded audio"
+description = "The TagRex preview player: a rodio Sink on its own thread, plus tempo analysis of the decoded audio"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 publish = false
+
+[features]
+# Decode fuzzing keeps its entry point without shipping an analysis API.
+fuzzing = []
 
 [dependencies]
 tagrex-core.workspace = true
