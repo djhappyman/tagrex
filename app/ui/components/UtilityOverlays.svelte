@@ -151,55 +151,47 @@
       </div>
     </ControllerDialog>
 
-    <ControllerDialog id="pe-editor" labelledby="pe-editor-title" closeId="pe-editor-close">
+    <ControllerDialog id="pe-editor" labelledby="pe-editor-title" closeId="pe-editor-close" describedby="pe-editor-purpose">
       <div class="modal pe-editor">
         <div class="modal-head">
-          <h2 id="pe-editor-title" data-i18n="presets.title">Presets</h2>
+          <div class="pe-heading-line"><h2 id="pe-editor-title" data-i18n="presets.title">Transformation presets</h2><span class="pe-save-note" data-i18n="presets.saveNote">Saves automatically · Files change on Apply</span></div>
           <Button variant="ghost" size="icon-sm" id="pe-editor-close" class="icon" type="button" data-i18n-title="action.done" title="Done" data-i18n-aria-label="action.done" aria-label="Done"><svg class="ico"><use href="#i-close"/></svg></Button>
         </div>
+        <p id="pe-editor-purpose" class="pe-intro" data-i18n="presets.purpose">Create reusable rules to tidy tags and file names.</p>
         <div class="pe-editor-body">
           <div class="pe-list-col">
             <div id="pe-list" class="pe-list"></div>
-            <div class="pe-list-actions">
-              <Button variant="outline" size="sm" id="pe-new" class="btn" type="button" data-i18n="presets.new">New</Button>
-              <Button variant="outline" size="sm" id="pe-duplicate" class="btn" type="button" data-i18n="presets.duplicate">Duplicate</Button>
-              <Button variant="outline" size="sm" id="pe-delete" class="btn" type="button" data-i18n="action.delete">Delete</Button>
-            </div>
+            <div class="pe-list-actions"><Button variant="default" size="sm" id="pe-new" class="btn primary" type="button"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg><span data-i18n="presets.newAction">New preset</span></Button></div>
+            <div id="pe-deleted" class="pe-deleted" hidden role="status"><span id="pe-deleted-label"></span><Button variant="ghost" size="sm" id="pe-undo-delete" type="button" data-i18n="action.undo">Undo</Button></div>
           </div>
           <div id="pe-edit-col" class="pe-edit-col">
-            <div class="pe-name-row">
-              <Input id="pe-name" type="text" spellcheck="false" data-i18n-aria-label="presets.name" aria-label="Preset name"  />
-              <span id="pe-builtin-note" hidden data-i18n="presets.builtinBadge">Read only</span>
-            </div>
-            <fieldset id="pe-rules-set" class="pe-rules-set">
-              <div id="pe-rules" class="rule-chain"></div>
-              <p id="pe-empty" class="empty inert-panel rule-chain-empty" hidden data-i18n="generator.noRules" data-i18n-html>
-                No rules yet. Pick a rule type and press <b>Add</b>.
-              </p>
-              <div class="gen-add">
-                <NativeSelect id="pe-kind">
-                  <NativeSelectOption value="replace" data-i18n="rule.replace">Find and replace</NativeSelectOption>
-                  <NativeSelectOption value="case" data-i18n="rule.case">Change case</NativeSelectOption>
-                  <NativeSelectOption value="diacritics" data-i18n="rule.diacritics">Remove diacritics</NativeSelectOption>
-                  <NativeSelectOption value="transliterate" data-i18n="rule.transliterate">Transliterate to Latin</NativeSelectOption>
-                  <NativeSelectOption value="untransliterate" data-i18n="rule.untransliterate">Transliterate to Cyrillic</NativeSelectOption>
-                  <NativeSelectOption value="key" data-i18n="rule.key">Key notation</NativeSelectOption>
-                </NativeSelect>
-                <Button variant="outline" size="sm" id="pe-add" class="btn" type="button" data-i18n="generator.addRule">Add</Button>
-                <div class="spacer"></div>
-                <Button variant="outline" size="sm" id="pe-clear" class="btn" type="button" hidden data-i18n="generator.clearRules">Clear</Button>
+            <section class="pe-sample" aria-labelledby="pe-preview-title">
+              <div class="pe-preview-head">
+                <h3 id="pe-preview-title" data-i18n="presets.previewTitle">Preview</h3>
+                <div class="pe-preview-actions">
+                  <label class="pe-preview-target"><span data-i18n="presets.fieldLabel">Field</span><select id="pe-preview-field" aria-label="Preview field" data-i18n-aria-label="presets.previewField"></select></label>
+                  <Button variant="ghost" size="sm" class="text-btn" type="button" id="pe-selection" data-i18n="presets.selection">Selection</Button>
+                  <Button variant="ghost" size="sm" class="text-btn" type="button" id="pe-example" data-i18n="presets.example">Example</Button>
+                </div>
               </div>
-            </fieldset>
-            <div class="pe-sample">
-              <label class="pe-sample-row">
-                <span class="pe-sample-label" data-i18n="presets.sample">Try it on</span>
-                <Input id="pe-sample-input" type="text" spellcheck="false" autocomplete="off"  />
-              </label>
-              <div id="pe-sample-out" class="pe-sample-out" aria-live="polite"></div>
-            </div>
+              <label class="pe-sample-row"><span class="pe-sample-label" data-i18n="presets.sample">Before</span><Input id="pe-sample-input" type="text" spellcheck="false" autocomplete="off" /></label>
+              <div class="pe-result"><span class="pe-sample-label" data-i18n="presets.result">After</span><div id="pe-sample-out" class="pe-sample-out" role="textbox" tabindex="0" aria-readonly="true" aria-label="Preview result" data-i18n-aria-label="presets.previewResult" aria-live="polite"></div></div>
+              <span id="pe-preview-status" class="pe-sr-only" role="status"></span>
+            </section>
+            <section class="pe-rules-panel" aria-labelledby="pe-rules-title">
+              <div class="pe-rules-heading"><div class="pe-rules-title-group"><h3 id="pe-rules-title" data-i18n="presets.rulesTitle">Rules</h3><span id="pe-rules-scope" class="pe-rules-scope" hidden></span></div><Button id="pe-copy-to-edit" variant="ghost" size="sm" type="button" class="text-btn" hidden data-i18n="presets.copyToEdit">Copy to edit</Button></div>
+              <fieldset id="pe-rules-set" class="pe-rules-set" aria-labelledby="pe-rules-title" aria-describedby="pe-rules-scope">
+                <div id="pe-rules" class="rule-chain"></div>
+                <div id="pe-empty" class="pe-empty-state" hidden><p data-i18n="presets.emptyTitle">No rules yet.</p><Button id="pe-empty-add" variant="default" size="sm" class="primary" type="button"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg><span data-i18n="presets.addRule">Add rule</span></Button></div>
+                <div class="pe-add-row"><Button id="pe-open-add" variant="ghost" size="sm" class="text-btn" type="button" aria-haspopup="menu" aria-controls="pe-rule-picker"><svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg><span data-i18n="presets.addRule">Add rule</span></Button></div>
+              </fieldset>
+
+            </section>
           </div>
         </div>
       </div>
+        <ControllerContextMenu id="pe-preset-menu"><ControllerMenuItem cmd="rename"><svg class="ico" aria-hidden="true"><use href="#i-rename"/></svg><span data-i18n="presets.rename">Rename</span></ControllerMenuItem><ControllerMenuItem cmd="copy"><svg class="ico"><use href="#i-copy"/></svg><span data-i18n="presets.duplicate">Copy</span></ControllerMenuItem><ContextMenu.Separator class="ctx-sep" /><ControllerMenuItem cmd="delete" danger><svg class="ico"><use href="#i-trash"/></svg><span data-i18n="action.delete">Delete</span></ControllerMenuItem></ControllerContextMenu>
+        <ControllerContextMenu id="pe-rule-picker"><ControllerMenuItem cmd="replace"><span><span data-i18n="rule.replace">Find and replace</span><small data-i18n="presets.kind.replace.hint">Replace or remove text.</small></span></ControllerMenuItem><ControllerMenuItem cmd="case"><span><span data-i18n="rule.case">Change case</span><small data-i18n="presets.kind.case.hint">Change capital letters.</small></span></ControllerMenuItem><ControllerMenuItem cmd="diacritics"><span><span data-i18n="rule.diacritics">Remove accents</span><small data-i18n="presets.kind.diacritics.hint">Turn é into e.</small></span></ControllerMenuItem><ControllerMenuItem cmd="transliterate"><span><span data-i18n="rule.transliterate">Use Latin letters</span><small data-i18n="presets.kind.transliterate.hint">Convert other writing systems.</small></span></ControllerMenuItem><ControllerMenuItem cmd="untransliterate"><span><span data-i18n="rule.untransliterate">Use Cyrillic letters</span><small data-i18n="presets.kind.untransliterate.hint">Convert Latin text to Cyrillic.</small></span></ControllerMenuItem><ControllerMenuItem cmd="key"><span><span data-i18n="rule.key">Musical key format</span><small data-i18n="presets.kind.key.hint">Switch between key notations.</small></span></ControllerMenuItem></ControllerContextMenu>
     </ControllerDialog>
 
     <ControllerDialog role="alertdialog" id="confirm-modal" labelledby="confirm-message" closeId="confirm-cancel" describedby="confirm-detail">

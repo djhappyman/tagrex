@@ -9,6 +9,7 @@ import './table.css';
 import './workbench-docking.css';
 import './inspector.css';
 import './form-controls.css';
+import './preset-editor.css';
 import { flushSync, mount } from 'svelte';
 import App from './components/App.svelte';
 import { initComponentControls } from './lib/runtime-controls';

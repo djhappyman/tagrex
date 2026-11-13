@@ -4,7 +4,7 @@
   import * as Select from '$lib/components/ui/select/index.js';
 
   let { native }: { native: HTMLSelectElement } = $props();
-  type Choice = { token: string; label: string; disabled: boolean; hidden: boolean; option: HTMLOptionElement };
+  type Choice = { token: string; label: string; description: string; disabled: boolean; hidden: boolean; option: HTMLOptionElement };
   let choices = $state.raw<Choice[]>([]);
   let token = $state('');
   let disabled = $state(false);
@@ -12,6 +12,7 @@
   let title = $state('');
   let trigger = $state<HTMLButtonElement | null>(null);
   let open = $state(false);
+  let pointerAnchor = $state.raw<{ getBoundingClientRect: () => DOMRect } | null>(null);
   let optionNodes: HTMLOptionElement[] = [];
   let optionGeneration = 0;
   let labels: HTMLLabelElement[] = [];
@@ -38,7 +39,7 @@
         optionNodes = options;
         optionGeneration++;
       }
-      const nextChoices = options.map((option, index) => ({ option, token: `option-${optionGeneration}-${index}`, label: option.textContent || option.value, disabled: option.disabled || (option.parentElement instanceof HTMLOptGroupElement && option.parentElement.disabled), hidden: option.hidden }));
+      const nextChoices = options.map((option, index) => ({ option, token: `option-${optionGeneration}-${index}`, label: option.textContent || option.value, description: option.dataset.description || '', disabled: option.disabled || (option.parentElement instanceof HTMLOptGroupElement && option.parentElement.disabled), hidden: option.hidden }));
       choices = nextChoices;
       token = nextChoices[native.selectedIndex]?.token || '';
       disabled = native.disabled;
@@ -62,7 +63,13 @@
       synchronize();
     });
   }
+  function anchorAtPointer(event: PointerEvent) {
+    if (open || event.button !== 0) return;
+    const rect = new DOMRect(event.clientX, event.clientY, 0, 0);
+    pointerAnchor = { getBoundingClientRect: () => rect };
+  }
   function dismiss(event: KeyboardEvent) {
+    if (!open) pointerAnchor = null;
     if (event.key !== 'Escape' || !open) return;
     event.preventDefault(); event.stopPropagation(); open = false;
   }
@@ -93,6 +100,8 @@
       // sends click. Open it directly for label text and avoid a second click.
       event.preventDefault();
       trigger?.focus();
+      const rect = new DOMRect(event.clientX, event.clientY, 0, 0);
+      pointerAnchor = event.detail ? { getBoundingClientRect: () => rect } : null;
       open = true;
     };
     labelTargets.forEach(({ label }) => {
@@ -122,12 +131,14 @@
 
 <span class="app-select-proxy" {@attach attachProxy}></span>
 <Select.Root type="single" bind:open value={token} onValueChange={choose} {disabled}>
-  <Select.Trigger bind:ref={trigger} id={triggerId} aria-label={name || undefined} {title} class="app-select-trigger" data-proxy-id={native.id} onkeydowncapture={dismiss}>
+  <Select.Trigger bind:ref={trigger} id={triggerId} aria-label={name || undefined} {title} class="app-select-trigger" data-proxy-id={native.id} onkeydowncapture={dismiss} onpointerdowncapture={anchorAtPointer}>
     <span class="app-select-label">{selected}</span>
   </Select.Trigger>
-  <Select.Content class="app-select-menu" data-controller-popup onkeydowncapture={dismiss}>
+  <Select.Content class="app-select-menu" data-controller-popup customAnchor={pointerAnchor} align="start" onkeydowncapture={dismiss}>
     {#each choices.filter(choice => !choice.hidden) as choice (choice.token)}
-      <Select.Item value={choice.token} label={choice.label} disabled={choice.disabled} />
+      <Select.Item value={choice.token} label={choice.label} disabled={choice.disabled}>
+          <span class="app-select-choice"><span>{choice.label}</span>{#if choice.description}<span class="app-select-description">{choice.description}</span>{/if}</span>
+      </Select.Item>
     {/each}
   </Select.Content>
 </Select.Root>
