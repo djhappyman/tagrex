@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [1.4.1] - Unreleased
+## [1.4.2] - Unreleased
+
+- Requested builds publish a complete personal prerelease after validation and
+  all platform packages pass, with checksums and source/build provenance.
+- Restrict release publication to the personal fork and reject version reuse.
+
+## [1.4.1] - 2026-11-13
 
 - Use a numeric personal app version so Linux RPM packages can be generated.
   Personal tags and app identity remain independent of upstream.

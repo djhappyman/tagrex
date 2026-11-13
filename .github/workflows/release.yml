@@ -13,15 +13,36 @@ name: Release build
 
 on:
   workflow_call:
+    inputs:
+      publish_release:
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
 
 permissions:
-  contents: write # only used by the tag-triggered release step
+  contents: read
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Check fork, version and release destination
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: ${{ inputs.publish_release }}
+        run: node tools/personal-release.mjs plan
+
   build:
+    needs: plan
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -58,11 +79,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Check personal release tag
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          node -e 'const c=require("./app/tauri.conf.json"); if(process.env.GITHUB_REF_NAME !== "personal-v"+c.version) throw new Error("Release tag must match app version");'
       - run: npm ci
 
       - name: Install Rust toolchain
@@ -115,8 +131,8 @@ jobs:
 
 
   publish:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/personal-v')
+    needs: [plan, build]
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -127,47 +143,11 @@ jobs:
         with:
           pattern: tagrex-*
           path: bundles
-      # The release page's text is the changelog's own section for this version
-      # (#261). The file already says what changed, in the words it was written
-      # in; without this the most visible page in the project is a list of files
-      # and nothing else. `shell: bash` because this runs on the Windows runners
-      # too, where the default shell is PowerShell.
-      - name: Take the release notes from the changelog
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
-        run: |
-          version="${GITHUB_REF_NAME#personal-v}"
-          # The changelog wraps at 80 columns, and a release description takes
-          # every newline as a line break (#598), so each paragraph and list item
-          # is joined back into one line on the way out.
-          awk -v heading="## [$version]" '
-            index($0, heading) == 1 { inside = 1; next }
-            inside && /^## \[/ { exit }
-            inside { print }
-          ' CHANGELOG.md | awk '
-            function flush() { if (buf != "") { print buf; buf = "" } }
-            /^[[:space:]]*$/ { flush(); print; next }
-            /^#/ { flush(); print; next }
-            /^[[:space:]]*([-*] |[0-9]+\. )/ { flush(); buf = $0; next }
-            { line = $0; sub(/^[[:space:]]+/, "", line); buf = (buf == "") ? line : buf " " line }
-            END { flush() }
-          ' > RELEASE_NOTES.md
-          # A version with no section says so, rather than the page silently
-          # going out empty again.
-          if [ ! -s RELEASE_NOTES.md ]; then
-            echo "See CHANGELOG.md for what changed in $version." > RELEASE_NOTES.md
-          fi
-
-      - name: Attach verified matrix to personal pre-release
-        uses: softprops/action-gh-release@v3
+      - uses: actions/setup-node@v7
         with:
-          prerelease: true
-          make_latest: false
-          fail_on_unmatched_files: true
-          body_path: RELEASE_NOTES.md
-          files: |
-            bundles/**/*.dmg
-            bundles/**/*.exe
-            bundles/**/*.deb
-            bundles/**/*.rpm
-            bundles/**/*.AppImage
+          node-version: 22
+      - name: Verify all packages and publish a complete personal prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_RELEASE: "true"
+        run: node tools/personal-release.mjs publish bundles
