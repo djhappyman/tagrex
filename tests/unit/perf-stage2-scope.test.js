@@ -14,6 +14,7 @@ function source(file, name) {
 }
 function harness(overrides = {}) {
   const nodes = new Map();
+  const node = () => ({ dataset: {}, textContent: '', setAttribute(k, v) { this[k] = v; }, getAttribute(k) { return this[k] ?? null; } });
   const calls = { validity: 0, scope: 0, event: 0, panels: 0, save: 0, paints: [], sets: 0 };
   const c = vm.createContext({
     filterPending: false, filterError: false,
@@ -27,9 +28,10 @@ function harness(overrides = {}) {
     paths: ['a', 'hidden'], selectedPaths: () => c.paths,
     navPathIndex: new Set(['a']), viewPathIndex: new Set(['a']), viewPaths: ['a'],
     diffByPath: new Map([['a', {}]]), applySelection: new Set(['a']),
-    applyBtn: { disabled: false }, selectAll: {}, editing: false,
+    applyBtn: { ...node(), disabled: false }, selectAll: {}, editing: false,
     tracksBody: { querySelector: () => c.editing },
-    el: id => { if (!nodes.has(id)) nodes.set(id, { textContent: '', setAttribute(k, v) { this[k] = v; } }); return nodes.get(id); },
+    el: id => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); },
+    msg: key => key, tn: (_key, count) => `${count} files`,
     paintRowSelection() {}, spreadsheet: { refresh() {} }, updateStatus() {}, updatePanelCounts() {},
     selectionPanelsPending: false, selectionPanelSubject: 'old', contentRevision: 0,
     selectionVersion: () => 1, isAutomaticTransformRefresh: () => c.refreshing,
@@ -176,8 +178,9 @@ test('hidden counts need no filtered selection array, and missing diff/rail rema
 // Filtering may temporarily leave old rows on screen; never Apply that scope.
 test('pending or invalid filters block Apply without bypassing plan validation', () => {
   for (const flags of [{ filterPending: true }, { filterError: 'invalid regex' }]) {
-    const { c } = harness(flags);
+    const { c, nodes } = harness(flags);
     c.updateDiffBar();
     assert.equal(c.applyBtn.disabled, true);
+    assert.equal(nodes.get('ab-state').textContent, flags.filterPending ? 'diff.updating' : 'diff.checkChanges');
   }
 });

@@ -1456,7 +1456,7 @@ function discardPreview() {
 // Stage `previewPlan` into the file table's diff-state (#117). Named renderPreview
 // still because every mutating mode funnels its plan here; there is no separate
 // Preview view any more — the same #tracks table shows the change in place with a
-// floating Apply/Discard bar. An empty plan just leaves the table untouched.
+// persistent Apply/Discard footer. An empty plan just leaves the table untouched.
 function renderPreview(plan) {
   // Live typing changes values, not table membership. Keep an actively edited
   // cell attached and patch only affected visible rows; grouping and virtual
@@ -1509,7 +1509,7 @@ function renderPreview(plan) {
 // cheap and the patching layer went away with it.
 
 // Enter the in-table diff-state: build the path->change map, tick every changed
-// file for apply by default, show the change in the table, and float the bar.
+// file for apply by default, show the change in the table and reveal the action footer.
 // The operation without the pattern it ran, but WITH whatever the backend
 // appended after it: `Tags from name: %artist% - %title% · cleaned up` is three
 // facts, and only the middle one is redundant here (#232).
@@ -1543,6 +1543,7 @@ function enterDiffState() {
   const kind = previewSource === "spreadsheet" ? spreadsheetBatchKind : "";
   const description = [kind, backendDescription].filter(Boolean).join(" · ");
   plan.textContent = description ? ` · ${shortPlanDescription(description)}` : "";
+  el("diff-actionbar").title = description;
   if (description && description !== shortPlanDescription(description)) {
     plan.title = description;
   } else {
@@ -1571,7 +1572,7 @@ function renderLockedSkips() {
   const parts = skips.map((s) =>
     msg("locks.fieldOnFiles", { field: diffLabel(s.field), files: tn("unit.file", s.files) })
   );
-  note.textContent = ` · ${msg("locks.lockedList", { fields: parts.join(", ") })}`;
+  note.textContent = msg("locks.lockedList", { fields: parts.join(", ") });
   note.title = msg(parts.length === 1 ? "locks.lockedTitleOne" : "locks.lockedTitleMany");
 }
 
@@ -1622,7 +1623,7 @@ function syncPanelCellMin() {
   document.documentElement.style.setProperty("--panel-cell-min", `${Math.ceil(widest + chrome + 2)}px`);
 }
 
-// Sync the floating action bar (apply count + enabled) and the header select-all
+// Sync the action footer (apply count + enabled) and the header select-all
 // tri-state to `applySelection`. Every changed file starts ticked; unticking
 // some narrows what a single Apply writes (#81).
 function updateDiffBar(scope) {
@@ -1631,7 +1632,17 @@ function updateDiffBar(scope) {
   const staged = diffByPath.size;
   const n = applySelection.size;
   el("ab-count").textContent = String(n);
+  const applyLabel = msg("diff.applyFiles", { files: tn("unit.file", n) });
+  if (applyBtn.getAttribute("aria-label") !== applyLabel) applyBtn.setAttribute("aria-label", applyLabel);
+  const label = el("ab-apply-label");
+  if (label.textContent !== applyLabel) label.textContent = applyLabel;
   applyBtn.disabled = filterPending || !!filterError || n === 0 || !!tracksBody.querySelector('[contenteditable="true"]') || scope.planInvalid || (isAutomaticTransformPreview() && (scope.busy || scope.invalid || scope.failed));
+  const pending = filterPending || (isAutomaticTransformPreview() && scope.busy);
+  const blocked = applyBtn.disabled;
+  el("diff-actionbar").dataset.blocked = String(blocked);
+  const statusKey = blocked ? (pending ? "diff.updating" : "diff.checkChanges") : (n === 1 ? "diff.fileReady" : "diff.filesReady");
+  el("ab-state").dataset.i18n = statusKey;
+  el("ab-state").textContent = msg(statusKey);
   if (isAutomaticTransformPreview()) return; // header ticks still select tracks
   selectAll.checked = n > 0 && n === staged;
   selectAll.indeterminate = n > 0 && n < staged;
@@ -3082,6 +3093,7 @@ function updateTransformScope() {
   let hidden = 0;
   for (const path of selectedPaths()) if (!navPathIndex.has(path)) hidden++;
   note.hidden = !scope.enabled && !hasLiveInputs() && !scope.busy;
+  note.dataset.detail = String(Boolean(scope.busy || scope.invalid || scope.failed || scope.blocked || hidden));
   const text = scope.busy ? 'Previewing…' : scope.invalid ? 'Fix invalid values' : scope.failed ? 'Preview failed' : scope.blocked ? 'Review current preview first' : scope.dismissed ? 'Preview cleared' : `${scope.changes} modified${hidden ? ` · ${hidden} selected hidden` : ''}`;
   if (note.textContent !== text) note.textContent = text;
   note.setAttribute('aria-busy', String(scope.busy));

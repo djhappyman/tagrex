@@ -1,9 +1,10 @@
 # Interface rules
 
-Current direction agreed during the Settings restyle. Apply these rules when
+Current direction agreed during the Settings and workbench restyles. Apply these rules when
 iterating on the personal interface; older design briefs are historical context.
 
-- Keep the existing theme colours, typography and familiar control shapes.
+- Use the shared [surface palettes](palettes.md), typography and familiar control
+  shapes. Keep saved custom accents independent of the surface family.
 - Use spacing, tone and rounded surfaces to group content. Avoid outlining every
   field, row or section. Add a divider only when it marks a useful boundary.
 - Use the shared `--input-radius` for standard inputs, selects and compound
@@ -20,6 +21,14 @@ iterating on the personal interface; older design briefs are historical context.
   combining that surface change with a redundant separator line.
 - Build hierarchy with page headings, section headings, labels and concise help.
   Keep related help close to its setting. Avoid adding a card around every group.
+- Keep the folder bar with the file table and common commands in the toolbar.
+  Show docking handles through View → Arrange panels rather than permanent chrome.
+- Align the permanent player beneath the file pane as the docks resize. Anchor
+  Compare, Discard and Apply beneath the inspector; put the affected file count
+  in the primary action's natural-language label. Keep feedback from resizing
+  the table during an active edit.
+- Use barely different row fills without divider borders; keep selection, staged
+  changes, invalid values and keyboard focus distinct. Keep artwork centred.
 - Preserve visible labels, keyboard access, selection and validation feedback.
   Check both themes and narrow windows. Quiet styling must stay discoverable.
 

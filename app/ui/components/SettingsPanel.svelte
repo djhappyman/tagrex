@@ -39,6 +39,19 @@
               <p class="settings-hint" data-i18n="settings.themeHint">Auto follows your system's light or dark appearance.</p>
             </div>
             <div class="settings-field">
+              <div class="settings-row col">
+                <span class="settings-label" data-i18n="settings.palette">Surface palette</span>
+                <div class="palette-picker" id="set-palette" role="group" data-i18n-aria-label="settings.palette" aria-label="Surface palette">
+                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="navy" aria-pressed="true"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.navy">Navy</span></Button>
+                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="graphite" aria-pressed="false"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.graphite">Graphite</span></Button>
+                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="forest" aria-pressed="false"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.forest">Forest</span></Button>
+                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="plum" aria-pressed="false"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.plum">Plum</span></Button>
+                </div>
+              </div>
+              <p class="settings-hint" data-i18n="settings.paletteHint">Changes surfaces and saves immediately. Your accent stays the same.</p>
+              <Button variant="ghost" size="sm" class="text-btn" id="set-palette-accent" type="button" data-i18n="settings.paletteAccent">Use palette accent</Button>
+            </div>
+            <div class="settings-field">
               <div class="settings-row">
                 <span class="settings-label" data-i18n="settings.accent">Accent colour</span>
                 <div class="accent-picker" id="set-accent" role="radiogroup" data-i18n-aria-label="settings.accent" aria-label="Accent colour">
