@@ -7,7 +7,8 @@ name: Release build
 # Windows and Linux on both ARM64 and x86-64. All of these runners are free for
 # public repos.
 #
-# Called by CI after validation. Main commits produce artifacts; personal tags
+# Called by Build and release after reusable CI validation. Main commits produce
+# artifacts; personal tags
 # also attach a complete successful matrix to a personal pre-release.
 
 on:
