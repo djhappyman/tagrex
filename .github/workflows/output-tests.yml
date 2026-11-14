@@ -79,7 +79,7 @@ jobs:
           diskutil unmountDisk "$device"
           mkdir "$mount"
           diskutil mount -mountPoint "$mount" "${device}s1"
-          diskutil info -plist "$mount" | python3 -c 'import os,plistlib,sys; p=plistlib.load(sys.stdin.buffer); expected="exfat" if os.environ["OUTPUT_FILESYSTEM"]=="ExFAT" else "msdos"; actual=p.get("FilesystemType", "").lower(); print("Filesystem:", actual); assert actual==expected, p'
+          diskutil info -plist "$mount" | python3 -c 'import os,plistlib,sys; p=plistlib.loads(sys.stdin.buffer.read()); expected="exfat" if os.environ["OUTPUT_FILESYSTEM"]=="ExFAT" else "msdos"; actual=p.get("FilesystemType", "").lower(); print("Filesystem:", actual); assert actual==expected, p'
           export TAGREX_OUTPUT_TEST_ROOT="$mount"
           # FAT-family volumes cannot create symlinks. Those two protections
           # run on APFS in ordinary CI; exercise all publication paths here.
