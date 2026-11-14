@@ -13,7 +13,7 @@ what they are called, in the language the interface is in, across every group.
 Several words must all be there; a group whose name matches shows in full.
 Escape empties the box (a second Escape closes Settings).
 
-**Reset to defaults** — a group whose settings differ from how TagRex ships shows
+**Reset to defaults** — a group whose settings differ from how Tagnetic ships shows
 a *Reset to defaults* link at its top right, and only then. It covers Network,
 Tag defaults, Cover art, Online import, Files, Display and LAB. The first five
 go back in the form and are kept when you Save, like any other edit; Display and
@@ -42,26 +42,15 @@ side. A `429` response with `Retry-After` from the provider is always honoured
 regardless of what you set here, so lowering this is about being a good citizen,
 not about avoiding errors.
 
-**Check for updates** — on by default. When TagRex starts it makes one request
-to GitHub's public Releases API for the latest published release and compares
-its version with the one you are running. If a newer one exists, a quiet note
-appears in the top bar, and the cross beside it stops the note for that version.
-The request carries nothing about you or your files beyond what any HTTPS
-request does: your address and a user agent naming the TagRex version. The proxy
-above applies to it. Switched off, the app makes no such request. **Check now**
-asks once regardless and tells you what it found.
+## Updates
 
-When the release can be installed from inside the app, the note reads **Update
-to TagRex X** and the document button beside it opens the release page. Clicking
-the note asks first, then downloads the update, checks its signature against the
-key built into TagRex, installs it and restarts. Nothing is downloaded until you
-ask. macOS replaces the app where it is; Windows runs the installer, which shows
-its own progress and, when TagRex sits in a folder you cannot write to such as
-`Program Files`, first asks for administrator rights; on Linux the system asks for your password to install the new
-`.deb` or `.rpm`. Apply or discard your changes, and let a BPM run finish, before
-updating. Where there is nothing to install (a release without update bundles,
-or a copy that was not installed from a package), the note opens the release
-page instead.
+In-app update checks and installation are disabled in Tagnetic. The inherited
+update controls are hidden, and the app does not check for original TagRex
+releases at startup.
+
+Download builds from [Tagnetic’s GitHub releases](https://github.com/djhappyman/tagrex/releases).
+Earlier packages still use the name TagRex Personal. See the
+[release notes and build guidance](../BUILDING.md) for the current process.
 
 ## Tag defaults
 
@@ -202,7 +191,7 @@ you drag.
 
 ## Where things are stored
 
-TagRex keeps its own data in the standard per-user application directory for your
+Tagnetic keeps its own data in the standard per-user application directory for your
 platform, under `com.tagrex.desktop`:
 
 | Platform | Location |
@@ -222,5 +211,5 @@ grouping key, volume, keyboard shortcuts, the LAB fonts — are stored by the
 interface itself rather than in `settings.json`.
 
 **Nothing is stored inside your music folders**, and no database of your
-collection is kept. Delete the directory above and TagRex forgets your settings
+collection is kept. Delete the directory above and Tagnetic forgets your settings
 and your undo history; your music is untouched.

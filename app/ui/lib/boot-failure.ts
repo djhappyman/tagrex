@@ -7,7 +7,7 @@ export function showBootFailure(error: unknown) {
   notice.className = 'boot-failure';
   notice.setAttribute('role', 'alert');
   const heading = document.createElement('h1');
-  heading.textContent = 'TagRex couldn’t start';
+  heading.textContent = 'Tagnetic couldn’t start';
   const message = document.createElement('p');
   message.textContent = 'Reload the app to try again.';
   const reload = createComponentElement('button', { variant: 'default' });

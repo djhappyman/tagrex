@@ -239,7 +239,7 @@ pub fn html(tracks: &[TrackFile]) -> String {
     let mut out = String::new();
     out.push_str("<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n");
     out.push_str("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n");
-    out.push_str("<title>TagRex export</title>\n<style>\n");
+    out.push_str("<title>Tagnetic export</title>\n<style>\n");
     out.push_str(
         "body{font:14px/1.5 system-ui,sans-serif;margin:2rem;color:#1a1a1a}\
          h1{font-size:1.2rem;margin:0 0 .25rem}\
@@ -250,7 +250,7 @@ pub fn html(tracks: &[TrackFile]) -> String {
          tr:nth-child(even) td{background:#fafafa}\n",
     );
     out.push_str("</style>\n</head>\n<body>\n");
-    out.push_str("<h1>TagRex export</h1>\n");
+    out.push_str("<h1>Tagnetic export</h1>\n");
     out.push_str(&format!(
         "<p class=\"count\">{} track{}</p>\n",
         tracks.len(),

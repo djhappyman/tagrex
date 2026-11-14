@@ -120,7 +120,7 @@ jobs:
       - name: Upload bundles as artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: tagrex-${{ matrix.name }}
+          name: tagnetic-${{ matrix.name }}
           if-no-files-found: error
           path: |
             target/**/release/bundle/**/*.dmg
@@ -141,7 +141,7 @@ jobs:
       - name: Download complete package matrix
         uses: actions/download-artifact@v8
         with:
-          pattern: tagrex-*
+          pattern: tagnetic-*
           path: bundles
       - uses: actions/setup-node@v7
         with:

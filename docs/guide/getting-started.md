@@ -20,7 +20,7 @@ under "Files".
 Supported formats: MP3, FLAC, Ogg Vorbis, Opus, Speex, M4A/MP4, AAC, AIFF, WAV,
 Musepack, Monkey's Audio, WavPack. Anything else in the folder is ignored.
 
-> **Work on copies the first time.** Not because TagRex is careless with files —
+> **Work on copies the first time.** Not because Tagnetic is careless with files —
 > every change is previewed and journaled — but because the fastest way to trust
 > a tool is to watch it do something reversible to files you do not care about.
 
@@ -49,7 +49,7 @@ is not written: the cell goes back to what the file says, and a message says why
 
 Press the undo arrow in the top bar, or ⌘Z. The edit is rolled back.
 
-The undo journal is a database on disk, not a list in memory: close TagRex,
+The undo journal is a database on disk, not a list in memory: close Tagnetic,
 reopen it, open the same library, and the undo is still there waiting. That is
 what makes it safe to apply a change to four hundred files at the end of a long
 evening.

@@ -37,9 +37,9 @@ const SEARCH_LIMIT: &str = "25";
 /// per-recording ISRCs used as an exact match key (#54).
 const RELEASE_INC: &str = "recordings+artist-credits+labels+genres+isrcs";
 const USER_AGENT: &str = concat!(
-    "TagRex/",
+    "Tagnetic/",
     env!("CARGO_PKG_VERSION"),
-    " +https://github.com/tagrex/tagrex"
+    " +https://github.com/djhappyman/tagrex"
 );
 
 #[derive(Clone)]

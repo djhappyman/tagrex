@@ -16,11 +16,11 @@ export function planRelease(version, env) {
 }
 export function verifyBundles(root, version) {
   const expected = {
-    'tagrex-linux-x64': ['.deb', '.rpm', '.AppImage'],
-    'tagrex-linux-arm64': ['.deb', '.rpm'],
-    'tagrex-windows-x64': ['.exe'],
-    'tagrex-windows-arm64': ['.exe'],
-    'tagrex-macos-universal': ['.dmg'],
+    'tagnetic-linux-x64': ['.deb', '.rpm', '.AppImage'],
+    'tagnetic-linux-arm64': ['.deb', '.rpm'],
+    'tagnetic-windows-x64': ['.exe'],
+    'tagnetic-windows-arm64': ['.exe'],
+    'tagnetic-macos-universal': ['.dmg'],
   };
   const walk = path => readdirSync(path).flatMap(name => {
     const p = join(path, name); return statSync(p).isDirectory() ? walk(p) : [p];
@@ -92,10 +92,10 @@ function main() {
   const changelog = readFileSync('CHANGELOG.md', 'utf8');
   const section = changelog.split(`## [${plan.version}]`)[1]?.split(/\n## \[/)[0]?.replace(/^[^\n]*\n/, '').trim();
   const notes = join(root, 'release-notes.md');
-  writeFileSync(notes, `Personal fork development prerelease.\n\n${section || `Personal build ${plan.version}.`}\n\nSource: ${plan.sha}\nBuild: ${process.env.BUILD_RUN_URL || `https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}`}\n\nWindows x64/ARM64; universal macOS; Linux x64 DEB/RPM/AppImage and ARM64 DEB/RPM. Packages are not notarized or signed with paid desktop certificates. In-app updates remain disabled.\n`);
+  writeFileSync(notes, `Tagnetic development prerelease.\n\n${section || `Tagnetic ${plan.version}.`}\n\nSource: ${plan.sha}\nBuild: ${process.env.BUILD_RUN_URL || `https://github.com/${repository}/actions/runs/${process.env.GITHUB_RUN_ID}`}\n\nWindows x64/ARM64; universal macOS; Linux x64 DEB/RPM/AppImage and ARM64 DEB/RPM. Packages are not notarized or signed with paid desktop certificates. In-app updates remain disabled.\n`);
   let created;
   try {
-    created = JSON.parse(gh(['api', '--method', 'POST', `repos/${repository}/releases`, '-f', `tag_name=${plan.tag}`, '-f', `target_commitish=${plan.sha}`, '-f', `name=TagRex Personal ${plan.version}`, '-f', `body=${readFileSync(notes, 'utf8')}`, '-F', 'draft=true', '-F', 'prerelease=true', '-f', 'make_latest=false']));
+    created = JSON.parse(gh(['api', '--method', 'POST', `repos/${repository}/releases`, '-f', `tag_name=${plan.tag}`, '-f', `target_commitish=${plan.sha}`, '-f', `name=Tagnetic ${plan.version}`, '-f', `body=${readFileSync(notes, 'utf8')}`, '-F', 'draft=true', '-F', 'prerelease=true', '-f', 'make_latest=false']));
     assert.ok(created?.draft);
     gh(['release', 'upload', plan.tag, '--repo', repository, ...assets]);
     const draft = api(`releases/${created.id}`); assert.equal(draft.id, created.id); assert.ok(draft.draft); assertAssets(draft.assets, assets);

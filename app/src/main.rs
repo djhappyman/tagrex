@@ -1798,7 +1798,7 @@ async fn install_update(
 ) -> Result<(), ErrorDto> {
     if !IN_APP_UPDATES {
         return Err(ErrorDto::plain(
-            "Automatic updates are disabled for this personal build.",
+            "In-app updates are disabled for Tagnetic. Download releases from this project’s GitHub page.",
         ));
     }
     let update = pending
@@ -1849,7 +1849,7 @@ async fn open_releases_page() -> Result<(), ErrorDto> {
 }
 
 /// The mask guide, linked from the foot of the placeholder reference (#557).
-const MASK_GUIDE: &str = "https://github.com/tagrex/tagrex/blob/main/docs/guide/masks.md";
+const MASK_GUIDE: &str = "https://github.com/djhappyman/tagrex/blob/main/docs/guide/masks.md";
 
 /// Open the mask guide in the system browser (#557). Fixed address, like the
 /// releases page: nothing the frontend sends can make this open anything else.

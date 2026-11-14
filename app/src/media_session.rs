@@ -303,13 +303,13 @@ mod mpris {
 
     /// The name players own on the session bus: `org.mpris.MediaPlayer2.` and
     /// the player's own part. One process per user, so no instance suffix.
-    const BUS_NAME: &str = "org.mpris.MediaPlayer2.tagrex";
+    const BUS_NAME: &str = "org.mpris.MediaPlayer2.tagnetic";
     const PATH: &str = "/org/mpris/MediaPlayer2";
     const PLAYER_IFACE: &str = "org.mpris.MediaPlayer2.Player";
     /// The track id the specification reserves for "nothing loaded".
     const NO_TRACK: &str = "/org/mpris/MediaPlayer2/TrackList/NoTrack";
     /// The `.desktop` file the Linux bundles install, without its extension.
-    const DESKTOP_ENTRY: &str = "TagRex";
+    const DESKTOP_ENTRY: &str = "Tagnetic";
 
     /// Where a remote command goes: the frontend's event, or a test's channel.
     type Sink = Arc<dyn Fn(MediaControl) + Send + Sync>;
@@ -621,7 +621,7 @@ mod mpris {
 
         #[zbus(property(emits_changed_signal = "const"))]
         fn identity(&self) -> &str {
-            "TagRex"
+            "Tagnetic"
         }
 
         #[zbus(property(emits_changed_signal = "const"))]
@@ -720,7 +720,7 @@ mod mpris {
         fn open_uri(&self, uri: &str) -> zbus::fdo::Result<()> {
             let _ = uri;
             Err(zbus::fdo::Error::NotSupported(
-                "TagRex plays the files in its own list".into(),
+                "Tagnetic plays the files in its own list".into(),
             ))
         }
 
@@ -941,10 +941,10 @@ mod mpris {
         fn the_player_is_on_the_bus_with_what_the_frontend_reports() {
             let fx = fixture("report");
             let root = fx.proxy("org.mpris.MediaPlayer2");
-            assert_eq!(root.get_property::<String>("Identity").unwrap(), "TagRex");
+            assert_eq!(root.get_property::<String>("Identity").unwrap(), "Tagnetic");
             assert_eq!(
                 root.get_property::<String>("DesktopEntry").unwrap(),
-                "TagRex"
+                "Tagnetic"
             );
             let player = fx.proxy(PLAYER_IFACE);
             assert_eq!(

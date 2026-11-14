@@ -24,8 +24,8 @@ function fixture(t) {
     'macos-universal': ['universal.dmg'], 'windows-x64': ['x64.exe'], 'windows-arm64': ['arm64.exe'],
   };
   for (const [name, types] of Object.entries(matrix)) {
-    const dir = join(root, `tagrex-${name}`, 'nested'); mkdirSync(dir, { recursive: true });
-    for (const type of types) writeFileSync(join(dir, `TagRex Personal_1.4.1_${type}`), 'package');
+    const dir = join(root, `tagnetic-${name}`, 'nested'); mkdirSync(dir, { recursive: true });
+    for (const type of types) writeFileSync(join(dir, `Tagnetic_1.4.1_${type}`), 'package');
   }
   return root;
 }
@@ -37,7 +37,7 @@ test('full installer set is required, including both Linux formats and AppImage'
 test('wrong versions, empty packages and unexpected duplicate formats are rejected', t => {
   const root = fixture(t); assert.throws(() => verifyBundles(root, '1.4.10'));
   const files = verifyBundles(root, '1.4.1'); writeFileSync(files[0], ''); assert.throws(() => verifyBundles(root, '1.4.1'));
-  writeFileSync(files[0], 'package'); writeFileSync(join(root, 'tagrex-linux-x64', 'duplicate.deb'), 'extra');
+  writeFileSync(files[0], 'package'); writeFileSync(join(root, 'tagnetic-linux-x64', 'duplicate.deb'), 'extra');
   assert.throws(() => verifyBundles(root, '1.4.1'));
 });
 test('published draft assets must match every file size and SHA-256 digest', t => {

@@ -26,9 +26,9 @@ use tagrex_core::transform::{TransformChain, TransformStep};
 
 const API_BASE: &str = "https://api.discogs.com";
 const USER_AGENT: &str = concat!(
-    "TagRex/",
+    "Tagnetic/",
     env!("CARGO_PKG_VERSION"),
-    " +https://github.com/tagrex/tagrex"
+    " +https://github.com/djhappyman/tagrex"
 );
 
 #[derive(Clone)]
