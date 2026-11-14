@@ -106,7 +106,14 @@ for(const font of ['inter','mono']) {
       await expect(inputs).toHaveCount(4);
       for(let i=0;i<4;i++){
         const input=inputs.nth(i);await input.fill(i%2?'999':'123');
-        expect(await input.evaluate(node=>{const s=getComputedStyle(node);return node.clientWidth-parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);})).toBeGreaterThanOrEqual(24);
+        // Input clientWidth excludes padding in Chromium 158, unlike 155.
+        // Measure the same rendered content box without subtracting it twice.
+        expect(await input.evaluate(node=>{
+          const s=getComputedStyle(node);
+          return node.getBoundingClientRect().width
+            -parseFloat(s.borderLeftWidth)-parseFloat(s.borderRightWidth)
+            -parseFloat(s.paddingLeft)-parseFloat(s.paddingRight);
+        })).toBeGreaterThanOrEqual(24);
         await expect(input).toHaveValue(i%2?'999':'123');
       }
     }
