@@ -1098,7 +1098,11 @@ fn custom_item_options() -> ParseOptions {
 /// The error reported when all three fail is the **first** one: it describes the
 /// file as it actually presents itself, which is what someone looking at the
 /// message needs.
+///
+/// An Ogg stream of a codec the backend cannot read is refused before any of
+/// them (#762), see [`refuse_unsupported_ogg`].
 fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
+    refuse_unsupported_ogg(path)?;
     let first = match probe_source(path)?
         .guess_file_type()?
         .options(parse_options())
@@ -1137,6 +1141,62 @@ fn probe_file(path: &Path) -> Result<lofty::file::TaggedFile, TagIoError> {
     }
 
     Err(first.into())
+}
+
+/// The first packet of each Ogg codec the backend reads: Vorbis, Opus, Speex.
+const OGG_CODEC_MAGICS: [&[u8]; 3] = [b"\x01vorbis", b"OpusHead", b"Speex   "];
+
+/// Refuse an Ogg stream of a codec the backend has no reader for (#762).
+///
+/// The backend knows an Ogg file only by the codecs it reads. One holding FLAC
+/// fell through its sniff to the frame-sync search, which found an ADTS-looking
+/// pair of bytes in the FLAC data and read the file as AAC: no tags shown, and
+/// a write put an ID3v2 tag in front of the first Ogg page. So the first
+/// packet is looked at here, and anything but a codec the backend reads is
+/// unsupported, named when it is FLAC. A leading ID3v2 tag is stepped over
+/// first, so a file such a write already damaged is refused too instead of
+/// being read as AAC again.
+fn refuse_unsupported_ogg(path: &Path) -> Result<(), TagIoError> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = std::fs::File::open(path)?;
+    let mut head = [0u8; 10];
+    if file.read_exact(&mut head).is_err() {
+        return Ok(());
+    }
+    let start = if &head[..3] == b"ID3" {
+        let size = head[6..10]
+            .iter()
+            .fold(0u64, |size, byte| (size << 7) | u64::from(byte & 0x7f));
+        let footer = if head[5] & 0x10 != 0 { 10 } else { 0 };
+        10 + size + footer
+    } else {
+        0
+    };
+    file.seek(SeekFrom::Start(start))?;
+    // The page header is 27 bytes and its segment table at most 255; the
+    // longest magic follows right after.
+    let mut page = Vec::new();
+    file.take(27 + 255 + 8).read_to_end(&mut page)?;
+    if !page.starts_with(b"OggS") {
+        return Ok(());
+    }
+    let packet = page
+        .get(26)
+        .and_then(|&segments| page.get(27 + usize::from(segments)..))
+        .unwrap_or_default();
+    if OGG_CODEC_MAGICS
+        .iter()
+        .any(|magic| packet.starts_with(magic))
+    {
+        return Ok(());
+    }
+    let codec = if packet.starts_with(b"\x7fFLAC") {
+        "Ogg FLAC"
+    } else {
+        "Ogg (unknown codec)"
+    };
+    Err(TagIoError::UnsupportedFormat(codec.to_string()))
 }
 
 /// The file at `path`, in memory, with the frames of its leading ID3v2 tag that
