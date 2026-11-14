@@ -68,8 +68,11 @@ jobs:
           trap cleanup EXIT
           # Explicit partition layout and a larger image avoid filesystem
           # geometry/default-layout differences in macOS image creation.
-          hdiutil create -size 512m -layout GPTSPUD -format UDRW \
+          # Formatting ExFAT can require the privileged image helper on
+          # hosted macOS. This affects only the new disposable image above.
+          sudo -n hdiutil create -size 512m -layout GPTSPUD \
             -fs "$OUTPUT_FILESYSTEM" -volname TagRexOutputs "$image"
+          sudo -n chown "$(id -u):$(id -g)" "$image"
           mkdir "$mount"
           hdiutil attach "$image" -mountpoint "$mount" -nobrowse
           export TAGREX_OUTPUT_TEST_ROOT="$mount"
