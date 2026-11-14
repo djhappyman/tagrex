@@ -1034,6 +1034,22 @@ pub struct TrackRead {
     pub has_cover: bool,
 }
 
+impl TrackRead {
+    /// The existing native field for the compilation flag. The UI edits this
+    /// through the ordinary preview/Apply path, without guessing tag names.
+    pub fn compilation_field(&self) -> Option<TagField> {
+        let kind = self
+            .blocks
+            .iter()
+            .find(|block| block.read_from)
+            .map_or(self.file.format.primary_tag_type(), |block| {
+                block.kind.to_tag_type()
+            });
+        ItemKey::FlagCompilation.map_key(kind)?;
+        Some(item_key_to_tag_field(ItemKey::FlagCompilation, kind))
+    }
+}
+
 /// A single audio file as seen by the table model.
 #[derive(Debug, Clone)]
 pub struct TrackFile {
