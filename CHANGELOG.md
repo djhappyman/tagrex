@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dependency update proposals no longer offer a `windows-future` bump on its own: its newer releases need a `windows` crate that has not been published yet, so it is now updated by hand together with that crate ([#756](https://github.com/tagrex/tagrex/issues/756)).
 - Dependency update proposals no longer offer a new major version of `zbus` on its own: it stays on the major version the single-instance plugin builds, so the Linux build carries one copy of it ([#759](https://github.com/tagrex/tagrex/issues/759)).
 - On a FAT or exFAT volume such as a USB stick, the hidden `._` companion files macOS writes next to every file are no longer listed as extra, unreadable tracks ([#755](https://github.com/tagrex/tagrex/issues/755)).
+- The Linux build keeps moving files to the Trash with the 5.3 release of the trash library, which made its Linux backend a feature of its own; without it the build failed ([#760](https://github.com/tagrex/tagrex/issues/760)).
 
 ## [1.5.0] - 2026-11-13
 
