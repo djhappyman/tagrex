@@ -80,7 +80,8 @@ test('the keyboard splitter resizes the workspace and remembers the layout on re
   const before = Number(await splitter.getAttribute('aria-valuenow'));
   const originalWidth = (await page.locator('.mode-col').boundingBox()).width;
   await splitter.focus();
-  await page.keyboard.press('ArrowLeft');
+  // Move beyond the inspector's desktop minimum before measuring growth.
+  for (let step=0;step<6;step++) await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => Number(await splitter.getAttribute('aria-valuenow'))).toBeLessThan(before);
   expect((await page.locator('.mode-col').boundingBox()).width).toBeGreaterThan(originalWidth);
   const changed = Number(await splitter.getAttribute('aria-valuenow'));
@@ -88,7 +89,7 @@ test('the keyboard splitter resizes the workspace and remembers the layout on re
   await expect.poll(() => page.evaluate(() => typeof window.tagrex?.setMode)).toBe('function');
   await expect.poll(async () => Number(await splitter.getAttribute('aria-valuenow'))).toBe(changed);
   await splitter.focus();
-  await page.keyboard.press('ArrowRight');
+  for (let step=0;step<6;step++) await page.keyboard.press('ArrowRight');
   await expect.poll(async () => Number(await splitter.getAttribute('aria-valuenow'))).toBe(before);
 });
 
@@ -496,7 +497,7 @@ for (const viewport of [{ width: 375, height: 667 }, { width: 844, height: 390 }
   test(`every mode keeps its primary actions reachable at ${viewport.width}×${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     const actions = {
-      tagger: ['fields-clear'], renamer: ['preview'],
+      tagger: [], renamer: ['preview'],
       generator: ['presets-edit', 'autonum-run', 'vinyl-split'],
       deduplicator: ['dup-scan'], exporter: ['export-run'],
     };

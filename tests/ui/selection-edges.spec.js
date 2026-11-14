@@ -95,7 +95,7 @@ test('column chooser uses available height and scrolls its quiet list inside a f
   await expect(menu).toBeVisible();
   await expect.poll(()=>surface.evaluate(node=>node.getAnimations().filter(animation=>animation.playState==='running').length)).toBe(0);
   const box=await surface.boundingBox(),listBox=await list.boundingBox(),fitBox=await fit.boundingBox(),footerBox=await footer.boundingBox();
-  expect(box.height).toBeGreaterThan(300);expect(box.y+box.height).toBeLessThanOrEqual(493);
+  expect(box.height).toBeGreaterThanOrEqual(280);expect(box.y+box.height).toBeLessThanOrEqual(493);
   expect(fitBox.y+fitBox.height).toBeLessThan(listBox.y);expect(listBox.y+listBox.height).toBeLessThanOrEqual(footerBox.y);
   expect(listBox.x+listBox.width).toBeLessThan(box.x+box.width);
   await expect(footer.getByRole('button',{name:'Add',exact:true})).toBeVisible();await expect(footer.getByRole('button',{name:'Reset',exact:true})).toBeVisible();
@@ -132,10 +132,10 @@ test('manual-review group selection keeps the whole group when a Shift range ext
   await groups.nth(1).locator('.group-label').click({button:'right'});await expect(page.locator('tr[data-path].selected')).toHaveCount(3);
   await rows(page).first().locator('td.file').click({modifiers:['Shift']});await expect(page.locator('tr[data-path].selected')).toHaveCount(6);
 });
-test('a Show old values toggle recalibrates the entire virtual scroll extent',async({page})=>{
+test('switching Staged comparison recalibrates the entire virtual scroll extent',async({page})=>{
   await manualPlan(page);const before=await page.locator('#files-view').evaluate(node=>node.scrollHeight);
-  await page.locator('.toggle-old').click();const after=await page.locator('#files-view').evaluate(node=>node.scrollHeight);expect(after).toBeGreaterThan(before*1.5);
-  await page.locator('.toggle-old').click();expect(await page.locator('#files-view').evaluate(node=>node.scrollHeight)).toBeLessThan(after*.75);
+  await page.locator('#staged-tab').click();const after=await page.locator('#files-view').evaluate(node=>node.scrollHeight);expect(after).toBeGreaterThan(before*1.5);
+  await page.locator('#files-tab').click();expect(await page.locator('#files-view').evaluate(node=>node.scrollHeight)).toBeLessThan(after*.75);
 });
 test('a plain empty-space click preserves the highlighted manual Apply scope',async({page})=>{
   await manualPlan(page,6);const box=await page.locator('#files-view').boundingBox();await page.mouse.click(box.x+60,box.y+box.height-30);

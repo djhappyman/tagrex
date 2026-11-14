@@ -38,11 +38,20 @@
     <ControllerContextMenu id="file-ctx">
       <ControllerMenuItem cmd="bpm"><svg class="ico"><use href="#i-metronome"/></svg><span data-i18n="toolbar.detectBpm">Detect BPM</span><span class="ctx-key" data-action="detectBpm"></span></ControllerMenuItem>
       <ControllerMenuItem cmd="clear"><svg class="ico"><use href="#i-eraser"/></svg><span data-i18n="editor.clearTags">Clear tags</span><span class="ctx-key" data-action="clearTags"></span></ControllerMenuItem>
+      <ControllerMenuItem cmd="formats"><svg class="ico"><use href="#i-tag"/></svg><span data-i18n="staging.tagFormats">Tag formats…</span></ControllerMenuItem>
       <ContextMenu.Separator class="ctx-sep" />
       <ControllerMenuItem cmd="hide"><svg class="ico"><use href="#i-list-remove"/></svg><span class="ctx-label" data-i18n="ctx.removeFromList">Remove from the list</span></ControllerMenuItem>
       <ContextMenu.Separator class="ctx-sep" />
       <ControllerMenuItem cmd="trash" danger><svg class="ico"><use href="#i-trash"/></svg><span class="ctx-label" data-i18n="ctx.trash">Move to Trash…</span><span class="ctx-key" data-action="trash"></span></ControllerMenuItem>
     </ControllerContextMenu>
+
+    <ControllerDialog id="tag-formats-modal" labelledby="tag-formats-title" closeId="tag-formats-close">
+      <div class="modal tag-formats-modal">
+        <div class="modal-head"><h2 id="tag-formats-title" data-i18n="staging.tagFormats">Tag formats…</h2><Button id="tag-formats-close" variant="ghost" size="icon-sm" class="icon" aria-label="Close"><svg class="ico"><use href="#i-close"/></svg></Button></div>
+        <p id="fields-blocks" class="hint muted" hidden></p>
+        <div id="fields-blocks-convert" class="blocks-convert" hidden></div>
+      </div>
+    </ControllerDialog>
 
     <ControllerDialog id="colmask-modal" labelledby="colmask-title" closeId="colmask-close">
       <div class="modal colmask">

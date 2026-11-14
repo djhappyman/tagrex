@@ -1373,4 +1373,20 @@ export const ru = {
   "inspector.skippedLines": {"one": "{n} строка пропущена", "few": "{n} строки пропущено", "many": "{n} строк пропущено", "other": "{n} строки пропущено"},
   "settings.interfaceFont": "Шрифт интерфейса",
   "settings.interfaceFontHint": "Для элементов управления и подписей. Сохраняется сразу; шрифт данных выбирается отдельно.",
+
+  "editor.compilation": "Отметить как сборник",
+  "editor.compilationMixed": "Разные значения. Выберите одно значение для всех выбранных файлов.",
+  "editor.compilationUnsupported": "Форматы тегов выбранных файлов не поддерживают отметку сборника.",
+  "editor.mixedValue": "Разные значения",
+  "staging.heading": "Ожидающие изменения",
+  "staging.fileCount": "{files} с изменениями",
+  "staging.views": "Представления файлов",
+  "staging.files": "Файлы",
+  "staging.tab": "Изменения",
+  "staging.clear": "Сбросить ожидающие изменения",
+  "staging.preview": "Предпросмотр",
+
+  "staging.empty": "Нет ожидающих изменений",
+  "staging.tagFormats": "Форматы тегов…",
+  "staging.applyFirst": "Примените или сбросьте изменения перед удалением файлов из списка.",
 };

@@ -13,16 +13,16 @@
      24  field group -> field group      (--inspector-block)
      32  section -> section              (only between stacked panel blocks)
      12  heading / row content gaps, panel insets
-      4  inside a row, head -> first row, stacked rows
+      8  field row -> field row
+      4  inside a row, head -> first row
    Documented optical exceptions:
      * 1px seams, focus edges and the 3px state-marker rail (table-consistent);
        the marker keeps a 2px radius and is vertically inset so the row's
        control contour stays unbroken.
-     * Field pitch is 36px = 32px control (--ctl-h) + one 4px substep; the row
+     * Field pitch is 40px = 32px control (--ctl-h) + one 8px gap; the row
        box itself is the 32px control so a staged tint shares its contour.
-     * The label rail is 74px from 300px up and is driven by the dock's own
-       width (container query), never by the window; below 300px labels move
-       above their field instead of squeezing the value rail.
+     * The normal label rail is 74px; secondary compact labels use 32px.
+       The desktop form keeps its structure inside its own scrollport.
    ========================================================================== */
 
 body .mode-col {
@@ -182,6 +182,7 @@ body .mode-col :is(.hint, .cover-meta, .cover-hint, .panel-note) {
 /* ---- field groups: 24px between groups, 4px inside --------------------- */
 body .mode-col .fe {
   gap: var(--inspector-block);
+  min-width: 360px; /* fixed desktop form; a narrower dock scrolls horizontally */
 }
 body .mode-col .fe-group {
   gap: var(--sp-1);
@@ -190,7 +191,7 @@ body .mode-col .fe-group + .fe-group {
   margin-top: 0; /* grouping comes from .fe's gap, never from both */
 }
 body .mode-col .fe-grid {
-  gap: 0;
+  gap: var(--sp-2);
 }
 body .mode-col .fe-group-head,
 body .mode-col button.fe-group-head {
@@ -235,8 +236,8 @@ body .mode-col .fe-group-count {
 
 /* ---- one field row ------------------------------------------------------
    The row box is exactly one control tall, so a staged/error tint shares the
-   input's 10px contour (row radius = control radius, inset 0). The 4px
-   substep lives in the margin between rows, keeping the 36px pitch. */
+   input's 10px contour (row radius = control radius, inset 0). The parent
+   owns an 8px gap between every row, including compact field groups. */
 body .mode-col .fe-row {
   grid-template-columns: 3px var(--inspector-label) minmax(0, 1fr) var(--ctl-hit);
   column-gap: var(--sp-1);
@@ -246,7 +247,7 @@ body .mode-col .fe-row {
   border-radius: var(--r-control);
 }
 body .mode-col .fe-row + .fe-row {
-  margin-top: var(--sp-1);
+  margin-top: 0; /* the grid owns gaps for plain and paired rows alike */
 }
 /* The number row has no label rail: marker, the pair group, the pair's lock. */
 body .mode-col .fe-row.duo {
@@ -272,18 +273,21 @@ body .mode-col .fe-row.dirty .fe-label {
 body .mode-col .fe-row.multiple .fe-label {
   font-style: normal;
 }
+body .mode-col .fe-hint:empty {
+  display: none; /* an empty focus hint must not add padding to the row */
+}
 body .mode-col .fe-row.error .fe-label {
   color: var(--del);
 }
 body .mode-col .fe-comment {
-  align-items: start;
+  align-items: center;
   padding-block: var(--sp-1);
 }
 body .mode-col .fe-comment > .fe-label {
-  padding-top: var(--sp-1);
+  padding-top: 0;
 }
 body .mode-col .fe-comment > .fe-lock {
-  margin-top: var(--sp-1);
+  margin-top: 0;
 }
 
 /* ---- inputs, selects, textareas: one control family -------------------- */
@@ -296,6 +300,7 @@ body .mode-col .fe-comment textarea.field-input {
   font-family: var(--font-value);
   font-size: var(--type-body-size);
   line-height: var(--input-line-height, var(--lh-tight));
+  text-align: start;
   transition: opacity 180ms ease;
 }
 body .mode-col .fe textarea.field-input {
@@ -341,19 +346,23 @@ body .mode-col :is(input[data-slot='input'], button.app-select-trigger) {
   font-size: var(--type-body-size);
 }
 
-/* ---- labels above value: the narrow dock's compression ----------------- */
+/* ---- compact metadata: the same left label rail as ordinary fields ---- */
 body .mode-col .fe-duo {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-  gap: var(--sp-4);
+  grid-template-columns: minmax(0, calc(50% + 15px)) minmax(0, 1fr);
+  gap: var(--sp-3);
   width: 100%;
 }
 body .mode-col .fe-duo-unit {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: var(--inspector-label) minmax(0, 1fr);
+  align-items: center;
   gap: var(--sp-1);
   min-width: 0;
   width: auto;
+}
+body .mode-col .fe-duo-unit + .fe-duo-unit {
+  grid-template-columns: 32px minmax(0, 1fr);
 }
 body .mode-col .fe-duo-label {
   width: auto;
@@ -366,63 +375,59 @@ body .mode-col .fe-duo .fe-pair {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
-  width: auto;
-  min-width: 0;
-  /* Fill the allocated unit before bounding the compact pair; auto width
-     collapses flex children whose basis and width are both zero. */
   width: 100%;
-  max-width: 148px;
+  min-width: 0;
 }
 body .mode-col .fe-duo .fe-pair .field-input {
   flex: 1 1 0;
   width: 0;
   min-width: 0;
-  padding-inline: var(--sp-2);
-  text-align: center;
+  padding-inline: 6px;
+  text-align: start;
 }
 body .mode-col .fe-cell.num {
   align-items: flex-start;
 }
 body .mode-col .fe-cell.num > .field-input {
+  width: 100%;
   max-width: 96px;
 }
-/* Two compact fields share one row: label above, value below it. */
+body .mode-col .fe-cell.num > .field-input:placeholder-shown {
+  text-align: start;
+}
+/* Desktop compact rows retain their two-column structure at every dock size. */
 body .mode-col .fe-inline-fields {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--sp-1) var(--sp-4);
+  grid-template-columns: minmax(0, calc(50% + 13px)) minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-4);
 }
-body .mode-col .fe-inline-fields > .fe-row,
 body .mode-col .fe-inline-fields > .fe-row + .fe-row {
-  grid-template-columns: 3px minmax(0, 1fr) var(--ctl-hit);
-  grid-template-rows: auto auto;
-  row-gap: var(--sp-1);
-  column-gap: var(--sp-1);
-  align-items: center;
-  margin-top: 0;
-}
-body .mode-col .fe-inline-fields .fe-label {
-  grid-column: 2 / 3;
-  grid-row: 1;
-}
-body .mode-col .fe-inline-fields .fe-cell {
-  grid-column: 2 / 3;
-  grid-row: 2;
-  width: 100%;
-  min-width: 0;
-}
-body .mode-col .fe-inline-fields .fe-marker {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-  align-self: center;
-}
-body .mode-col .fe-inline-fields .fe-lock {
-  grid-column: 3;
-  grid-row: 2;
+  grid-template-columns: 3px 32px minmax(0, 1fr) var(--ctl-hit);
 }
 body .mode-col .fe-inline-fields .fe-cell.num > .field-input {
   max-width: none;
 }
+body .mode-col .fe-year-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+  align-items: center;
+}
+body .mode-col .fe-year-options > .fe-row { margin: 0; }
+body .mode-col .fe-year-options .fe-cell.num > .field-input { max-width: 128px; }
+body .mode-col .fe-compilation {
+  grid-template-columns: 3px minmax(0, 1fr) var(--ctl-hit);
+}
+body .mode-col .fe-compilation-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--ctl-h);
+  color: var(--label);
+  font-size: var(--type-help-size);
+  white-space: nowrap;
+}
+body .mode-col .editor-scroll { overflow-x: auto; }
 
 /* ---- add-a-field row --------------------------------------------------- */
 body .mode-col .fe-add {
@@ -1094,70 +1099,15 @@ body .mode-col :is(#panel-renamer, #panel-deduplicator, #panel-exporter) .panel-
     --inspector-inset: var(--sp-2);
   }
   body .mode-col .fe-duo {
-    gap: var(--sp-3);
+    gap: var(--sp-2) var(--sp-3);
   }
   body .mode-col .fe-inline-fields {
-    gap: var(--sp-1) var(--sp-3);
+    gap: var(--sp-2) var(--sp-3);
   }
 }
-/* Below 300px the label rail would squeeze the value: put the label above the
-   field instead (the pattern the inline fields already use). */
-@container tag-inspector (max-width: 300px) {
-  body .mode-col .fe-row {
-    grid-template-columns: 3px minmax(0, 1fr) var(--ctl-hit);
-    grid-template-rows: auto auto;
-    row-gap: 2px; /* optical: label sits tight to its own value */
-    align-items: center;
-    padding-block: 2px;
-  }
-  body .mode-col .fe-label {
-    grid-column: 2 / 3;
-    grid-row: 1;
-  }
-  body .mode-col .fe-cell {
-    grid-column: 2 / 3;
-    grid-row: 2;
-    width: 100%;
-    min-width: 0;
-  }
-  body .mode-col .fe-lock {
-    grid-column: 3;
-    grid-row: 2;
-  }
-  body .mode-col .fe-marker {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-  }
-  body .mode-col .fe-row.duo {
-    grid-template-columns: 3px minmax(0, 1fr) var(--ctl-hit);
-    grid-template-rows: auto;
-  }
-  body .mode-col .fe-row.duo .fe-lock {
-    grid-column: 3;
-    grid-row: 1;
-    justify-self: center;
-  }
-  /* The stacked row is taller than its control, so the staged/error tint moves
-     onto the control itself: one 32px box, one 10px contour, in every state. */
-  body .mode-col .fe-row.dirty,
-  body .mode-col .fe-row.error {
-    background: transparent;
-  }
-  body .mode-col .fe-row.dirty .fe-cell .field-input {
-    background: var(--dirty-tint);
-  }
-  body .mode-col .fe-row.error .fe-cell .field-input {
-    background: var(--error-tint);
-  }
-  body .mode-col .fe-duo {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  body .mode-col .fe-inline-fields {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  body .mode-col .fe-cell.num > .field-input {
-    max-width: none;
-  }
+@container tag-inspector (max-width: 430px) {
+  body .mode-col .fe-year-options { grid-template-columns:minmax(0,1fr) 144px; }
+  body .mode-col .fe-compilation-label { white-space:normal; line-height:1.2; }
 }
 @container tag-inspector (max-width: 240px) {
   body .mode-col .online-empty {
@@ -1181,3 +1131,23 @@ body .mode-col :is(#panel-renamer, #panel-deduplicator, #panel-exporter) .panel-
     transition: none !important;
   }
 }
+
+/* A checkbox does not need the full staged-input tint or marker rail. */
+body .mode-col .fe-compilation.dirty { background:transparent; }
+body .mode-col .fe-compilation .fe-marker { visibility:hidden; }
+
+/* Keep pending work outside the panel scrollport, level with the table bottom. */
+body .mode-col { overflow:hidden; }
+body .mode-col > .mode-panel:not([hidden]) { flex:1 1 0; min-height:0; overflow-y:auto; }
+body .mode-col #panel-tagger { overflow:hidden; }
+body .mode-col .staged-edits {
+  flex:0 0 auto; min-width:0; margin:var(--sp-3); margin-top:var(--sp-2); padding:var(--sp-3);
+  border:0; border-radius:var(--r-inset); background:var(--bg);
+}
+.staged-edits[hidden] { display:none; }
+.staged-head { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); }
+.staged-head > div { display:flex; align-items:baseline; flex-wrap:wrap; gap:var(--sp-2); }
+.staged-head h3 { margin:0; font-size:var(--type-body-size); font-weight:var(--fw-strong); color:var(--text); }
+.staged-count { font-size:var(--type-help-size); color:var(--muted); }
+body button.staged-remove { flex:none; width:24px; height:24px; min-width:24px; min-height:24px; padding:5px; border:0; background:transparent; color:var(--muted); border-radius:var(--r-compact); }
+body button.staged-remove:hover { background:var(--row-hover); color:var(--text); }

@@ -1372,4 +1372,20 @@ export const es = {
   "inspector.skippedLines": {"one": "{n} línea omitida", "other": "{n} líneas omitidas"},
   "settings.interfaceFont": "Fuente de la interfaz",
   "settings.interfaceFontHint": "Para controles y etiquetas. Se guarda al instante; la fuente de datos sigue siendo independiente.",
+
+  "editor.compilation": "Marcar como recopilación",
+  "editor.compilationMixed": "Indicadores distintos. Elige un valor para todos los archivos seleccionados.",
+  "editor.compilationUnsupported": "Los formatos de etiquetas de esta selección no admiten el indicador de recopilación.",
+  "editor.mixedValue": "Valores distintos",
+  "staging.heading": "Cambios pendientes",
+  "staging.fileCount": "{files} pendientes",
+  "staging.views": "Vistas de archivos",
+  "staging.files": "Archivos",
+  "staging.tab": "Pendientes",
+  "staging.clear": "Descartar cambios pendientes",
+  "staging.preview": "Vista previa",
+
+  "staging.empty": "No hay cambios pendientes",
+  "staging.tagFormats": "Formatos de etiquetas…",
+  "staging.applyFirst": "Aplica o descarta los cambios pendientes antes de quitar archivos.",
 };

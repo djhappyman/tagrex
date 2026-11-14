@@ -73,15 +73,14 @@ test('Transformations header collapses to its header and gives Inspector the rec
   await expect(toggle(page)).toBeFocused();
 });
 
-test('Core, More tags and Advanced headers are accessible collapsibles and retired Add controls are absent', async ({ page }) => {
+test('everyday fields stay open while More tags stays an accessible collapsible', async ({ page }) => {
   await open(page);
   await editor(page);
-  await expect(page.locator('#fields-body .fe-group[data-group="core"] > button.fe-group-head')).toHaveAttribute('aria-expanded', 'true', { timeout: 1200 });
-  await expect(page.locator('.fe-group[data-group="core"] .fe-group-count')).toHaveText('13');
+  await expect(page.locator('#fields-body .fe-group[data-group="core"] > button.fe-group-head')).toHaveCount(0);
   await expect(page.locator('#subtab-editor [data-i18n="editor.tagFields"], #subtab-editor [data-i18n="editor.fieldsShort"]')).toHaveCount(0);
   await expect(page.locator('#fields-add-toggle, #fields-add-row, #fields-new-name, #fields-new-value, #fields-add, #fields-add-cancel, #fields-known')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Add tags$/i })).toHaveCount(0);
-  for (const kind of ['core', 'standard']) {
+  for (const kind of ['standard']) {
     const head = page.locator(`.fe-group[data-group="${kind}"] > button.fe-group-head`);
     await expect(head).toHaveAttribute('aria-controls', `editor-group-${kind}`);
     const labelOffset = await head.evaluate((node, name) => {
@@ -220,7 +219,6 @@ test('editor group folding retains drafts and metadata while preferences follow 
     track.tags = { ...track.tags, 'custom:QA_RAW_TAG': 'Existing custom metadata' };
     window.tagrex.renderTracks();
   });
-  const core = page.locator('.fe-group[data-group="core"] > button.fe-group-head');
   const advanced = page.locator('.fe-group[data-group="advanced"] > button.fe-group-head');
   await advanced.click();
   const custom = page.locator('input[data-key="custom:QA_RAW_TAG"]');
@@ -234,11 +232,7 @@ test('editor group folding retains drafts and metadata while preferences follow 
   expect(await custom.evaluate(node => node === window.integrationCustom)).toBe(true);
   const title = page.locator('input[data-key="title"]').first();
   await title.fill('Subject A draft');
-  await core.click();
-  await expect(core).toHaveAttribute('aria-expanded', 'false');
   await page.locator('#tracks-body tr[data-path]').nth(1).locator('.file').click();
-  await expect(page.locator('.fe-group[data-group="core"] > button.fe-group-head')).toHaveAttribute('aria-expanded', 'false');
-  await core.click();
   await expect(title).toHaveValue('Radio');
   await expect(title).not.toHaveClass(/dirty/);
   expect(await page.evaluate(() => window.tagrex.tracks[0].tags['custom:QA_RAW_TAG'])).toBe('Existing custom metadata');
@@ -281,8 +275,9 @@ for (const theme of ['dark', 'light']) for (const size of [{ width: 375, height:
     await expect(page.locator('#presets-edit')).toBeInViewport({ ratio: 1 });
     await toggle(page).click(); await toggle(page).click();
     await editor(page);
-    await expect(page.locator('.fe-group[data-group="core"] > button.fe-group-head')).toBeInViewport({ ratio: 1 });
-    await expect(page.locator('#fields-clear')).toBeInViewport({ ratio: 1 });
+    await page.locator('#editor-field-title').scrollIntoViewIfNeeded();
+    await expect(page.locator('#editor-field-title')).toBeInViewport({ ratio: 1 });
+    await expect(page.locator('#staged-edits')).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     const panel = await page.locator('#dock-module-inspector').evaluate(node => ({ scroll: node.scrollWidth, client: node.clientWidth }));
     expect(panel.scroll).toBeLessThanOrEqual(panel.client);

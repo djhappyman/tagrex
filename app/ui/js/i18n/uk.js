@@ -1374,4 +1374,20 @@ export const uk = {
   "inspector.skippedLines": {"one": "{n} рядок пропущено", "few": "{n} рядки пропущено", "many": "{n} рядків пропущено", "other": "{n} рядки пропущено"},
   "settings.interfaceFont": "Шрифт інтерфейсу",
   "settings.interfaceFontHint": "Для елементів керування та підписів. Зберігається одразу; шрифт даних вибирається окремо.",
+
+  "editor.compilation": "Позначити як збірку",
+  "editor.compilationMixed": "Різні значення. Виберіть одне значення для всіх вибраних файлів.",
+  "editor.compilationUnsupported": "Формати тегів вибраних файлів не підтримують позначку збірки.",
+  "editor.mixedValue": "Різні значення",
+  "staging.heading": "Очікувані зміни",
+  "staging.fileCount": "{files} зі змінами",
+  "staging.views": "Подання файлів",
+  "staging.files": "Файли",
+  "staging.tab": "Зміни",
+  "staging.clear": "Скинути очікувані зміни",
+  "staging.preview": "Попередній перегляд",
+
+  "staging.empty": "Немає очікуваних змін",
+  "staging.tagFormats": "Формати тегів…",
+  "staging.applyFirst": "Застосуйте або скиньте зміни перед вилученням файлів зі списку.",
 };

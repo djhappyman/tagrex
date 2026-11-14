@@ -59,6 +59,7 @@ function anchorVisible(anchor) {
   if (rect.bottom <= 0 || rect.top >= innerHeight || rect.right <= 0 || rect.left >= innerWidth) return false;
   for (let parent = anchor.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
     const style = getComputedStyle(parent), clip = parent.getBoundingClientRect();
+    if (style.display === 'contents') continue; // no box exists to clip the owner
     if (/(auto|scroll|hidden|clip)/.test(style.overflowY) && (rect.bottom <= clip.top || rect.top >= clip.bottom)) return false;
     if (/(auto|scroll|hidden|clip)/.test(style.overflowX) && (rect.right <= clip.left || rect.left >= clip.right)) return false;
   }

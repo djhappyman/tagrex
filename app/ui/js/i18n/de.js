@@ -1370,4 +1370,20 @@ export const de = {
   "inspector.skippedLines": {"one": "{n} Zeile übersprungen", "other": "{n} Zeilen übersprungen"},
   "settings.interfaceFont": "Schrift der Oberfläche",
   "settings.interfaceFontHint": "Für Bedienelemente und Beschriftungen. Wird sofort gespeichert; die Datenschrift bleibt unabhängig.",
+
+  "editor.compilation": "Als Zusammenstellung markieren",
+  "editor.compilationMixed": "Unterschiedliche Markierungen. Wähle einen Wert für alle ausgewählten Dateien.",
+  "editor.compilationUnsupported": "Die Tag-Formate dieser Auswahl unterstützen keine Zusammenstellungsmarkierung.",
+  "editor.mixedValue": "Verschiedene Werte",
+  "staging.heading": "Vorgemerkte Änderungen",
+  "staging.fileCount": "{files} vorgemerkt",
+  "staging.views": "Dateiansichten",
+  "staging.files": "Dateien",
+  "staging.tab": "Vorgemerkt",
+  "staging.clear": "Vorgemerkte Änderungen verwerfen",
+  "staging.preview": "Vorschau",
+
+  "staging.empty": "Keine vorgemerkten Änderungen",
+  "staging.tagFormats": "Tag-Formate…",
+  "staging.applyFirst": "Änderungen vor dem Entfernen von Dateien anwenden oder verwerfen.",
 };

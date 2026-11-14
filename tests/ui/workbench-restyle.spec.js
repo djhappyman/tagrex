@@ -140,7 +140,7 @@ test('permanent playback follows the table width and stays reachable in the comp
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
 });
 
-test('Apply footer keeps a stable table and uses one scoped primary action beside Compare and Discard', async ({ page }) => {
+test('Apply footer keeps a stable table with Preview beside the scoped primary action', async ({ page }) => {
   await page.setViewportSize({width:1397,height:900});
   await openLibrary(page);
   await page.locator('.subtab[data-subtab="editor"]').click();
@@ -166,15 +166,15 @@ test('Apply footer keeps a stable table and uses one scoped primary action besid
   const button = await apply.boundingBox();
   expect(button.x).toBeGreaterThan(sidebar.x);
   expect(button.x + button.width).toBeLessThanOrEqual(sidebar.x + sidebar.width + 1);
-  await page.locator('.toggle-old').click();
-  await expect(page.locator('#diff-show-old')).toBeChecked();
+  await page.locator('#diff-preview').click();
   await expect(page.locator('#tracks')).toHaveClass(/show-old/);
   expect(await page.evaluate(() => window.tagrex.tracks[0].tags.title)).toBe('Desert Rain');
   const actionNode = await page.locator('#diff-actionbar').evaluate(node => { window.footerActionNode = node; return node.id; });
   expect(actionNode).toBe('diff-actionbar');
   await page.setViewportSize({width:375,height:667});
-  for (const id of ['diff-apply','diff-discard','diff-show-old-control']) await expect(page.locator(`#${id}`)).toBeInViewport({ratio:1});
+  for (const id of ['diff-apply','diff-preview']) await expect(page.locator(`#${id}`)).toBeInViewport({ratio:1});
   expect(await page.evaluate(() => window.footerActionNode === document.getElementById('diff-actionbar'))).toBe(true);
+  await page.setViewportSize({width:1280,height:800});
   await page.locator('#diff-discard').click();
   await expect(page.locator('#diff-actionbar')).toBeHidden();
   await expect(page.locator('#ab-locked')).toBeHidden();

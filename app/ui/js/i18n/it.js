@@ -1374,4 +1374,20 @@ export const it = {
   "inspector.skippedLines": {"one": "{n} riga saltata", "other": "{n} righe saltate"},
   "settings.interfaceFont": "Carattere dell’interfaccia",
   "settings.interfaceFontHint": "Per comandi ed etichette. Salvataggio immediato; il carattere dei dati resta indipendente.",
+
+  "editor.compilation": "Segna come compilation",
+  "editor.compilationMixed": "Valori diversi. Scegli un valore per tutti i file selezionati.",
+  "editor.compilationUnsupported": "I formati dei tag selezionati non supportano il contrassegno compilation.",
+  "editor.mixedValue": "Valori diversi",
+  "staging.heading": "Modifiche in sospeso",
+  "staging.fileCount": "{files} in sospeso",
+  "staging.views": "Viste dei file",
+  "staging.files": "File",
+  "staging.tab": "In sospeso",
+  "staging.clear": "Scarta modifiche in sospeso",
+  "staging.preview": "Anteprima",
+
+  "staging.empty": "Nessuna modifica in sospeso",
+  "staging.tagFormats": "Formati dei tag…",
+  "staging.applyFirst": "Applica o scarta le modifiche prima di rimuovere i file.",
 };

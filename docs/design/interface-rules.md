@@ -26,7 +26,8 @@ iterating on the personal interface; older design briefs are historical context.
 - Keep the folder bar with the file table and common commands in the toolbar.
   Show docking handles through View → Arrange panels rather than permanent chrome.
 - Align the permanent player beneath the file pane as the docks resize. Anchor
-  Compare, Discard and Apply beneath the inspector; put the affected file count
+  Preview and Apply beneath the inspector; keep the draft-clear control in the
+  pinned staged summary, visible only while edits exist. Put the affected file count
   in the primary action's natural-language label. Keep feedback from resizing
   the table during an active edit.
 - Use barely different row fills without divider borders; keep selection, staged
