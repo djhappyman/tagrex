@@ -6,6 +6,7 @@
   import DockModule from './DockModule.svelte';
   import type { WorkspaceLayout } from '$lib/workspace-layout';
   import FilterPanel from './FilterPanel.svelte';
+  import InspectorHelp from './InspectorHelp.svelte';
   import NativeCheckbox from './controls/NativeCheckbox.svelte';
   import NativeSlider from './controls/NativeSlider.svelte';
   import * as Popover from '$lib/components/ui/popover/index.js';
@@ -406,20 +407,19 @@
 
       <Tabs.Content value="online" id="subtab-online" class="subtab-panel online">
         <div class="online-head">
+          <div class="inspector-heading"><h2 data-i18n="inspector.onlineHeading">Find a release</h2><InspectorHelp labelKey="inspector.onlineInfo" helpKey="inspector.onlineHelp" /></div>
           <div class="online-head-row">
-            <label class="source-label"
-              ><span data-i18n="online.source">Source</span>
-              <NativeSelect size="sm" id="online-source" data-i18n-title="online.sourceTitle" title="Metadata source">
+            <div class="source-label">
+              <NativeSelect size="sm" id="online-source" data-i18n-aria-label="online.source" aria-label="Source" data-i18n-title="online.sourceTitle" title="Metadata source">
                 <NativeSelectOption value="discogs">Discogs</NativeSelectOption>
                 <NativeSelectOption value="musicbrainz">MusicBrainz</NativeSelectOption>
                 <NativeSelectOption value="beatport">Beatport</NativeSelectOption>
                 <NativeSelectOption value="bandcamp">Bandcamp</NativeSelectOption>
                 <NativeSelectOption value="soundeo">Soundeo</NativeSelectOption>
               </NativeSelect>
-            </label>
-            <div class="spacer"></div>
+            </div>
 
-            <NativeSelect size="sm" id="search-format" data-i18n-title="online.mediaFilter" title="Filter results by media type">
+            <NativeSelect size="sm" id="search-format" data-i18n-aria-label="online.mediaFilter" aria-label="Filter results by media type" data-i18n-title="online.mediaFilter" title="Filter results by media type">
               <NativeSelectOption value="" data-i18n="online.allMedia">All media</NativeSelectOption>
               <NativeSelectOption value="CD">CD</NativeSelectOption>
               <NativeSelectOption value="Vinyl" data-i18n="media.vinyl">Vinyl</NativeSelectOption>
@@ -431,17 +431,16 @@
           <div class="mask-row">
 
             <div id="query-box" class="query field">
-              <Input id="discogs-query" type="text" data-i18n-placeholder="online.queryPlaceholder" placeholder="artist / album / catalog no." spellcheck="false" />
+              <Input id="discogs-query" type="text" data-i18n-aria-label="online.queryPlaceholder" aria-label="Artist, album, or catalogue number" data-i18n-placeholder="online.queryPlaceholder" placeholder="artist / album / catalog no." spellcheck="false" />
               <div class="field-tools">
                 <Button variant="ghost" size="icon-sm" id="query-presets" class="icon" type="button" data-i18n-title="online.presets" title="Queries this selection can build" data-i18n-aria-label="online.presets" aria-label="Queries this selection can build" aria-expanded="false"><svg class="ico"><use href="#i-caret-down"/></svg></Button>
+                <Button variant="ghost" size="icon-sm" id="discogs-search" class="icon search-toggle" data-i18n-title="online.search" title="Search" data-i18n-aria-label="online.search" aria-label="Search">
+                  <svg class="glyph glyph-search" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.3" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="10.3" y1="10.3" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <svg class="glyph glyph-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
+                </Button>
               </div>
               <div id="query-preset-menu" class="col-menu" hidden></div>
             </div>
-
-            <Button variant="ghost" size="icon-sm" id="discogs-search" class="icon search-toggle" data-i18n-title="online.search" title="Search" data-i18n-aria-label="online.search" aria-label="Search">
-              <svg class="glyph glyph-search" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.3" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="10.3" y1="10.3" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-              <svg class="glyph glyph-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
-            </Button>
           </div>
           <div class="release-toolbar" id="release-toolbar" hidden>
             <span class="hint muted" id="release-found" data-i18n="online.foundNone">Found 0 entries</span>
@@ -461,7 +460,11 @@
         <div class="online-scroll">
 
           <div id="release-list" class="release-list"></div>
-          <p id="discogs-empty" class="empty inert-panel" data-i18n="online.empty">Search the selected source to see releases.</p>
+          <div class="online-empty" role="status">
+            <svg class="ico online-empty-icon" aria-hidden="true"><use href="#i-search" /></svg>
+            <h3 id="online-empty-heading" data-i18n="inspector.searchEmptyHeading">Find the right release</h3>
+            <p id="discogs-empty" class="empty" data-i18n="online.empty">Search by artist, album or catalogue number.</p>
+          </div>
         </div>
 
         <div id="release-more" class="release-more" hidden>
@@ -471,6 +474,7 @@
 
       <Tabs.Content value="editor" id="subtab-editor" class="subtab-panel editor" hidden>
         <div class="editor-scroll">
+          <div class="inspector-heading"><h2 data-i18n="inspector.editorHeading">Edit tags</h2><InspectorHelp labelKey="inspector.editorInfo" helpKey="inspector.editorHelp" /></div>
           <div class="panel-block">
             <span id="fields-count" hidden></span>
 
@@ -497,10 +501,10 @@
 
       <Tabs.Content value="filename" id="subtab-filename" class="subtab-panel from-name" hidden>
         <div class="from-name-scroll"><div class="panel-block">
-          <h2 data-i18n="fromName.heading">Tags from the file name</h2>
+          <div class="inspector-heading"><h2 data-i18n="fromName.heading">Read file names</h2><InspectorHelp labelKey="inspector.nameInfo" helpKey="inspector.nameHelp" /></div>
           <div class="mask-row">
             <div class="field">
-              <Input id="from-name-mask" type="text" value="%artist% - %title%" spellcheck="false" placeholder="%artist% - %title%" />
+              <Input id="from-name-mask" aria-label="Pattern" data-i18n-aria-label="inspector.pattern" type="text" value="%artist% - %title%" spellcheck="false" placeholder="%artist% - %title%" />
               <div class="field-tools">
                 <Button variant="ghost" size="icon-sm" class="icon ph-btn" type="button" data-ph-target="from-name-mask" data-i18n-title="mask.placeholders" title="Placeholders" data-i18n-aria-label="mask.placeholdersAria" aria-label="Placeholder reference"><svg class="ico"><use href="#i-help"/></svg></Button>
                 <Button variant="ghost" size="icon-sm" class="icon preset-btn" type="button" data-preset-target="from-name-mask" data-i18n-title="preset.title" title="Mask presets" data-i18n-aria-label="preset.title" aria-label="Mask presets"><svg class="ico"><use href="#i-presets"/></svg></Button>
@@ -512,10 +516,7 @@
 
           <div id="from-name-probe" class="probe"></div>
 
-          <details class="panel-help">
-            <summary data-i18n="fromName.hintSummary">How the mask is read</summary>
-            <p class="hint mask-hint" data-i18n="fromName.hint" data-i18n-html>A name that does not fit the mask is left alone. <span class="hint-tool">?</span> lists the placeholders and grammar, read in reverse. The builder tries the mask on every selected file.</p>
-          </details>
+
         </div></div>
         <div class="panel-actions from-name-actions">
           <Button variant="default" size="sm" id="from-name-preview" class="primary" data-i18n="fromName.preview">Preview</Button>
@@ -524,10 +525,10 @@
 
       <Tabs.Content value="fromtext" id="subtab-fromtext" class="subtab-panel from-name" hidden>
         <div class="from-name-scroll"><div class="panel-block">
-          <h2 data-i18n="fromText.heading">Tags from a text list</h2>
+          <div class="inspector-heading"><h2 data-i18n="fromText.heading">Read a text list</h2><InspectorHelp labelKey="inspector.textInfo" helpKey="inspector.textHelp" /></div>
           <div class="mask-row">
             <div class="field">
-              <Input id="from-text-mask" type="text" value="%track%. %artist% - %title%" spellcheck="false" placeholder="%track%. %artist% - %title%" />
+              <Input id="from-text-mask" aria-label="Pattern" data-i18n-aria-label="inspector.pattern" type="text" value="%track%. %artist% - %title%" spellcheck="false" placeholder="%track%. %artist% - %title%" />
               <div class="field-tools">
                 <Button variant="ghost" size="icon-sm" class="icon ph-btn" type="button" data-ph-target="from-text-mask" data-i18n-title="mask.placeholders" title="Placeholders" data-i18n-aria-label="mask.placeholdersAria" aria-label="Placeholder reference"><svg class="ico"><use href="#i-help"/></svg></Button>
                 <Button variant="ghost" size="icon-sm" class="icon preset-btn" type="button" data-preset-target="from-text-mask" data-i18n-title="preset.title" title="Mask presets" data-i18n-aria-label="preset.title" aria-label="Mask presets"><svg class="ico"><use href="#i-presets"/></svg></Button>
@@ -537,17 +538,17 @@
             </div>
           </div>
           <div class="from-text-head">
-            <span id="from-text-count" class="muted"></span>
-            <Button variant="outline" size="sm" id="from-text-suggest" type="button" data-i18n="fromText.suggest" data-i18n-title="fromText.suggestTitle" title="Builds a mask from the list layout: columns, numbering, dashes and lengths.">Suggest</Button>
-            <Button variant="outline" size="sm" id="from-text-load" type="button" data-i18n="fromText.load">Open</Button>
+            <label for="from-text-lines" data-i18n="inspector.trackList">Track list</label>
+            <Button variant="ghost" size="sm" id="from-text-load" type="button" data-i18n="fromText.load">Open file</Button>
           </div>
           <Textarea id="from-text-lines" class="from-text-lines" spellcheck="false" wrap="off" data-i18n-placeholder="fromText.placeholder" placeholder="Paste a tracklist, one line per track" />
+          <div class="from-text-meta">
+            <span id="from-text-count" class="muted" role="status"></span>
+            <Button variant="ghost" size="sm" id="from-text-suggest" type="button" data-i18n="fromText.suggest" data-i18n-title="fromText.suggestTitle" title="Builds a pattern from the list layout.">Detect pattern</Button>
+          </div>
           <div id="from-text-probe" class="probe"></div>
 
-          <details class="panel-help">
-            <summary data-i18n="fromText.hintSummary">How lines are matched</summary>
-            <p class="hint mask-hint" data-i18n="fromText.hint" data-i18n-html>One line per selected file, in table order. Lines that do not fit are skipped. <span class="hint-tool">?</span> lists the grammar. The builder shows every line.</p>
-          </details>
+
         </div></div>
         <div class="panel-actions from-name-actions">
           <Button variant="default" size="sm" id="from-text-preview" class="primary" data-i18n="fromName.preview">Preview</Button>

@@ -45,6 +45,17 @@ test('all palette modes have readable normal and muted text on every surface', (
   }
 });
 
+test('placeholder colours stay quieter than values and readable in every palette', () => {
+  for (const [name, tokens] of surfaces) {
+    for (const surface of ['bg','panel']) assert.ok(contrast(tokens['field-ghost'],tokens[surface])>=4.5, `${name}: placeholder on ${surface}`);
+    assert.ok(contrast(tokens['field-ghost'],tokens.bg)<contrast(tokens.muted,tokens.bg),`${name}: placeholder recedes below helper text`);
+  }
+  for (const mode of ['dark','light']) {
+    const values=PALETTES.map(p=>luminance(surfaces.get(`${p.id}:${mode}`)['field-ghost']));
+    assert.ok(Math.max(...values)-Math.min(...values)<.006,'matching placeholder tone across palettes');
+  }
+});
+
 test('dark palettes retain the approved lifted surfaces and sampled Navy colours', () => {
   // Resolved pixels from the approved 751×733 reference image, rather than
   // inferred navy colours: shell, filled inputs/table, and alternating rows.

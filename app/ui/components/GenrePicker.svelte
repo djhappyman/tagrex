@@ -14,6 +14,8 @@
   let active = $state(-1);
   let content = $state<HTMLDivElement | null>(null);
   let disposed = false;
+  let anchorTop = 0;
+  let anchorLeft = 0;
 
   function token() {
     const value = native.value;
@@ -58,7 +60,12 @@
   }
   function setOpen(next: boolean) {
     if (disposed || native.disabled || !native.isConnected) next = false;
-    if (next && !open) prepare();
+    if (next && !open) {
+      const bounds = native.getBoundingClientRect();
+      anchorTop = bounds.top;
+      anchorLeft = bounds.left;
+      prepare();
+    }
     open = next;
     if (!next) active = -1;
     reflect();
@@ -117,7 +124,14 @@
     };
     });
   }
-  function scroll(event: Event) { if (open && !content?.contains(event.target as Node)) setOpen(false); }
+  function scroll(event: Event) {
+    if (!open || content?.contains(event.target as Node)) return;
+    // Focusing an off-screen field scrolls it before input/click, but its
+    // queued scroll event can arrive after the popup opens. Only dismiss when
+    // the anchor has actually moved since opening, not on that delayed event.
+    const bounds = native.getBoundingClientRect();
+    if (Math.abs(bounds.top - anchorTop) > .5 || Math.abs(bounds.left - anchorLeft) > .5) setOpen(false);
+  }
 </script>
 
 <svelte:window onscrollcapture={scroll} onresize={() => setOpen(false)} />

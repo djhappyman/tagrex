@@ -12,6 +12,7 @@ import './form-controls.css';
 import './preset-editor.css';
 import './workbench-system.css';
 import './palettes.css';
+import './inspector-iteration.css';
 import { flushSync, mount } from 'svelte';
 import App from './components/App.svelte';
 import { initComponentControls } from './lib/runtime-controls';

@@ -78,7 +78,10 @@ for (const width of [360, 480]) {
     expect(fields.every((box) => box.width >= 150 && box.height === 32)).toBe(true);
     expect(await artist.evaluate(input => parseFloat(getComputedStyle(input).borderRadius))).toBe(10);
     for (const row of await page.locator('#fields-body .fe-row.duo').all()) {
-      expect((await row.boundingBox()).height).toBeLessThanOrEqual(36);
+      // Number labels now sit above their pairs rather than inside the value rail.
+      expect((await row.boundingBox()).height).toBeLessThanOrEqual(68);
+      const label = row.locator('.fe-duo-label').first();
+      expect((await label.boundingBox()).y + (await label.boundingBox()).height).toBeLessThan((await row.locator('input').first().boundingBox()).y);
     }
     const panel = await page.locator('.mode-col').boundingBox();
     for (const input of await page.locator('#fields-body .fe-row.duo input').all()) {

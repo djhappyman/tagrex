@@ -24,7 +24,7 @@ import {
   tracks,
 } from "./state.js";
 import { EXTENDED_FIELDS, customLabel, fieldLabel as catalogueLabel } from "./fields.js";
-import { isFieldLocked, lockButton, lockedFieldKeys } from "./locks.js";
+import { isFieldLocked, lockButton, lockedFieldKeys, reflectLockButton } from "./locks.js";
 import { hooks } from "./hooks.js";
 
 // Fields the user actually touched in the dialog, staged until they confirm.
@@ -71,7 +71,13 @@ function refreshFieldEditor({ force = false, resetDraft = false } = {}) {
     JSON.stringify([...(edits.get(path) || [])])]]));
   const sameContent = sameSubject && editorContent?.size === content.size && [...content].every(([path, entry]) =>
     entry.every((value, at) => value === editorContent.get(path)?.[at]));
-  if (!force && !resetDraft && sameSubject && locks === editorLocks && isSelectionCurrent(editorSubject) && (sameContent || stagedFields.size)) return;
+  if (!force && !resetDraft && sameSubject && isSelectionCurrent(editorSubject) && (sameContent || stagedFields.size)) {
+    if (locks !== editorLocks) {
+      reflectFieldLocks();
+      editorLocks = locks;
+    }
+    return;
+  }
   if (!sameSubject || resetDraft) stagedFields = new Map();
   editorPaths = new Set(paths);
   editorContent = content;
@@ -81,6 +87,18 @@ function refreshFieldEditor({ force = false, resetDraft = false } = {}) {
   renderTagBlocks(paths);
   renderFieldEditor(paths);
   hooks.refreshCoverWell();
+}
+
+// Keep raw drafts, focus and the opacity transition alive when only locks
+// change. A new selection/content revision still gets a full, fresh render.
+function reflectFieldLocks() {
+  for (const row of el("fields-body").querySelectorAll(".fe-row")) {
+    const inputs = [...row.querySelectorAll(".field-input")];
+    for (const input of inputs) input.disabled = isFieldLocked(input.dataset.key);
+    row.classList.toggle("locked", inputs.length > 0 && inputs.every(input => input.disabled));
+    const button = row.querySelector(".fe-lock");
+    if (button) reflectLockButton(button);
+  }
 }
 
 // Which tag block the values on show came out of, and what else the file
@@ -425,7 +443,7 @@ async function previewConvertTagBlock(from, to, revision) {
 // metadata live in Standard or Advanced.
 const EDITOR_CORE_KEYS = ["artist", "title", "album", "albumartist", "track", "tracktotal", "disc", "disctotal", "year", "genre", "comment", "bpm", "key"];
 // Core follows the tagging workflow: compact number pairs, identity fields,
-// genre and multiline comment, then tempo/key. Labels keep a fixed rail.
+// paired short fields, then multiline comment. Long fields keep a fixed rail.
 const EDITOR_CORE_LAYOUT = [
   { duo: [
     { pair: ["track", "tracktotal"], key: "track" },
@@ -435,19 +453,18 @@ const EDITOR_CORE_LAYOUT = [
   { key: "artist" },
   { key: "album" },
   { key: "albumartist" },
-  { key: "year" },
-  { key: "genre" },
-  { key: "comment" },
+  { inline: ["year", "genre"] },
   { inline: ["bpm", "key"] },
+  { key: "comment" },
 ];
 // Numeric/typed fields get a narrow right-aligned input and inline validation
 // mirroring the backend's is_writable_value rule, so a bad value shows as an
 // error as you type instead of only being rejected at apply.
 const EDITOR_NUMERIC_KEYS = new Set(["track", "tracktotal", "disc", "bpm", "year"]);
 // Whether each collapsible group is folded; persists across re-renders in a
-// session. Core and Standard are open by default; Advanced starts folded
+// session. Core is open by default; More tags and Advanced start folded
 // so the everyday form isn't buried under technical noise (#136).
-const editorGroupCollapsed = { core: false, standard: false, advanced: true };
+const editorGroupCollapsed = { core: false, standard: true, advanced: true };
 
 // A vinyl position as a track or disc number (#641), the backend's
 // is_vinyl_position: one or two letters with up to three digits ("A", "B2",
@@ -529,6 +546,14 @@ function renderFieldEditor(paths) {
     else advancedRows.push({ key, label: raw });
   }
   promoted.sort((a, b) => a.label.localeCompare(b.label));
+  // Pair the two compact identifiers; every other extended/custom field keeps
+  // its full row and original relative order.
+  const catalogue = standardRows.find(row => row.key === "catalognumber");
+  const isrc = standardRows.find(row => row.key === "isrc");
+  if (catalogue && isrc) {
+    standardRows.splice(standardRows.indexOf(catalogue), 1, { inline: [catalogue, isrc] });
+    standardRows.splice(standardRows.indexOf(isrc), 1);
+  }
   standardRows.push(...promoted);
 
   body.appendChild(fieldGroup(tr("editor.group.core"), coreRows, paths, "core"));
@@ -644,6 +669,7 @@ function fieldRow(key, label, paths) {
     input.placeholder = tr("editor.multipleValues");
   } else {
     input.value = shared;
+    input.placeholder = tr("editor.emptyValue");
   }
 
   const hint = document.createElement("span");
@@ -686,8 +712,8 @@ function fieldRow(key, label, paths) {
 }
 
 // A row of one or more "number / total" pairs on a single line, e.g.
-// "Track [n] / [total]   Disc [n] / [total]" (#136). The first pair's label sits
-// in the aligned label column; later pairs get an inline label. Each sub-input
+// "Track [n] / [total]   Disc [n] / [total]" (#136). Each pair has a label
+// above its inputs. Each sub-input
 // stages and validates its own key; the row's dirty/error marker reflects any
 // half — recomputed across every input so fixing one can't clear another's error.
 function fieldDuoRow(pairs, paths) {
@@ -696,11 +722,6 @@ function fieldDuoRow(pairs, paths) {
 
   const marker = document.createElement("span");
   marker.className = "fe-marker";
-
-  const labelCell = document.createElement("label");
-  labelCell.className = "fe-label";
-  labelCell.textContent = pairs[0].label;
-  labelCell.title = pairs[0].label;
 
   const value = document.createElement("span");
   value.className = "fe-duo";
@@ -725,15 +746,15 @@ function fieldDuoRow(pairs, paths) {
     input.className = "field-input num";
     input.dataset.key = key;
     input.id = `editor-field-${encodeURIComponent(key)}`;
-    if (!labelCell.htmlFor) labelCell.htmlFor = input.id;
     input.spellcheck = false;
     input.inputMode = "numeric";
     input.setAttribute("aria-label", aria);
     if (shared === null) {
       input.classList.add("multiple");
-      input.placeholder = "—"; // narrow numeric box: a dash reads better than "<multiple values>"
+      input.placeholder = tr("editor.mixedShort");
     } else {
       input.value = shared;
+      input.placeholder = tr("editor.emptyValue");
     }
     if (isFieldLocked(key)) input.disabled = true;
     input.addEventListener("input", () => {
@@ -749,17 +770,14 @@ function fieldDuoRow(pairs, paths) {
     return input;
   };
 
-  pairs.forEach((p, i) => {
+  pairs.forEach((p) => {
     const unit = document.createElement("span");
     unit.className = "fe-duo-unit";
-    // The first pair's label is the row's aligned column label; the rest inline.
-    if (i > 0) {
-      const inlineLabel = document.createElement("label");
-      inlineLabel.className = "fe-duo-label";
-      inlineLabel.htmlFor = `editor-field-${encodeURIComponent(p.pair[0])}`;
-      inlineLabel.textContent = p.label;
-      unit.append(inlineLabel);
-    }
+    const inlineLabel = document.createElement("label");
+    inlineLabel.className = "fe-duo-label";
+    inlineLabel.htmlFor = `editor-field-${encodeURIComponent(p.pair[0])}`;
+    inlineLabel.textContent = p.label;
+    unit.append(inlineLabel);
     const group = document.createElement("span");
     group.className = "fe-pair";
     const sep = document.createElement("span");
@@ -776,11 +794,11 @@ function fieldDuoRow(pairs, paths) {
 
   reflectRow(); // surface a pre-filled invalid value on first render (rare)
   // One lock for the number/total pair, aligned with the other field locks.
-  // Track and Disc share a compact row; the fixed label rail does not resize.
+  // Track and Disc share one row and the existing grouped lock semantics.
   const keys = pairs.flatMap((p) => p.pair);
   const label = pairs.map((p) => p.label).join(" / ");
   if (keys.every((key) => isFieldLocked(key))) row.classList.add("locked");
-  row.append(marker, labelCell, value, lockButton(keys, label, refreshFieldEditor));
+  row.append(marker, value, lockButton(keys, label, refreshFieldEditor));
   return row;
 }
 
