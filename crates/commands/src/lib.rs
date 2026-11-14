@@ -13,6 +13,7 @@
 //! keys use [`TagField`]'s lossless storage-key codec.
 
 mod output;
+mod sidecars;
 
 use std::path::{Component, Path, PathBuf};
 
@@ -2816,69 +2817,46 @@ impl App {
         carried
     }
 
+    /// The sidecar pairs that a rename from `src` to `dst` should carry (#58):
+    /// matching-stem files in `src`'s folder whose extension is in the
+    /// configured set, retargeted to `dst`. No-op when the feature is off, the
+    /// set is empty, or `src` and `dst` are the same path (nothing is moving,
+    /// so nothing travels).
+    ///
+    /// `scan` is the preview's own one-ask view of the source folders; the scan
+    /// itself decides what "matching" means (see [`sidecars::SidecarScan`]).
+    /// Every public preview builds one and threads it through its call sites,
+    /// so the same folder is listed once per preview instead of once per file,
+    /// while a *new* preview always re-reads the disk.
+    fn sidecar_pairs(
+        &self,
+        scan: &mut sidecars::SidecarScan,
+        src: &Path,
+        dst: &Path,
+    ) -> Option<Vec<(String, String)>> {
+        if !self.carry_sidecars.get() || src == dst {
+            return None;
+        }
+        let exts = self.sidecar_extensions.borrow();
+        if exts.is_empty() {
+            return None;
+        }
+        scan.pairs(src, dst, &exts)
+    }
+
     /// Detect sidecar files that should travel with `change`'s rename/move (#58)
     /// and record them on it. A sidecar is a file in the source directory whose
     /// stem matches the audio file's and whose extension is in the configured
     /// set; its target keeps the destination directory and the new stem. No-op
     /// when the feature is off or the change carries no real rename.
-    fn attach_sidecars(&self, change: &mut FileChangeDto) {
-        if !self.carry_sidecars.get() {
-            return;
-        }
+    fn attach_sidecars(&self, change: &mut FileChangeDto, scan: &mut sidecars::SidecarScan) {
         let Some(rename_to) = change.rename_to.as_deref() else {
             return;
         };
-        let src = Path::new(&change.path);
-        let dst = Path::new(rename_to);
-        if src == dst {
-            return;
+        if let Some(pairs) = self.sidecar_pairs(scan, Path::new(&change.path), Path::new(rename_to))
+        {
+            change.sidecar_renames = pairs;
         }
-        let (Some(src_dir), Some(src_stem)) =
-            (src.parent(), src.file_stem().and_then(|s| s.to_str()))
-        else {
-            return;
-        };
-        let (Some(dst_dir), Some(dst_stem)) =
-            (dst.parent(), dst.file_stem().and_then(|s| s.to_str()))
-        else {
-            return;
-        };
-        let exts = self.sidecar_extensions.borrow();
-        if exts.is_empty() {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(src_dir) else {
-            return;
-        };
-        let mut pairs = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            // Never the audio file itself, and only real files.
-            if path == *src || !path.is_file() {
-                continue;
-            }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if stem != src_stem {
-                continue;
-            }
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-                continue; // an extension-less file can't match the set
-            };
-            if !exts.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
-                continue;
-            }
-            let from = path.to_string_lossy().into_owned();
-            let to = dst_dir
-                .join(format!("{dst_stem}.{ext}"))
-                .to_string_lossy()
-                .into_owned();
-            pairs.push((from, to));
-        }
-        // Deterministic order so preview and journal read consistently.
-        pairs.sort();
-        change.sidecar_renames = pairs;
     }
 
     /// Render `mask` against `path`'s own tags and turn the result into a
@@ -2961,6 +2939,9 @@ impl App {
         let mask = Mask::parse(mask_pattern)?;
         let mut changes = Vec::new();
         let mut unrendered = Vec::new();
+        // One listing per source folder for this preview (#58); a later
+        // preview builds its own and sees the disk as it is then.
+        let mut scan = sidecars::SidecarScan::default();
         for path in paths {
             let root = path.parent().unwrap_or(path);
             let target = match self.render_target_under(&mask, path, root) {
@@ -2986,7 +2967,7 @@ impl App {
                 creates_folder: creates_folder(&target),
                 folder_extras: Vec::new(),
             };
-            self.attach_sidecars(&mut change);
+            self.attach_sidecars(&mut change, &mut scan);
             changes.push(change);
         }
         let mut plan = self.plan(
@@ -3329,6 +3310,8 @@ impl App {
     ) -> Result<PlanDto, AppError> {
         let chain = build_chain(rules)?;
         let mut changes = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
 
         for path in paths {
             let Ok(track) = TagEngine::read(path) else {
@@ -3372,7 +3355,7 @@ impl App {
                     creates_folder: false,
                     folder_extras: Vec::new(),
                 };
-                self.attach_sidecars(&mut change);
+                self.attach_sidecars(&mut change, &mut scan);
                 changes.push(change);
                 continue;
             }
@@ -3419,7 +3402,7 @@ impl App {
                     creates_folder: false,
                     folder_extras: Vec::new(),
                 };
-                self.attach_sidecars(&mut change);
+                self.attach_sidecars(&mut change, &mut scan);
                 changes.push(change);
                 continue;
             }
@@ -3494,6 +3477,8 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut changes = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
         for path in paths {
             let Ok(track) = TagEngine::read(path) else {
                 continue;
@@ -3576,7 +3561,7 @@ impl App {
                 folder_extras: Vec::new(),
             };
             if renamed {
-                self.attach_sidecars(&mut change);
+                self.attach_sidecars(&mut change, &mut scan);
             }
             changes.push(change);
         }
@@ -3628,6 +3613,8 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut changes = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
         for change in &plan.changes {
             let path = Path::new(&change.path);
 
@@ -3760,26 +3747,6 @@ impl App {
             if tag_changes.is_empty() && !renamed && change.cover_change.is_none() {
                 continue;
             }
-            // Folder extras (#161) ride on a change as sidecar pairs that do not
-            // follow the stem. They go where the folder goes — re-based from the
-            // folder as staged onto the folder as cleaned (#384) — while only the
-            // stem sidecars are recomputed below. Which pairs are stem sidecars
-            // is asked of the same code that attached them, against the change
-            // as it arrived.
-            let mut as_staged = change.clone();
-            self.attach_sidecars(&mut as_staged);
-            let extras: Vec<(String, String)> = change
-                .sidecar_renames
-                .iter()
-                .filter(|(from, _)| !as_staged.sidecar_renames.iter().any(|(own, _)| own == from))
-                .map(|(from, to)| {
-                    let to = match Path::new(to).strip_prefix(&proposed_dir) {
-                        Ok(rest) => target_dir.join(rest).to_string_lossy().into_owned(),
-                        Err(_) => to.clone(),
-                    };
-                    (from.clone(), to)
-                })
-                .collect();
             let mut revised = FileChangeDto {
                 path: change.path.clone(),
                 rename_to: renamed.then(|| target.to_string_lossy().into_owned()),
@@ -3799,7 +3766,43 @@ impl App {
                 folder_extras: Vec::new(),
             };
             if renamed {
-                self.attach_sidecars(&mut revised);
+                // Only a change that still moves has sidecars to work out, and
+                // only a move can carry a folder's extras: everything below is
+                // invisible to the plan when nothing is renamed, so a tag-only
+                // cleanup (every live edit) pays none of it.
+                //
+                // Folder extras (#161) ride on a change as sidecar pairs that do
+                // not follow the stem. They go where the folder goes — re-based
+                // from the folder as staged onto the folder as cleaned (#384) —
+                // while only the stem sidecars are recomputed below. Which pairs
+                // are stem sidecars is asked of the same code that attached
+                // them, against the change as it arrived.
+                let src = Path::new(&change.path);
+                let staged_pairs = self.sidecar_pairs(&mut scan, src, proposed);
+                // A no-op/failed scan used to leave the clone's original pairs
+                // intact. Preserve that classification without cloning the DTO.
+                let own_pairs = staged_pairs.as_deref().unwrap_or(&change.sidecar_renames);
+                let extras: Vec<(String, String)> = change
+                    .sidecar_renames
+                    .iter()
+                    .filter(|(from, _)| !own_pairs.iter().any(|(own, _)| own == from))
+                    .map(|(from, to)| {
+                        let to = match Path::new(to).strip_prefix(&proposed_dir) {
+                            Ok(rest) => target_dir.join(rest).to_string_lossy().into_owned(),
+                            Err(_) => to.clone(),
+                        };
+                        (from.clone(), to)
+                    })
+                    .collect();
+                // A chain that leaves the name alone lands on the pairs the
+                // staged rename already had, so the same listing answers the
+                // revised change too — only a changed name needs a second pass.
+                revised.sidecar_renames = if target.as_path() == proposed {
+                    staged_pairs.unwrap_or_default()
+                } else {
+                    self.sidecar_pairs(&mut scan, src, &target)
+                        .unwrap_or_default()
+                };
                 revised.sidecar_renames.extend(extras);
                 // Still the folder's, not the track's (#403): the marker is by
                 // source path, which the re-basing above leaves unchanged.
@@ -3853,6 +3856,8 @@ impl App {
         };
         let mut changes = Vec::new();
         let mut unrendered = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
         for path in paths {
             let target = match self.render_target_under(&mask, path, &root) {
                 Ok(target) => target,
@@ -3877,7 +3882,7 @@ impl App {
                 creates_folder: creates_folder(&target),
                 folder_extras: Vec::new(),
             };
-            self.attach_sidecars(&mut change);
+            self.attach_sidecars(&mut change, &mut scan);
             changes.push(change);
         }
         // Whatever else lives in a folder every track is leaving (#161). Said in
@@ -6264,21 +6269,22 @@ fn fill_by_length(aligned: &mut [Option<usize>], locals: &[TrackRef], candidates
 /// the order is total and stable.
 pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let (mut left, mut right) = (a.chars().peekable(), b.chars().peekable());
+    let (mut left, mut right) = (a.chars(), b.chars());
     loop {
-        match (left.peek().copied(), right.peek().copied()) {
+        match (left.clone().next(), right.clone().next()) {
             (None, None) => return a.cmp(b),
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(l), Some(r)) if l.is_ascii_digit() && r.is_ascii_digit() => {
-                let take = |chars: &mut std::iter::Peekable<std::str::Chars>| {
-                    let mut digits = String::new();
-                    while let Some(c) = chars.peek().copied().filter(char::is_ascii_digit) {
-                        digits.push(c);
-                        chars.next();
-                    }
+                // Borrow the digit run from the original UTF-8 string. ASCII
+                // digits are one byte, so the boundary is also a char boundary.
+                fn take<'a>(chars: &mut std::str::Chars<'a>) -> &'a str {
+                    let suffix = chars.as_str();
+                    let len = suffix.bytes().take_while(u8::is_ascii_digit).count();
+                    let (digits, rest) = suffix.split_at(len);
+                    *chars = rest.chars();
                     digits
-                };
+                }
                 let (l, r) = (take(&mut left), take(&mut right));
                 let (l_value, r_value) = (l.trim_start_matches('0'), r.trim_start_matches('0'));
                 let by_value = l_value
@@ -8933,6 +8939,26 @@ mod tests {
     }
 
     #[test]
+    fn natural_cmp_handles_digit_boundaries_and_unicode() {
+        use std::cmp::Ordering::{Greater, Less};
+        assert_eq!(natural_cmp("音楽2🎵", "音楽10🎵"), Less);
+        assert_eq!(natural_cmp("é0002a", "É2b"), Less);
+        assert_eq!(natural_cmp("x000", "x0"), "x000".cmp("x0"));
+        assert_eq!(natural_cmp("a٢", "a10"), Greater);
+        assert_eq!(natural_cmp("İ02", "i2"), Greater);
+        assert_eq!(natural_cmp("🎵", "🎵0"), Less);
+        let long = "9".repeat(500);
+        assert_eq!(
+            natural_cmp(&format!("音{long}"), &format!("音1{long}")),
+            Less
+        );
+        assert_eq!(
+            natural_cmp(&format!("音00{long}"), &format!("音{long}")),
+            format!("音00{long}").cmp(&format!("音{long}"))
+        );
+    }
+
+    #[test]
     fn read_text_list_decodes_utf8_and_utf16_and_refuses_binary() {
         let dir = TempDir::new("fromtext-read");
         let file = |name: &str, bytes: &[u8]| {
@@ -9393,6 +9419,365 @@ mod tests {
         app.undo(batch.id).unwrap();
         assert!(lrc.exists() && txt.exists(), "sidecars restored");
         assert!(!dir.0.join(format!("{stem}.lrc")).exists());
+    }
+
+    #[test]
+    fn sidecar_candidates_keep_file_and_extension_rules() {
+        let dir = TempDir::new("sidecar-candidates");
+        let track = dir.tagged_flac("original.flac", "Artist", "Title");
+        let cue = dir.0.join("original.CUE");
+        std::fs::write(&cue, b"cue").unwrap();
+        std::fs::write(dir.0.join("original.zzz"), b"unlisted").unwrap();
+        std::fs::write(dir.0.join("different.lrc"), b"other stem").unwrap();
+        std::fs::write(dir.0.join("original"), b"extensionless").unwrap();
+        std::fs::create_dir(dir.0.join("original.lrc")).unwrap();
+        let app = open_app(&dir);
+        let plan = app
+            .preview_rename("renamed", std::slice::from_ref(&track))
+            .unwrap();
+        assert_eq!(
+            plan.changes[0].sidecar_renames,
+            vec![(
+                cue.to_string_lossy().into_owned(),
+                dir.0.join("renamed.CUE").to_string_lossy().into_owned(),
+            )]
+        );
+        #[cfg(unix)]
+        {
+            let linked = dir.0.join("original.txt");
+            std::os::unix::fs::symlink(&cue, &linked).unwrap();
+            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("original.jpg")).unwrap();
+            let plan = app
+                .preview_rename("renamed", std::slice::from_ref(&track))
+                .unwrap();
+            let froms: Vec<_> = plan.changes[0]
+                .sidecar_renames
+                .iter()
+                .map(|(from, _)| from.as_str())
+                .collect();
+            assert_eq!(
+                froms.len(),
+                2,
+                "file symlink included, broken symlink excluded"
+            );
+            assert!(froms.contains(&linked.to_string_lossy().as_ref()));
+        }
+    }
+
+    // #58: one preview lists each source folder once, but the pairs are still
+    // taken per file — same stem in two folders, a subfolder that is not the
+    // file's own, a directory named like a sidecar, a live symlink and a
+    // dangling one are all judged exactly as the per-file walk judged them.
+    #[test]
+    fn each_files_sidecars_come_from_its_own_folder() {
+        let dir = TempDir::new("sidecar-per-folder");
+        let first = dir.tagged_flac_at("a/x.flac", "Artist", "First");
+        let second = dir.tagged_flac_at("b/x.flac", "Artist", "Second");
+        std::fs::write(dir.0.join("a").join("x.lrc"), b"a lyrics").unwrap();
+        std::fs::write(dir.0.join("b").join("x.lrc"), b"b lyrics").unwrap();
+        // A same-stem sidecar below the file's own folder is not the folder's.
+        std::fs::create_dir_all(dir.0.join("a").join("Nested")).unwrap();
+        std::fs::write(dir.0.join("a").join("Nested/x.lrc"), b"nested").unwrap();
+        // A directory that looks like a sidecar is not a file.
+        std::fs::create_dir(dir.0.join("a").join("x.cue")).unwrap();
+        // A live symlink to a file travels; a dangling one does not.
+        std::fs::write(dir.0.join("outside.txt"), b"outside").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("../outside.txt", dir.0.join("a").join("x.txt")).unwrap();
+            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("a").join("x.jpg"))
+                .unwrap();
+        }
+        let mut app = open_app(&dir);
+
+        let plan = app
+            .preview_rename("%title%", &[first.clone(), second.clone()])
+            .unwrap();
+        assert_eq!(plan.changes.len(), 2);
+        let position = |path: &Path| {
+            plan.changes
+                .iter()
+                .position(|change| change.path == path.to_string_lossy().as_ref())
+                .unwrap()
+        };
+        let first_change = &plan.changes[position(&first)];
+        #[allow(unused_mut)]
+        let mut expected = vec![(
+            dir.0.join("a").join("x.lrc").to_string_lossy().into_owned(),
+            dir.0
+                .join("a")
+                .join("First.lrc")
+                .to_string_lossy()
+                .into_owned(),
+        )];
+        #[cfg(unix)]
+        expected.push((
+            dir.0.join("a").join("x.txt").to_string_lossy().into_owned(),
+            dir.0
+                .join("a")
+                .join("First.txt")
+                .to_string_lossy()
+                .into_owned(),
+        ));
+        expected.sort();
+        assert_eq!(first_change.sidecar_renames, expected);
+        // The other folder's sidecar is not this file's.
+        assert_eq!(
+            plan.changes[position(&second)].sidecar_renames,
+            vec![(
+                dir.0.join("b").join("x.lrc").to_string_lossy().into_owned(),
+                dir.0
+                    .join("b")
+                    .join("Second.lrc")
+                    .to_string_lossy()
+                    .into_owned(),
+            )]
+        );
+
+        let batch = app.apply(&plan).unwrap();
+        assert!(dir.0.join("a").join("First.flac").exists());
+        assert!(dir.0.join("a").join("First.lrc").exists());
+        assert!(!dir.0.join("a").join("x.lrc").exists());
+        assert!(dir.0.join("b").join("Second.flac").exists());
+        assert!(dir.0.join("b").join("Second.lrc").exists());
+        assert!(
+            dir.0.join("a").join("Nested/x.lrc").exists(),
+            "a subfolder's file never travels"
+        );
+        assert!(
+            dir.0.join("a").join("x.cue").is_dir(),
+            "a directory is not carried"
+        );
+        #[cfg(unix)]
+        assert!(
+            std::fs::read_link(dir.0.join("a").join("First.txt")).unwrap()
+                == Path::new("../outside.txt"),
+            "the live symlink travelled as itself"
+        );
+
+        app.undo(batch.id).unwrap();
+        assert!(dir.0.join("a").join("x.flac").exists());
+        assert!(dir.0.join("a").join("x.lrc").exists());
+        assert!(dir.0.join("b").join("x.lrc").exists());
+        assert!(!dir.0.join("a").join("First.lrc").exists());
+    }
+
+    // #58: the listing is the preview's, not the session's — each new preview
+    // re-reads the disk, so a sidecar added, renamed or removed in between is
+    // exactly what the next preview carries.
+    #[test]
+    fn a_second_preview_sees_a_sidecar_added_renamed_or_removed() {
+        let dir = TempDir::new("sidecar-fresh-preview");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        let sidecars = |app: &App| {
+            app.preview_rename("Renamed", std::slice::from_ref(&track))
+                .unwrap()
+                .changes[0]
+                .sidecar_renames
+                .clone()
+        };
+        assert!(sidecars(&app).is_empty());
+
+        std::fs::write(dir.0.join("track.lrc"), b"lyrics").unwrap();
+        assert_eq!(sidecars(&app).len(), 1);
+
+        // Renamed away from the stem: no longer this track's sidecar.
+        std::fs::rename(dir.0.join("track.lrc"), dir.0.join("other.lrc")).unwrap();
+        assert!(sidecars(&app).is_empty());
+
+        std::fs::remove_file(dir.0.join("other.lrc")).unwrap();
+        std::fs::write(dir.0.join("track.lrc"), b"again").unwrap();
+        assert_eq!(sidecars(&app).len(), 1);
+    }
+
+    // #58: the settings gate every preview, not only the first one — and the
+    // set is matched case-insensitively while the destination keeps the
+    // spelling the file on disk has.
+    #[test]
+    fn every_preview_reads_the_sidecar_settings_again() {
+        let dir = TempDir::new("sidecar-settings-preview");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        std::fs::write(dir.0.join("track.lrc"), b"lyrics").unwrap();
+        std::fs::write(dir.0.join("track.jpg"), b"art").unwrap();
+        let app = open_app(&dir);
+        let sidecars = |app: &App| {
+            app.preview_rename("Renamed", std::slice::from_ref(&track))
+                .unwrap()
+                .changes[0]
+                .sidecar_renames
+                .clone()
+        };
+        assert_eq!(sidecars(&app).len(), 2);
+
+        app.apply_settings(&SettingsDto {
+            carry_sidecars: false,
+            ..SettingsDto::default()
+        });
+        assert!(sidecars(&app).is_empty());
+
+        app.apply_settings(&SettingsDto {
+            sidecar_extensions: vec!["LRC".into()],
+            ..SettingsDto::default()
+        });
+        let pairs = sidecars(&app);
+        assert_eq!(pairs.len(), 1);
+        assert!(pairs[0].1.ends_with("Renamed.lrc"), "{}", pairs[0].1);
+
+        app.apply_settings(&SettingsDto {
+            sidecar_extensions: Vec::new(),
+            ..SettingsDto::default()
+        });
+        assert!(sidecars(&app).is_empty());
+    }
+
+    #[test]
+    fn staged_cleanup_respects_disabled_or_empty_sidecar_settings() {
+        let dir = TempDir::new("sidecar-disabled-staged");
+        let track = dir.tagged_flac("original.flac", "Artist", "Title");
+        std::fs::write(dir.0.join("original.lrc"), b"lyrics").unwrap();
+        for settings in [
+            SettingsDto {
+                carry_sidecars: false,
+                ..SettingsDto::default()
+            },
+            SettingsDto {
+                sidecar_extensions: Vec::new(),
+                ..SettingsDto::default()
+            },
+        ] {
+            let app = open_app(&dir);
+            let staged = app
+                .preview_rename("Renamed", std::slice::from_ref(&track))
+                .unwrap();
+            assert_eq!(staged.changes[0].sidecar_renames.len(), 1);
+            app.apply_settings(&settings);
+            let cleaned = app
+                .preview_transform_over_plan(
+                    &staged,
+                    &[ActionGroupDto {
+                        name: "lower".into(),
+                        scope: "filename".into(),
+                        rules: vec![case_rule("lower")],
+                        note: String::new(),
+                    }],
+                )
+                .unwrap();
+            assert!(cleaned
+                .changes
+                .iter()
+                .all(|change| change.sidecar_renames.is_empty()));
+        }
+    }
+
+    // #142/#58: a cleanup over a staged plan keeps one pair per sidecar — the
+    // staged rename's own pairs are recognised as stem sidecars from the same
+    // listing, not recomputed into duplicates — and a tag-only cleanup has no
+    // sidecar work at all.
+    #[test]
+    fn a_cleanup_over_a_move_keeps_each_folders_sidecars_once() {
+        let dir = TempDir::new("sidecar-over-plan");
+        let first = dir.tagged_flac_at("box/One.flac", "Artist", "One");
+        let second = dir.tagged_flac_at("box/Two.flac", "Artist", "Two");
+        std::fs::write(dir.0.join("box/One.lrc"), b"one").unwrap();
+        std::fs::write(dir.0.join("box/Two.lrc"), b"two").unwrap();
+        let mut app = open_app(&dir);
+
+        let staged = app
+            .preview_move(
+                "%artist%/%title%",
+                &[first.clone(), second.clone()],
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(staged.changes.len(), 2);
+        for change in &staged.changes {
+            assert_eq!(
+                change.sidecar_renames.len(),
+                1,
+                "each track carries its own .lrc only: {:?}",
+                change.sidecar_renames
+            );
+        }
+
+        let cleaned = app
+            .preview_transform_over_plan(
+                &staged,
+                &[ActionGroupDto {
+                    name: "lower".into(),
+                    scope: "filename".into(),
+                    rules: vec![case_rule("lower")],
+                    note: String::new(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(cleaned.changes.len(), 2);
+        let mut targets: Vec<String> = cleaned
+            .changes
+            .iter()
+            .flat_map(|change| change.sidecar_renames.iter().map(|(_, to)| to.clone()))
+            .collect();
+        targets.sort();
+        assert_eq!(targets.len(), 2, "no duplicate pairs: {targets:?}");
+        assert!(targets[0].ends_with("one.lrc"), "{}", targets[0]);
+        assert!(targets[1].ends_with("two.lrc"), "{}", targets[1]);
+        assert!(cleaned
+            .changes
+            .iter()
+            .all(|change| change.folder_extras.is_empty()));
+
+        let batch = app.apply(&cleaned).unwrap();
+        assert!(dir.0.join("artist/one.flac").exists());
+        assert!(dir.0.join("artist/one.lrc").exists());
+        assert!(dir.0.join("artist/two.flac").exists());
+        assert!(dir.0.join("artist/two.lrc").exists());
+        app.undo(batch.id).unwrap();
+        assert!(dir.0.join("box/One.lrc").exists());
+        assert!(dir.0.join("box/Two.lrc").exists());
+
+        // A cleanup that only touches tags proposes no sidecar pairs, because
+        // nothing is being renamed — the same plan the per-file walk produced.
+        let edits = app
+            .preview_tag_edits(&[TagEditDto {
+                path: first.to_string_lossy().into_owned(),
+                field: "title".into(),
+                value: Some("Renamed".into()),
+            }])
+            .unwrap();
+        let cleaned = app.preview_transform_over_plan(&edits, &[]).unwrap();
+        assert_eq!(cleaned.changes.len(), 1);
+        assert!(cleaned.changes[0].rename_to.is_none());
+        assert!(cleaned.changes[0].sidecar_renames.is_empty());
+    }
+
+    // #58: a sidecar target that is already taken is refused by the executor's
+    // preflight, and nothing moves — the preview lists the pair, Apply says no.
+    #[test]
+    fn a_carried_sidecar_that_would_overwrite_a_file_stops_the_apply() {
+        let dir = TempDir::new("sidecar-collision-preview");
+        let track = dir.tagged_flac("one.flac", "Artist", "Title");
+        let lrc = dir.0.join("one.lrc");
+        std::fs::write(&lrc, b"mine").unwrap();
+        let occupied = dir.0.join("Renamed.lrc");
+        std::fs::write(&occupied, b"someone else").unwrap();
+        let mut app = open_app(&dir);
+
+        let plan = app
+            .preview_rename("Renamed", std::slice::from_ref(&track))
+            .unwrap();
+        assert_eq!(
+            plan.changes[0].sidecar_renames,
+            vec![(
+                lrc.to_string_lossy().into_owned(),
+                occupied.to_string_lossy().into_owned(),
+            )]
+        );
+        assert!(app.apply(&plan).is_err());
+        assert!(track.exists() && lrc.exists());
+        assert_eq!(std::fs::read(&occupied).unwrap(), b"someone else");
+        assert!(!dir.0.join("Renamed.flac").exists());
     }
 
     #[test]

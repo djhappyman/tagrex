@@ -13,10 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The Undo history list reads only each batch's description and file paths, not the full tag, artwork and block snapshots behind it, so it opens quickly even with a long history. The snapshots are loaded when a batch is actually undone ([#739](https://github.com/tagrex/tagrex/pull/739)).
 - The README's screenshots and demo animation show the mode switcher as the segmented pill the app now opens with, in both the light and the dark theme ([#754](https://github.com/tagrex/tagrex/issues/754)).
 - Online sources reuse their connection between requests instead of building a new client for each one; a changed token or proxy setting still takes effect at once. Finding duplicates by content reads each file through a small buffer instead of loading the whole file into memory ([#740](https://github.com/tagrex/tagrex/pull/740)).
+- Rename, move and file-name cleanup previews list each folder once to find the companion files that travel with a track, instead of once per track, and check a file's type only for names that match. A preview over 2000 tracks in 20 folders went from about a second to about a tenth of one; the plans are the same ([#751](https://github.com/tagrex/tagrex/pull/751)).
+- Putting files in folder order compares the numbers in their names without copying them first, so sorting a large folder is about a quarter faster; the order is the same ([#750](https://github.com/tagrex/tagrex/pull/750)).
 
 ### Fixed
 
 - When a write fails and the rollback cannot restore every file, the batch's record is kept, marked as interrupted, instead of being deleted, so the files that were changed can still be found and undone. The check that runs before a write also reports its progress and can be cancelled ([#738](https://github.com/tagrex/tagrex/pull/738)).
+- Dependency update proposals no longer offer a `windows-future` bump on its own: its newer releases need a `windows` crate that has not been published yet, so it is now updated by hand together with that crate ([#756](https://github.com/tagrex/tagrex/issues/756)).
+- Dependency update proposals no longer offer a new major version of `zbus` on its own: it stays on the major version the single-instance plugin builds, so the Linux build carries one copy of it ([#759](https://github.com/tagrex/tagrex/issues/759)).
+- On a FAT or exFAT volume such as a USB stick, the hidden `._` companion files macOS writes next to every file are no longer listed as extra, unreadable tracks ([#755](https://github.com/tagrex/tagrex/issues/755)).
+- The Linux build keeps moving files to the Trash with the 5.3 release of the trash library, which made its Linux backend a feature of its own; without it the build failed ([#760](https://github.com/tagrex/tagrex/issues/760)).
 
 ## [1.5.0] - 2026-11-13
 
