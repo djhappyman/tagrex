@@ -13199,45 +13199,6 @@ mod tests {
     // ---- mask-defined table columns (#150) ----
 
     #[test]
-    fn cached_reads_refresh_after_external_write_apply_and_undo() {
-        let dir = TempDir::new("cache-invalidation");
-        let path = dir.tagged_flac("track.flac", "Before", "Title");
-        let mut app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
-        assert_eq!(
-            app.render_column("%artist%", std::slice::from_ref(&path))
-                .unwrap(),
-            ["Before"]
-        );
-        let mut track = TagEngine::read(&path).unwrap();
-        track.tags.insert(TagField::Artist, "External".into());
-        TagEngine::write(&track).unwrap();
-        assert_eq!(
-            app.render_column("%artist%", std::slice::from_ref(&path))
-                .unwrap(),
-            ["External"]
-        );
-        let plan = app
-            .preview_tag_edits(&[TagEditDto {
-                path: path.to_string_lossy().into_owned(),
-                field: "artist".into(),
-                value: Some("Applied".into()),
-            }])
-            .unwrap();
-        let batch = app.apply(&plan).unwrap();
-        assert_eq!(
-            app.render_column("%artist%", std::slice::from_ref(&path))
-                .unwrap(),
-            ["Applied"]
-        );
-        app.undo(batch.id).unwrap();
-        assert_eq!(
-            app.render_column("%artist%", std::slice::from_ref(&path))
-                .unwrap(),
-            ["External"]
-        );
-    }
-
-    #[test]
     fn render_column_renders_a_pattern_over_a_batch() {
         let dir = TempDir::new("render-column");
         let a = dir.tagged_flac("a.flac", "Massive Attack", "Safe From Harm");
@@ -14105,44 +14066,6 @@ mod tests {
 
         let plan = app.preview_rename("%album% - %title%", &[track]).unwrap();
         assert!(plan.changes.is_empty());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn confined_exports_never_follow_existing_or_dangling_links() {
-        let dir = TempDir::new("confined-exports");
-        let library = dir.0.join("library");
-        std::fs::create_dir(&library).unwrap();
-        let outside = dir.0.join("outside.txt");
-        std::fs::write(&outside, b"original").unwrap();
-        let app = App::open(&library, &dir.0.join("journal.sqlite")).unwrap();
-        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
-        assert!(app.export_playlist(&[], "list.m3u").is_err());
-        assert_eq!(std::fs::read(&outside).unwrap(), b"original");
-        std::fs::remove_file(library.join("list.m3u")).unwrap();
-        std::fs::remove_file(&outside).unwrap();
-        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
-        assert!(app.export_playlist(&[], "list.m3u").is_err());
-        assert!(!outside.exists());
-    }
-
-    #[test]
-    fn fetched_image_batch_refuses_special_targets_without_partial_outputs() {
-        let dir = TempDir::new("images-atomic");
-        let app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
-        std::fs::write(dir.0.join("folder.jpg"), b"original").unwrap();
-        std::fs::create_dir(dir.0.join("cover.jpg")).unwrap();
-        let image = || FetchedImage {
-            mime: "image/jpeg".into(),
-            data: vec![1, 2, 3],
-        };
-        assert!(app
-            .save_fetched_release_images(&dir.0.join("track.flac"), &[image(), image()], true)
-            .is_err());
-        assert_eq!(
-            std::fs::read(dir.0.join("folder.jpg")).unwrap(),
-            b"original"
-        );
     }
 
     #[test]

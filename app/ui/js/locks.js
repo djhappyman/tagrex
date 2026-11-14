@@ -1,3 +1,4 @@
+import { createComponentElement } from "../lib/component-elements.js";
 // Field locks (#48).
 //
 // A lock marks a field as not-to-be-touched, and every plan the backend builds
@@ -90,23 +91,26 @@ export async function toggleFieldLock(keys, onChanged) {
 // The padlock button for a field row. `keys` is what it locks, `label` names the
 // field in the tooltip, and `onChanged` re-renders the surface it sits on.
 export function lockButton(keys, label, onChanged) {
-  const on = keys.every((key) => locked.has(key));
-  const button = document.createElement("button");
+  const button = createComponentElement("button");
   button.type = "button";
-  // Not the shared `.icon` class: that is a full control-height square with the
-  // button chrome, and a column of those beside every field would shout. This
-  // one carries its own quiet styling.
-  button.className = "fe-lock" + (on ? " on" : "");
-  button.innerHTML = ico(on ? "lock" : "unlock");
-  button.title = on
-    ? t("locks.titleOn", { label })
-    : t("locks.titleOff", { label });
-  button.setAttribute("aria-label", button.title);
-  button.setAttribute("aria-pressed", String(on));
+  button.className = "fe-lock";
+  button.dataset.lockKeys = JSON.stringify(keys);
+  button.dataset.lockLabel = label;
+  reflectLockButton(button);
   button.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
     toggleFieldLock(keys, onChanged);
   });
   return button;
+}
+
+// Refresh a mounted control without replacing its native focus/animation node.
+export function reflectLockButton(button) {
+  const on = JSON.parse(button.dataset.lockKeys).every(key => locked.has(key));
+  button.classList.toggle("on", on);
+  button.innerHTML = ico(on ? "lock" : "unlock");
+  button.title = t(on ? "locks.titleOn" : "locks.titleOff", { label: button.dataset.lockLabel });
+  button.setAttribute("aria-label", button.title);
+  button.setAttribute("aria-pressed", String(on));
 }

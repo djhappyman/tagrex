@@ -10,6 +10,7 @@ async function locksWith(invoke) {
   let source = await readFile(new URL('../../app/ui/js/locks.js', import.meta.url), 'utf8');
   globalThis[stubKey] = invoke;
   const dependencies = {
+    '../lib/component-elements.js': 'export const createComponentElement = () => null;',
     './dom.js': 'export const ico = () => "";',
     './i18n.js': 'export const t = () => "";',
     './hooks.js': 'export const hooks = { renderTableHead() {}, renderTracks() {} };',

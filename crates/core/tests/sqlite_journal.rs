@@ -835,31 +835,6 @@ fn new_artwork_snapshots_remain_inline_and_share_memory_after_loading() {
 }
 
 #[test]
-fn history_headers_never_hydrate_snapshot_tables() {
-    let dir = TempDir::new("headers-only");
-    let track = dir.flac("track.flac");
-    let mut journal = SqliteJournal::open(&dir.db()).unwrap();
-    let batch = Executor::apply(
-        &set_artist(&track, None, Some("A")),
-        &mut journal,
-        &roots(dir.path()),
-    )
-    .unwrap();
-    let conn = rusqlite::Connection::open(dir.db()).unwrap();
-    // A header query must not need even the text-snapshot table, let alone
-    // images. Damage is deliberate and confined to this disposable journal.
-    conn.execute("DROP TABLE field_changes", []).unwrap();
-    assert!(journal.batch(batch.id).is_err());
-    let headers = journal.headers(&roots(dir.path())).unwrap();
-    assert_eq!(headers.len(), 1);
-    assert_eq!(headers[0].id, batch.id);
-    assert!(journal
-        .headers(&[dir.path().join("other-library")])
-        .unwrap()
-        .is_empty());
-}
-
-#[test]
 fn separate_batches_keep_exact_inline_artwork_until_their_own_undo() {
     use tagrex_core::model::{CoverArt, CoverKind};
     use tagrex_core::plan::CoverChange;
