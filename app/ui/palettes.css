@@ -1,0 +1,118 @@
+/* Complete surface families. --panel is the shell/editor, --bg the filled
+   table/controls. Dark palettes lift those surfaces above the shell, matching
+   the approved reference. Accent and semantic colours stay independent. */
+:root[data-palette="navy"] {
+  --bg: #f8fafc;
+  --panel: #eaf0f6;
+  --text: #1c2839;
+  --muted: #4e5e73;
+  --border: #cbd5e2;
+  --row-hover: #dfe7f0;
+  --row-stripe: #f1f5f9;
+}
+:root[data-palette="navy"][data-theme="dark"] {
+  --bg: #252a40;
+  --panel: #1a1f34;
+  --text: #c2cae9;
+  --muted: #aeb7d0;
+  --border: #3d435b;
+  --row-hover: #343951;
+  --row-stripe: #2b3046;
+}
+:root[data-palette="graphite"] {
+  --bg: #fafafa;
+  --panel: #efeff0;
+  --text: #262729;
+  --muted: #5b5d63;
+  --border: #d3d4d7;
+  --row-hover: #e5e6e8;
+  --row-stripe: #f4f4f5;
+}
+:root[data-palette="graphite"][data-theme="dark"] {
+  --bg: #2a2b31;
+  --panel: #1f2024;
+  --text: #cacad8;
+  --muted: #b6b6c4;
+  --border: #43444b;
+  --row-hover: #393a42;
+  --row-stripe: #303137;
+}
+:root[data-palette="forest"] {
+  --bg: #f8faf8;
+  --panel: #ebf1ed;
+  --text: #1b2b23;
+  --muted: #4e6156;
+  --border: #cad7cf;
+  --row-hover: #dee9e2;
+  --row-stripe: #f1f6f2;
+}
+:root[data-palette="forest"][data-theme="dark"] {
+  --bg: #242d29;
+  --panel: #1a2220;
+  --text: #bcd0c1;
+  --muted: #aabcb0;
+  --border: #39473e;
+  --row-hover: #313d37;
+  --row-stripe: #29332f;
+}
+:root[data-palette="plum"] {
+  --bg: #fbf9fc;
+  --panel: #f2eef4;
+  --text: #2e2334;
+  --muted: #675770;
+  --border: #dad1df;
+  --row-hover: #ebe4ee;
+  --row-stripe: #f7f3f8;
+}
+:root[data-palette="plum"][data-theme="dark"] {
+  --bg: #2f2836;
+  --panel: #251d29;
+  --text: #d4c6df;
+  --muted: #c1b2c9;
+  --border: #4d3f55;
+  --row-hover: #3f3747;
+  --row-stripe: #362e3c;
+}
+:root[data-palette] {
+  --shadow: 0 1px 3px rgb(0 0 0 / .12);
+  --tip-bg: #252b36;
+  --tip-text: #ffffff;
+}
+:root[data-palette][data-theme="dark"] {
+  --shadow: 0 1px 3px rgb(0 0 0 / .3);
+  --tip-bg: color-mix(in srgb, var(--panel) 86%, var(--text));
+  --tip-text: var(--text);
+}
+
+/* Four quiet swatches with names: the family colour is a preview rather than
+   another frame around the settings field. Native buttons retain Tab/Space. */
+.palette-picker { display: flex; flex-wrap: wrap; gap: 5px 8px; }
+body button[data-slot="button"].palette-choice {
+  display: inline-flex;
+  gap: 8px;
+  padding-inline: 9px;
+  color: var(--muted);
+  background: transparent;
+  border-color: transparent;
+}
+body button[data-slot="button"].palette-choice:is(:hover, [aria-pressed="true"]) {
+  background: var(--row-hover);
+  color: var(--text);
+}
+.palette-preview {
+  display: inline-block;
+  flex: none;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: linear-gradient(110deg, var(--palette-preview-bg) 50%, var(--palette-preview-panel) 50%);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / .16);
+}
+[data-palette-choice="navy"] { --palette-preview-bg: #1a1f34; --palette-preview-panel: #252a40; }
+[data-palette-choice="graphite"] { --palette-preview-bg: #1f2024; --palette-preview-panel: #2a2b31; }
+[data-palette-choice="forest"] { --palette-preview-bg: #1a2220; --palette-preview-panel: #242d29; }
+[data-palette-choice="plum"] { --palette-preview-bg: #251d29; --palette-preview-panel: #2f2836; }
+:root[data-theme="light"] [data-palette-choice="navy"] { --palette-preview-bg: #f8fafc; --palette-preview-panel: #eaf0f6; }
+:root[data-theme="light"] [data-palette-choice="graphite"] { --palette-preview-bg: #fafafa; --palette-preview-panel: #efeff0; }
+:root[data-theme="light"] [data-palette-choice="forest"] { --palette-preview-bg: #f8faf8; --palette-preview-panel: #ebf1ed; }
+:root[data-theme="light"] [data-palette-choice="plum"] { --palette-preview-bg: #fbf9fc; --palette-preview-panel: #f2eef4; }

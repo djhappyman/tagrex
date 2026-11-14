@@ -35,6 +35,8 @@ import {
   applyCheckboxCol,
   applyTableFont,
   applyTheme,
+  applyPalette,
+  paletteMode,
   ACCENT_PRESETS,
   ACCENT_BRAND_SWATCH,
   accentColor,
@@ -51,6 +53,7 @@ import {
   tracklistFontPx,
   valueFont,
 } from "./prefs.js";
+import { DEFAULT_ACCENT, PALETTE_DEFAULT, paletteAccent } from "./palettes.js";
 import { MEDIA_GLYPH_SET_OPTIONS } from "./mediaglyphs.js";
 import { checkUpdateNow } from "./updatecheck.js";
 import { setBpmEnabled } from "./bpm.js";
@@ -128,6 +131,14 @@ function setThemeChoice(mode) {
   el("set-theme")
     .querySelectorAll(".seg-btn")
     .forEach((b) => b.classList.toggle("active", b.dataset.themeMode === mode));
+}
+
+// Surface palettes are live, like the theme, and keep the chosen accent.
+function setPaletteChoice(mode) {
+  applyPalette(mode);
+  el("set-palette").querySelectorAll("[data-palette-choice]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.paletteChoice === paletteMode()));
+  });
 }
 
 // Accent colour (#431), live like the theme: pick a swatch or a custom colour and
@@ -421,6 +432,7 @@ async function openSettings() {
   }
   // Display prefs live in localStorage, not the backend settings.
   setThemeChoice(themeMode());
+  setPaletteChoice(paletteMode());
   reflectAccentChoice();
   setLanguageChoice(langMode());
   el("set-checkbox-col").checked = checkboxColEnabled();
@@ -649,6 +661,11 @@ el("set-theme").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-theme-mode]");
   if (btn) setThemeChoice(btn.dataset.themeMode);
 });
+el("set-palette").addEventListener("click", (e) => {
+  const button = e.target.closest("[data-palette-choice]");
+  if (button) setPaletteChoice(button.dataset.paletteChoice);
+});
+el("set-palette-accent").addEventListener("click", () => setAccentChoice(paletteAccent(paletteMode())));
 buildAccentSwatches();
 el("set-accent").addEventListener("click", (e) => {
   const b = e.target.closest(".accent-swatch");
@@ -764,13 +781,15 @@ initGroupResets([
     isDefault: () =>
       langMode() === "auto" &&
       themeMode() === "auto" &&
-      accentColor() === null &&
+      paletteMode() === PALETTE_DEFAULT &&
+      accentColor() === DEFAULT_ACCENT &&
       !el("set-checkbox-col").checked &&
       el("set-check-updates").checked,
     reset: () => {
       setLanguageChoice("auto");
       setThemeChoice("auto");
-      setAccentChoice(null);
+      setPaletteChoice(PALETTE_DEFAULT);
+      setAccentChoice(DEFAULT_ACCENT);
       el("set-checkbox-col").checked = false;
       el("set-check-updates").checked = true;
     },

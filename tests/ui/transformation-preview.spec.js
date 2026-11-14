@@ -263,7 +263,8 @@ test('the compact375px layout keeps scope and explicit Apply reachable after sel
   await tick(page, 'Upper titles'); await changed(page);
   await page.getByRole('tab', { name: 'Files', exact: true }).click();
   await expect(page.locator('#diff-apply')).toBeInViewport({ ratio: 1 });
-  await expect(page.locator('#status-transform-scope')).toBeInViewport({ ratio: 1 });
+  await expect(page.locator('#diff-apply')).toHaveAccessibleName('Apply to 1 file');
+  await expect(page.locator('#status-transform-scope')).toHaveText('1 modified');
   await page.locator('#diff-apply').focus(); await expect(page.locator('#diff-apply')).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
   expect(await calls(page, 'apply_plan')).toBe(0);

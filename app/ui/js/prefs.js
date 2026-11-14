@@ -7,6 +7,7 @@
 // library data, and they apply themselves by toggling classes and CSS
 // variables on <body>.
 import { filterRegex, filterCase } from "./state.js";
+import { DEFAULT_ACCENT, PALETTE_DEFAULT, normalizePalette } from "./palettes.js";
 
 // Value-font preference: which face every value surface uses — the file table,
 // the release tracklist, deduplicator paths, rename/export pattern fields and
@@ -208,7 +209,7 @@ function applyBadgeFont(mode) {
   }
 }
 
-// Accent colour (#431): the brand green by default, or one of a few presets or
+// Accent colour (#431): the saved colour, brand green, or one of a few presets or
 // any colour the user picks. Only the base `--accent` is a free choice; the two
 // companions are derived so a custom colour stays readable: `--accent-text` is
 // the label on an accent fill (white, with the fill darkened until it clears
@@ -220,6 +221,34 @@ function applyBadgeFont(mode) {
 // inline style on <html>, which wins over both theme palettes, and is recomputed
 // whenever the resolved theme changes because the ink depends on the surface.
 const ACCENT_STORAGE_KEY = "tagrex.accent";
+const PALETTE_STORAGE_KEY = "tagrex.palette";
+// Earlier versions always wrote tagrex.theme at startup. Its presence preserves
+// their implicit brand-green accent; only a fresh preference set starts amber.
+let freshAccent = null;
+try {
+  if (localStorage.getItem("tagrex.theme") === null &&
+      localStorage.getItem(PALETTE_STORAGE_KEY) === null &&
+      localStorage.getItem(ACCENT_STORAGE_KEY) === null) {
+    freshAccent = DEFAULT_ACCENT;
+    localStorage.setItem(ACCENT_STORAGE_KEY, DEFAULT_ACCENT);
+  }
+} catch { /* Still show the first-run accent if storage cannot persist it. */ }
+let currentPalette = PALETTE_DEFAULT;
+function paletteMode() {
+  try {
+    return normalizePalette(localStorage.getItem(PALETTE_STORAGE_KEY) || currentPalette);
+  } catch {
+    return currentPalette;
+  }
+}
+function applyPalette(mode) {
+  currentPalette = normalizePalette(mode);
+  document.documentElement.dataset.palette = currentPalette;
+  try { localStorage.setItem(PALETTE_STORAGE_KEY, currentPalette); }
+  catch { /* Appearance still applies when storage is unavailable. */ }
+  applyAccent();
+}
+
 // `hex: null` is the brand green — no override at all. The swatch colour shown
 // for it is the stylesheet's light-theme fill.
 const ACCENT_BRAND_SWATCH = "#0b6b53";
@@ -311,7 +340,7 @@ function deriveAccent(hex, surface, dark) {
 }
 function accentColor() {
   try {
-    return normalizeHex(localStorage.getItem(ACCENT_STORAGE_KEY));
+    return normalizeHex(localStorage.getItem(ACCENT_STORAGE_KEY)) || freshAccent;
   } catch (e) {
     return null;
   }
@@ -334,13 +363,18 @@ function stampAccent() {
   const dark = root.dataset.theme === "dark";
   const surface = normalizeHex(getComputedStyle(root).getPropertyValue("--bg")) || (dark ? "#16181d" : "#ffffff");
   const { accent, text, ink } = deriveAccent(hex, surface, dark);
+  // Links and tabs also sit on the shell. Keep the existing fill derivation,
+  // and give small accent text the same AA floor on both palette surfaces.
+  const panel = normalizeHex(getComputedStyle(root).getPropertyValue("--panel")) || surface;
+  const readableInk = shiftToContrast(ink, panel, dark ? 1 : -1, ACCENT_MIN_CONTRAST);
   root.style.setProperty("--accent", accent);
   root.style.setProperty("--accent-text", text);
-  root.style.setProperty("--accent-ink", ink);
+  root.style.setProperty("--accent-ink", readableInk);
 }
 // `null` goes back to the brand green.
 function saveAccent(hex) {
   const value = normalizeHex(hex);
+  freshAccent = null;
   try {
     if (value) localStorage.setItem(ACCENT_STORAGE_KEY, value);
     else localStorage.removeItem(ACCENT_STORAGE_KEY);
@@ -374,7 +408,8 @@ function applyTheme(mode) {
     localStorage.setItem(THEME_STORAGE_KEY, mode);
   } catch (e) {
     /* localStorage unavailable — preference just won't persist */
-  }  applyAccent();
+  }
+  applyAccent();
 }
 // Follow OS changes only while in Auto.
 prefersDarkMq.addEventListener("change", () => {
@@ -383,6 +418,8 @@ prefersDarkMq.addEventListener("change", () => {
     applyAccent();
   }
 });
+// Apply surfaces before deriving the accent against them.
+document.documentElement.dataset.palette = paletteMode();
 // Apply as early as app.js runs, before the settings sheet is ever opened.
 applyTheme(themeMode());
 
@@ -483,6 +520,8 @@ export {
   applyBadgeFont,
   BADGE_FONTS,
   VALUE_FONTS,
+  paletteMode,
+  applyPalette,
   THEME_MODES,
   themeMode,
   LANG_MODES,

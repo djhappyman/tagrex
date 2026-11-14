@@ -121,8 +121,9 @@
       <Collapsible.Trigger>
         {#snippet child({ props })}
           <Button {...props} id="filter-panel-toggle" variant="ghost" size="sm" class="filter-panel-toggle">
-            <svg class="ico filter-panel-caret" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+            <svg class="ico filter-panel-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12L9 8.5V13l-2-1V8.5Z"/></svg>
             <span>Filter</span>
+            <svg class="ico filter-panel-caret" aria-hidden="true"><use href="#i-caret-down"/></svg>
             {#if active}<span class="filter-panel-active" aria-hidden="true"></span>{/if}
           </Button>
         {/snippet}
