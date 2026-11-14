@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Each track the backend lists names the field that holds its compilation flag in that file's own tag format, so an interface can offer the flag and write it through the ordinary Preview and Apply. A WAV, AIFF or MP3 whose tags cannot hold the flag is given the key of the ID3v2 tag a write adds ([#761](https://github.com/tagrex/tagrex/pull/761)).
+
 ### Changed
 
 - File and library commands no longer run on the interface thread: they go to a background worker, so the window keeps responding while a long one runs. Each online source keeps its own queue, and quick successive clicks on field locks are applied in the order they were made ([#737](https://github.com/tagrex/tagrex/pull/737)).
