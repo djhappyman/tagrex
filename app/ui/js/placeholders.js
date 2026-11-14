@@ -10,7 +10,7 @@ import { upgradeComponentMarkup } from "../lib/component-elements.js";
 //
 // The list comes from the backend (`mask_placeholders`), which builds it off the
 // same tables the parser reads. A name shown here parses, by construction.
-import { el, escapeHtml } from "./dom.js";
+import { placeFloating, el, escapeHtml } from "./dom.js";
 import { t, tOr } from "./i18n.js";
 import { invoke } from "./invoke.js";
 
@@ -149,22 +149,7 @@ export function renderReference(entries, filter, body = el("ph-body"), direction
 // absolute `.col-menu` shell every other popover uses: this one is tall, and the
 // mode panel it opens from scrolls (`overflow: auto`), which would clip it.
 function place(menu, button) {
-  const rect = button.getBoundingClientRect();
-  const width = Math.min(360, window.innerWidth - 16);
-  menu.style.width = `${width}px`;
-  const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
-  menu.style.left = `${left}px`;
-  // Below the button when there's room, above it when there isn't.
-  const below = window.innerHeight - rect.bottom;
-  if (below > 260 || below > rect.top) {
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.style.bottom = "auto";
-    menu.style.maxHeight = `${below - 12}px`;
-  } else {
-    menu.style.top = "auto";
-    menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-    menu.style.maxHeight = `${rect.top - 12}px`;
-  }
+  placeFloating(menu, button, { align: "right", width: Math.min(360, innerWidth - 16) });
 }
 
 export function closeReference() {

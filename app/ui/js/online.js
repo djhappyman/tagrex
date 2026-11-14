@@ -2029,11 +2029,20 @@ el("release-list").addEventListener("click", (e) => {
   } else if (act === "save-menu") {
     // Split-button caret: toggle this card's save menu, closing any other.
     const menu = card.querySelector(".tk-save-menu");
+    const anchor = e.target.closest('[data-act="save-menu"]');
     e.stopPropagation();
     document.querySelectorAll(".tk-save-menu").forEach((m) => {
       if (m !== menu) m.hidden = true;
     });
-    if (menu) menu.hidden = !menu.hidden;
+    if (menu) {
+      menu.hidden = !menu.hidden;
+      anchor.setAttribute("aria-expanded", String(!menu.hidden));
+      if (!menu.hidden) {
+        menu.classList.add("floating");
+        placeFloating(menu, anchor);
+        queueMicrotask(() => menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true }));
+      }
+    }
   } else if (act === "automatch") {
     // One button, two rules (#191), alternating (#199): the label is the rule
     // the next press will use, and each press offers the other one back.

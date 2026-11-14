@@ -152,7 +152,7 @@ body .pe-editor button.pe-group-toggle { border-radius:var(--r-menu-item); displ
 /* A short action menu, not a centred button panel. */
 #pe-preset-menu { width:148px; min-width:0; }
 #pe-preset-menu .controller-context-content { min-width:0; padding:7px; border-radius:var(--r-menu); box-shadow:0 10px 24px rgb(0 0 0 / .22); }
-#pe-preset-menu .ctx-item { display:flex; align-items:center; justify-content:flex-start; height:28px; min-height:28px; padding:4px 8px; gap:8px; border-radius:var(--r-menu-item); font-size:var(--type-body-size); line-height:18px; }
+#pe-preset-menu .ctx-item { display:flex; align-items:center; justify-content:flex-start; height:32px; min-height:32px; padding:4px 8px; gap:8px; border-radius:var(--r-menu-item); font-size:var(--type-body-size); line-height:18px; }
 #pe-preset-menu .ctx-item .ico { width:14px; height:14px; flex:none; }
 #pe-preset-menu .ctx-sep[role=separator] { height:4px; }
 /* Focused preset buttons must not cover their separate overflow action. */

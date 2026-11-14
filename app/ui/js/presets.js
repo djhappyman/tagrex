@@ -13,7 +13,7 @@ import { createComponentElement } from "../lib/component-elements.js";
 // presets save as you go — on switching to another preset, on closing, and on
 // quit — so there is no Save button to forget.
 import { EXTENDED_FIELDS, fieldLabel } from "./fields.js";
-import { el, fileName, ico, toast } from "./dom.js";
+import { placeFloating, placeContextMenu, el, fileName, ico, toast } from "./dom.js";
 import { t, tn } from "./i18n.js";
 import { invoke } from "./invoke.js";
 import {
@@ -257,6 +257,8 @@ function shortPresetNote(group) {
   return describeRule(group.rules[0], t).title + (group.rules.length > 1 ? " · " + tn("unit.rule", group.rules.length) : "");
 }
 
+let pressedPresetMenu = null;
+
 function presetRow(group) {
   const wrap = document.createElement("div"); wrap.className = "pe-list-item";
   const row = createComponentElement("button"); row.type = "button"; row.className = "pe-list-row";
@@ -272,13 +274,21 @@ function presetRow(group) {
     event.preventDefault(); event.stopPropagation(); select(group.name, !!group.builtin);
     if (current?.name !== group.name || current.builtin !== !!group.builtin) return;
     const anchor = el("pe-list").querySelector(".pe-list-row.active");
-    const rect = anchor.getBoundingClientRect();
     const menu = el("pe-preset-menu");
     for (const cmd of ["rename", "delete"]) menu.querySelector(`[data-cmd="${cmd}"]`).closest('[role="menuitem"]').hidden = !!group.builtin;
     menu.querySelector(".ctx-sep").hidden = !!group.builtin;
-    showMenu(menu, anchor, event.type === "contextmenu" || event.detail ? event.clientX : rect.right - 20, event.type === "contextmenu" || event.detail ? event.clientY : rect.bottom);
+    const context = event.type === "contextmenu";
+    const owner = context || event.type === "keydown" ? anchor : anchor.closest('.pe-list-item').querySelector('.pe-preset-more');
+    showMenu(menu, owner, context ? { x: event.clientX, y: event.clientY } : null, "right");
   };
   more.addEventListener("click", openMenu); row.addEventListener("contextmenu", openMenu);
+  // Preserve the pressed row if a sticky group heading retargets the native
+  // contextmenu event after the sidebar scrolls it into view.
+  row.addEventListener("pointerdown", event => {
+    if (event.button !== 2) return;
+    event.preventDefault();
+    pressedPresetMenu = { open: openMenu, x: event.clientX, y: event.clientY };
+  });
   row.addEventListener("keydown", event => {
     if (event.key === "F2" && !group.builtin) { event.preventDefault(); select(group.name, false); startRename(); }
     if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) openMenu(event);
@@ -375,28 +385,20 @@ function undoDelete() {
   addPreset(restored); select(restored.name, false);
   el("pe-list").querySelector(".pe-list-row.active")?.focus();
 }
-function showMenu(menu, anchor, x, y) {
+function showMenu(menu, anchor, point = null, align = "left") {
   closeMenus(false); menuReturnFocus = anchor;
-  menu.style.left = "0px"; menu.style.top = "0px";
   menu.hidden = false;
-  // A transformed dialog is the fixed-position containing block. Convert
-  // viewport pointer coordinates into that block exactly once, after clamping.
-  const origin = menu.getBoundingClientRect();
-  const scaleX = origin.width / menu.offsetWidth || 1;
-  const scaleY = origin.height / menu.offsetHeight || 1;
-  const left = Math.max(8, Math.min(x, innerWidth - origin.width - 8));
-  const top = Math.max(8, Math.min(y, innerHeight - origin.height - 8));
-  menu.style.left = (left - origin.left) / scaleX + "px";
-  menu.style.top = (top - origin.top) / scaleY + "px";
-  queueMicrotask(() => { if (!menu.hidden) menu.querySelector('[role="menuitem"]:not([hidden]) button, button[role="menuitem"]:not([hidden])')?.focus(); });
+  if (point) placeContextMenu(menu, point.x, point.y);
+  else placeFloating(menu, anchor, { align });
+  queueMicrotask(() => { if (!menu.hidden) menu.querySelector('[role="menuitem"]:not([hidden]) button, button[role="menuitem"]:not([hidden])')?.focus({ preventScroll: true }); });
 }
+
 function closeMenus(restore = true) {
   for (const id of ["pe-preset-menu", "pe-rule-picker"]) el(id).hidden = true;
   if (restore && menuReturnFocus?.isConnected) menuReturnFocus.focus({ preventScroll: true });
 }
 function openRulePicker(event) {
-  const anchor = event.currentTarget; const box = anchor.getBoundingClientRect();
-  showMenu(el("pe-rule-picker"), anchor, event.detail ? event.clientX : box.left, event.detail ? event.clientY : box.bottom + 4);
+  showMenu(el("pe-rule-picker"), event.currentTarget);
 }
 
 function editorOpen() {
@@ -490,6 +492,12 @@ document.addEventListener(
 document.addEventListener("pointerdown", event => {
   if (!event.target.closest("#pe-preset-menu, #pe-rule-picker, .pe-preset-more, #pe-open-add, #pe-empty-add")) closeMenus(false);
 });
+el("pe-list").addEventListener("contextmenu", event => {
+  const pressed = pressedPresetMenu; pressedPresetMenu = null;
+  if (pressed && Math.abs(event.clientX - pressed.x) < 4 && Math.abs(event.clientY - pressed.y) < 4) pressed.open(event);
+}, true);
+document.addEventListener("pointerdown", () => { pressedPresetMenu = null; }, true);
+window.addEventListener("pointercancel", () => { pressedPresetMenu = null; });
 window.addEventListener("resize", () => closeMenus(false));
 window.addEventListener("beforeunload", commit);
 // Structural edits update the count and preview without rebuilding inputs.

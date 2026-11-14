@@ -11,6 +11,13 @@
     return { destroy: bridge.destroy };
   }
   function changed(value: boolean) { if (!value && open) root.hidden = true; }
+  function escape(event: KeyboardEvent) {
+    event.stopPropagation();
+    // Preset menus have their own row/overflow return-focus contract.
+    if (id !== 'edit-ctx' && id !== 'file-ctx') return;
+    const owner = (root as HTMLElement & { returnFocusTo?: HTMLElement }).returnFocusTo;
+    if (owner?.isConnected && owner !== document.body) queueMicrotask(() => owner.focus({ preventScroll: true }));
+  }
 </script>
 
 <div {id} class="ctx-menu controller-popup-root" hidden use:connect>
@@ -18,7 +25,7 @@
     <ContextMenu.Content forceMount portalProps={{ disabled: true }} class="controller-context-content"
       data-controller-popup loop preventScroll={false} trapFocus={false}
       onCloseAutoFocus={(event) => event.preventDefault()}
-      onEscapeKeydown={(event) => event.stopPropagation()}>
+      onEscapeKeydown={escape}>
       {@render children()}
     </ContextMenu.Content>
   </ContextMenu.Root>
