@@ -61,20 +61,24 @@ jobs:
             echo 'Disposable image or mount already exists' >&2
             exit 1
           fi
+          device=""
           cleanup() {
-            hdiutil detach "$mount" || true
-            rm -f "$image"
+            if [ -n "$device" ]; then hdiutil detach "$device" || true; fi
+            rm -f "$image" "$RUNNER_TEMP/tagrex-output-attach.plist"
           }
           trap cleanup EXIT
-          # Explicit partition layout and a larger image avoid filesystem
-          # geometry/default-layout differences in macOS image creation.
-          # Formatting ExFAT can require the privileged image helper on
-          # hosted macOS. This affects only the new disposable image above.
-          sudo -n hdiutil create -size 512m -layout GPTSPUD \
-            -fs "$OUTPUT_FILESYSTEM" -volname TagRexOutputs "$image"
-          sudo -n chown "$(id -u):$(id -g)" "$image"
+          # Create an unformatted image first: some macOS releases refuse
+          # direct hdiutil -fs ExFAT formatting even with elevated privileges.
+          hdiutil create -size 512m -layout NONE -type UDIF "$image"
+          hdiutil attach -nomount -plist "$image" > "$RUNNER_TEMP/tagrex-output-attach.plist"
+          # Select only the whole device returned for this newly attached image;
+          # never enumerate or choose an unrelated host disk for formatting.
+          device="$(python3 -c 'import plistlib,re,sys; p=plistlib.load(open(sys.argv[1], "rb")); d=[x["dev-entry"] for x in p["system-entities"] if re.fullmatch(r"/dev/disk[0-9]+", x.get("dev-entry", ""))]; assert len(d)==1, d; print(d[0])' "$RUNNER_TEMP/tagrex-output-attach.plist")"
+          diskutil eraseDisk "$OUTPUT_FILESYSTEM" TagRexOutputs MBR "$device"
+          diskutil unmountDisk "$device"
           mkdir "$mount"
-          hdiutil attach "$image" -mountpoint "$mount" -nobrowse
+          diskutil mount -mountPoint "$mount" "${device}s1"
+          diskutil info -plist "$mount" | python3 -c 'import os,plistlib,sys; p=plistlib.load(sys.stdin.buffer); expected="exfat" if os.environ["OUTPUT_FILESYSTEM"]=="ExFAT" else "msdos"; actual=p.get("FilesystemType", "").lower(); print("Filesystem:", actual); assert actual==expected, p'
           export TAGREX_OUTPUT_TEST_ROOT="$mount"
           # FAT-family volumes cannot create symlinks. Those two protections
           # run on APFS in ordinary CI; exercise all publication paths here.
