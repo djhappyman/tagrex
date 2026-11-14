@@ -1,6 +1,6 @@
 [package]
 name = "tagrex"
-description = "Cross-platform audio tag editor"
+description = "Tagnetic: Music tags, beautifully organised"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

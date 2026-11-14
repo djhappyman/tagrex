@@ -1,4 +1,4 @@
-# Builds and personal releases
+# Tagnetic builds and releases
 
 ## Routine development
 
@@ -41,3 +41,19 @@ For feature checkpoints, paired upstream contributions and branch retirement,
 see the [contribution workflow](WORKFLOW.md).
 
 Uncheck **publish_release** for an artifact-only manual build. Main pushes remain artifact-only. An upstream repository is rejected by the release planner; all publication targets `djhappyman/tagrex` explicitly.
+
+## Branding and compatibility
+
+New packages and release titles use **Tagnetic**. The repository remains at
+`djhappyman/tagrex`, and the `personal-v<VERSION>` tag scheme is retained so old
+release links and automation continue to work. The application identifier
+`com.djhappyman.tagrex.personal`, internal executable/crate names and saved
+preference keys are intentionally retained to keep existing settings and Undo
+history accessible. These are compatibility names, not the visible product name.
+
+The original TagRex downloads are not Tagnetic builds. The GitHub homepage, app
+release link and issue templates point to this fork. In-app updates stay disabled.
+
+Regenerate platform icons with `npm run icons`. The editable source is
+`app/ui/assets/tagnetic-icon.svg`. The bundled fonts retain their existing
+internal family names and licence/provenance records.

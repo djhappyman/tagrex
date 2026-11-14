@@ -351,20 +351,21 @@ select,
   background: var(--border);
 }
 
-/* The wordmark (#401) is the repo's own outlines, not text in the UI font: it
-   always inherited whatever the UI sans was, so the app's logo drifted from the
-   one on GitHub. Sized as the 20px text it replaces — the outlines are drawn at
-   100 units per em and cropped to the glyphs, 93.61 units from the top of the
-   slash to the bottom of the g. */
+/* Keep the wordmark stable when the interface or data font changes. The
+   bundled family name is retained for font provenance and reproducible builds. */
 .brand {
   flex: none;
   display: flex;
+  align-items: center;
   color: var(--accent-ink);
 }
-.brand svg {
-  display: block;
-  height: calc(20px * 0.9361);
-  width: auto;
+.brand-wordmark {
+  font-family: "TagRex Inter", sans-serif;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.045em;
+  white-space: nowrap;
 }
 
 /* Overlay title bar (#362): the traffic lights float over the page instead

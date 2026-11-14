@@ -95,7 +95,7 @@
               <span></span>
               <span id="update-result" class="settings-hint" role="status"></span>
             </div>
-            <p class="settings-hint" data-i18n="settings.checkUpdatesHint">At startup, TagRex checks GitHub for the latest release and shows a note in the top bar if a newer one exists. It does not download or install anything, and sends nothing about you or your files. When off, TagRex makes no request.</p>
+            <p class="settings-hint" data-i18n="settings.checkUpdatesHint">At startup, Tagnetic checks GitHub for the latest release and shows a note in the top bar if a newer one exists. It does not download or install anything, and sends nothing about you or your files. When off, Tagnetic makes no request.</p>
             </div>
           </div>
 
@@ -119,7 +119,7 @@
                   <Button variant="outline" size="sm" id="beatport-signout" class="btn" hidden data-i18n="settings.beatport.signOut">Disconnect</Button>
                 </div>
               </div>
-              <p class="settings-hint settings-detail" data-i18n="settings.beatport.hint">Opens Beatport's sign-in window. TagRex never sees your password. Uses an unofficial public client from Beatport's documentation because API access is partner-only. Access may stop working.</p>
+              <p class="settings-hint settings-detail" data-i18n="settings.beatport.hint">Opens Beatport's sign-in window. Tagnetic never sees your password. Uses an unofficial public client from Beatport's documentation because API access is partner-only. Access may stop working.</p>
             </div>
           </div>
 

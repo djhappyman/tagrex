@@ -5,9 +5,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: TagRex version
+      label: Tagnetic version
       description: Shown in the About dialog.
-      placeholder: "0.20.0"
+      placeholder: "1.4.2"
     validations:
       required: true
   - type: dropdown

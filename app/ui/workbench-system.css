@@ -12,7 +12,7 @@
 body .topbar { padding:var(--sp-3) var(--sp-4) var(--sp-2); gap:var(--sp-2); background:var(--panel); }
 body .topbar-main { align-items:center; gap:var(--sp-3); min-height:var(--ctl-h); flex-wrap:nowrap; }
 body .brand { margin-right:0; }
-body .brand svg { height:20px; }
+body .brand .brand-wordmark { font-size:20px; }
 body .mode-tabs { gap:2px; border:0; border-radius:0; padding:0; background:transparent; }
 body button[data-slot='button'].mode-tab { min-height:32px; padding:7px 10px; border-radius:var(--r-compact); font-size:var(--text-sm); letter-spacing:0; font-weight:var(--fw-medium); text-transform:none; }
 body button[data-slot='button'].mode-tab .ico { display:inline-block; width:17px; height:17px; }

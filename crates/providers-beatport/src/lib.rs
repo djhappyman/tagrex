@@ -34,9 +34,9 @@ use tagrex_core::transform::{KeyNotation, KeyStyle, TransformStep};
 pub(crate) const API_BASE: &str = "https://api.beatport.com/v4";
 const SITE_BASE: &str = "https://www.beatport.com";
 pub(crate) const USER_AGENT: &str = concat!(
-    "TagRex/",
+    "Tagnetic/",
     env!("CARGO_PKG_VERSION"),
-    " +https://github.com/tagrex/tagrex"
+    " +https://github.com/djhappyman/tagrex"
 );
 
 /// How many tracks to ask for per page. A release never has more, so one request

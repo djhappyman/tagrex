@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TagRex Personal",
+  "productName": "Tagnetic",
   "version": "1.4.2",
   "identifier": "com.djhappyman.tagrex.personal",
   "build": {
@@ -12,7 +12,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "TagRex Personal",
+        "title": "Tagnetic",
         "width": 1280,
         "height": 800,
         "minWidth": 360,

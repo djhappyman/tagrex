@@ -27,7 +27,7 @@ This is a working direction, not a promise of dates or platform performance. Cur
 
 ## Later — a sustainable personal project
 
-- Choose a lasting name/identity if the fork develops independently; retain clear attribution and the history of the shared foundation.
+- Establish the Tagnetic identity throughout the app and documentation, retaining clear attribution and the history of the TagRex foundation.
 - Add fork-specific signed/notarized releases and, if worthwhile, a separate trusted updater feed. Never install original-project releases over this interface.
 - Keep contributions small and testable, with a visible upstream status ledger and release notes grounded in shipped behavior.
 - Consider larger architectural changes only when profiling or maintenance evidence justifies them.

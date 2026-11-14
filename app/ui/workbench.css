@@ -142,7 +142,7 @@ body .field-tools button[data-slot="button"]:is([aria-pressed="true"], [aria-exp
 .topbar-main { gap: 8px; }
 .topbar > .lib { min-width: 0; }
 .brand { margin-right: 5px; }
-.brand svg { height: 20px; }
+.brand .brand-wordmark { font-size: 20px; }
 .mode-tabs {
   align-items: center;
   gap: 3px;
@@ -641,7 +641,7 @@ body button[data-slot="button"].settings-nav-item { min-height: 34px; border-rad
 @media (max-width: 460px) {
   :root { --ctl-h: 34px; }
   .topbar-main > button.icon { width: 34px; height: 34px; }
-  .brand svg { height: 18px; }
+  .brand .brand-wordmark { font-size: 18px; }
   .topbar-main .update-pill { display: none; }
   .view-tabs .filter-ctl { order: -1; flex-basis: 100%; }
   .view-tabs > .tb-div { margin-left: auto; }

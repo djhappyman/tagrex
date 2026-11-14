@@ -1,21 +1,23 @@
-# TagRex user guide
+# Tagnetic user guide
 
-How to use TagRex day to day. If you are looking for how the code is put
+How to use Tagnetic day to day. If you are looking for how the code is put
 together, that is [docs/architecture.md](../architecture.md); for what changed
 between releases, [CHANGELOG.md](../../CHANGELOG.md).
 
-## The one idea worth reading first
+## Edit, preview, apply
 
-TagRex does not write to your files when you press a button. Every mutating
-operation — a tag edit, a rename, a folder move, a transform, an import, a cover
-embed — produces a **change plan**, which is drawn as a diff *into the file
-table itself*. You look at it, tick off the rows you want, and press **Apply**.
-Only then is anything written, and even then it goes into an undo journal that
-survives closing the app.
+Choose files, make edits and review them in **Staged** before saving. You can
+keep editing to build up a set of tag, rename, artwork and transformation
+changes. **Apply** writes those changes to your music files and records the
+batch for **Undo**. Previewing alone does not write to your music files.
 
-Once that clicks, the rest of the app is small: a table, five modes that each
-propose changes to it, and one Apply/Discard gate they all pass through. If you
-read nothing else, read [Change plans, Apply and Undo](change-plans.md).
+Files and Staged share the same table and edits. Use Staged to review
+before-and-after values and refine a cell before applying the batch.
+See [Change plans, Apply and Undo](change-plans.md) for the underlying model.
+
+This guide is adapted from the TagRex documentation. Some detailed sections
+still describe the inherited interface; the [project README](../../README.md)
+describes Tagnetic’s current workflow and development status.
 
 ## Contents
 

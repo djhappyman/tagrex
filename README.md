@@ -1,5 +1,7 @@
 # Tagnetic
 
+<img src="app/ui/assets/tagnetic-icon.svg" width="64" height="64" alt="Tagnetic app icon" />
+
 **Music tags, beautifully organised.**
 
 A desktop music library editor built around a familiar table, quick previews and deliberate saving. Edit tags, tidy file names, find metadata and manage artwork, with a clear view of what will change before you Apply.

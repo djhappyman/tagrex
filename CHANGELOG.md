@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Introduce Tagnetic branding in the interface, app packages, release titles and
+  project links, preserving existing settings and Undo history.
+
 - Redesign transformation presets with clearer rule explanations, inline editing,
   collapsible preset groups and consistent themed controls.
 - Keep field-specific Before/After samples visible while editing rules, with

@@ -1,4 +1,4 @@
-//! Telling the user that a newer TagRex exists (#435).
+//! Telling the user that a newer Tagnetic exists (#435).
 //!
 //! One request to the GitHub Releases API for the latest published release,
 //! compared with the running version. Nothing about the user or their files is
@@ -18,7 +18,7 @@ use tauri::{AppHandle, Url};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// Where the releases are, and the page the notice opens.
-const LATEST_API: &str = "https://api.github.com/repos/tagrex/tagrex/releases/latest";
+const LATEST_API: &str = "https://api.github.com/repos/djhappyman/tagrex/releases/latest";
 pub const RELEASES_PAGE: &str = "https://github.com/djhappyman/tagrex/releases";
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -73,7 +73,7 @@ pub fn check(proxy: &str) -> Result<UpdateCheckDto, String> {
     let agent = ureq::Agent::new_with_config(builder.build());
     let mut response = agent
         .get(LATEST_API)
-        .header("User-Agent", &format!("TagRex/{current}"))
+        .header("User-Agent", &format!("Tagnetic/{current}"))
         .header("Accept", "application/vnd.github+json")
         .call()
         .map_err(|error| error.to_string())?;
@@ -186,9 +186,10 @@ pub fn run_installer_elevated(
     if !bytes.starts_with(b"MZ") {
         return Err("the update is not an installer".to_string());
     }
-    let temp = std::env::temp_dir().join(format!("TagRex-{version}-update-{}", std::process::id()));
+    let temp =
+        std::env::temp_dir().join(format!("Tagnetic-{version}-update-{}", std::process::id()));
     std::fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
-    let installer = temp.join(format!("TagRex_{version}-setup.exe"));
+    let installer = temp.join(format!("Tagnetic_{version}-setup.exe"));
     std::fs::write(&installer, bytes).map_err(|error| error.to_string())?;
 
     let wide = |text: &std::ffi::OsStr| -> Vec<u16> {
@@ -210,7 +211,7 @@ pub fn run_installer_elevated(
     match result.0 as isize {
         code if code > 32 => Ok(()),
         5 => Err(format!(
-            "TagRex needs administrator rights to update in {}",
+            "Tagnetic needs administrator rights to update in {}",
             dir.display()
         )),
         code => Err(format!("the installer could not start (error {code})")),
@@ -266,8 +267,8 @@ mod tests {
     #[test]
     fn the_elevated_installer_is_told_the_folder_last_and_unquoted() {
         assert_eq!(
-            elevated_installer_parameters(std::path::Path::new("Program Files/TagRex")),
-            "/P /UPDATE /R /ARGS /D=Program Files/TagRex"
+            elevated_installer_parameters(std::path::Path::new("Program Files/Tagnetic")),
+            "/P /UPDATE /R /ARGS /D=Program Files/Tagnetic"
         );
     }
 

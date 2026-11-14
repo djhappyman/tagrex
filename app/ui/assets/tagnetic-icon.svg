@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="Tagnetic app icon">
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#1b1e35"/>
+  <path d="M115 128h189l100 128-100 128H115a27 27 0 0 1-27-27V155a27 27 0 0 1 27-27Z" fill="#608eff"/>
+  <circle cx="344" cy="256" r="15" fill="#1b1e35"/>
+  <path d="M145 195h147v35h-54v87h-39v-87h-54Z" fill="#f4f6ff"/>
+</svg>

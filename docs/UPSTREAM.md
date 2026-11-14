@@ -1,11 +1,12 @@
 # Upstream relationship and contribution ledger
 
-TagRex Personal builds on [tagrex/tagrex](https://github.com/tagrex/tagrex). This fork's `main` is the canonical personal interface; upstream contributions use separate, curated branches. Personal branding, README, roadmap, versioning and release automation stay in the fork.
+Tagnetic builds on [tagrex/tagrex](https://github.com/tagrex/tagrex). This fork's `main` is the canonical personal interface; upstream contributions use separate, curated branches. Personal branding, README, roadmap, versioning and release automation stay in the fork.
 
 ## Current coverage
 
 | Concern | Upstream route |
 | --- | --- |
+| Tagnetic branding, icons and personal release metadata | Fork-only; independent product identity |
 | Component workbench, spreadsheet, workspace and artwork interface | [#729](https://github.com/tagrex/tagrex/pull/729), refreshed as the one-time foundation against `next` |
 | Blocking command queues | [#737](https://github.com/tagrex/tagrex/pull/737), accepted/merged into `main` |
 | Interrupted rollback recovery | [#738](https://github.com/tagrex/tagrex/pull/738), accepted/merged into `main` |
@@ -13,7 +14,7 @@ TagRex Personal builds on [tagrex/tagrex](https://github.com/tagrex/tagrex). Thi
 | Provider clients and streamed duplicate hashes | [#740](https://github.com/tagrex/tagrex/pull/740), accepted/merged into `main` |
 | Display metadata cache | [#741](https://github.com/tagrex/tagrex/pull/741), accepted/merged into `main` |
 | Shared artwork transport and encoding reuse | [#742](https://github.com/tagrex/tagrex/pull/742), open/proposed, `main` |
-| Guarded/staged exports | [#743](https://github.com/tagrex/tagrex/pull/743), open/proposed, `main` |
+| Guarded/staged exports | [#743](https://github.com/tagrex/tagrex/pull/743), accepted/merged into `main` |
 | Linux experimental compositor workaround | [#744](https://github.com/tagrex/tagrex/pull/744), Draft, `next`; native evidence pending |
 | Allocation-free natural comparison | [#750](https://github.com/tagrex/tagrex/pull/750), accepted/merged into `main` |
 | Sidecar filename filtering and per-preview directory batching | [#751](https://github.com/tagrex/tagrex/pull/751), accepted/merged into `main` |
@@ -23,6 +24,11 @@ These are submitted/proposed changes, not a claim that upstream has accepted the
 The foundation is intentionally the one broad exception while it remains unmerged. Subsequent interface work should be small follow-ups once that base is available. Backend PRs must land on `main` and flow to `next`; the foundation's bundled native snapshot must be reconciled with the reviewed implementations before merge. The open proposals retain their documented platform/evaluation gates; ready-for-review status does not imply acceptance.
 
 ## Workbench/theme checkpoint reconciliation (2026-11-14)
+
+Historical checkpoint details follow. Since that snapshot, fork #12 merged at
+`3f740bf`, upstream #743 and #761 were accepted, and #742 was reconciled with
+main at `104a6fc` with all four hosted checks passing. Tagnetic branding is
+fork-only and is not proposed to upstream main or Next.
 
 Fork [#11](https://github.com/djhappyman/tagrex/pull/11) is merged into fork `main` at `a1a2ad31046dbcab1e3278c2e3421b2cac200f0d`. All four checks passed on head `0e35c26`: Linux, Windows, macOS and advisories. It carries all six UI checkpoints, staging catalogue quoting and a Chromium-compatible input-width assertion; the assertion retains its original threshold and changes no production layout. Compatibility follow-up [#12](https://github.com/djhappyman/tagrex/pull/12) now targets actual fork `main` and requires its own exact-head platform/filesystem gate before merge.
 
@@ -40,7 +46,7 @@ Fresh local checks: fork source has 91 unit tests and 404 browser tests passing 
 - #744 is now accurately marked Draft. Native flash and restart/launch-path evidence remain outstanding; a green build does not close them.
 - New upstream Ogg-codec refusal, AppleDouble scanning and dependency safeguards are adopted in the fork without changing its interface, identity or release policy. They refuse unsupported Ogg FLAC before an unsafe AAC misidentification, exclude macOS `._` files, enable the trash 5.3 Linux backend explicitly, and keep incompatible Windows/zbus major updates out of automated proposals.
 
-The maintainer has now merged #741 into main. #742, #743 and #761 remain open for maintainer review. No upstream merge was performed by this agent. Fork follow-ups require their own full hosted gate before merging.
+The maintainer has merged #741, #743 and #761 into main. #742 remains open for maintainer review. No upstream merge was performed by this agent. Fork follow-ups require their own full hosted gate before merging.
 
 ## Explaining intentional differences
 

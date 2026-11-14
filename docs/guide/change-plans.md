@@ -8,7 +8,7 @@ everything.
 
 1. **You ask for something** — edit tags across a selection, run a transform,
    preview a rename, import a release, embed a cover.
-2. **TagRex builds a change plan** and draws it into the file table as a diff.
+2. **Tagnetic builds a change plan** and draws it into the file table as a diff.
    Nothing has been written.
 3. **You review it**, and untick any row you disagree with.
 4. **Apply** writes it, as one transactional batch, recorded in the undo journal.
@@ -67,7 +67,7 @@ current library.
 - **There is no redo.** An undone batch is gone from the journal. If you undo one
   step too far, you have to make the change again.
 - **It survives restarts.** The journal is a SQLite database on disk, so closing
-  TagRex and reopening the same library leaves the history intact.
+  Tagnetic and reopening the same library leaves the history intact.
 - **It is scoped to the library you have open.** The journal is shared across
   every library you have ever opened, but only batches whose files sit under the
   current root are offered — otherwise undo would promise something it cannot

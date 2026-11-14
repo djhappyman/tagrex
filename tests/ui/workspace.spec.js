@@ -44,6 +44,9 @@ async function openSettings(page) {
 
 test('every workspace mode and tagging subtab remains usable after mounting', async ({ page }) => {
   await openApp(page);
+  await expect(page).toHaveTitle('Tagnetic');
+  await expect(page.getByRole('img', { name: 'Tagnetic', exact: true })).toBeVisible();
+  await expect(page.locator('.brand')).toHaveText('TAGnetic');
   for (const mode of ['renamer', 'generator', 'deduplicator', 'exporter', 'tagger']) {
     const tab = page.locator(`.mode-tab[data-mode="${mode}"]`);
     await tab.focus();
@@ -298,7 +301,7 @@ test('a controller import failure explains recovery and Reload starts the app', 
   await page.route('**/assets/app-*.js', rejectController);
   await page.goto('http://tagrex.test/app/ui/index.html');
   const notice = page.getByRole('alert');
-  await expect(notice).toContainText('TagRex couldn’t start', { timeout: 3000 });
+  await expect(notice).toContainText('Tagnetic couldn’t start', { timeout: 3000 });
   await expect(notice.getByRole('button', { name: 'Reload' })).toBeFocused();
   await expect(page.locator('#app')).toHaveAttribute('inert', '');
   await page.unroute('**/assets/app-*.js', rejectController);
