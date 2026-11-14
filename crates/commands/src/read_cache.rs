@@ -1,11 +1,14 @@
 //! Bounded, fingerprint-validated display/preview snapshots. Executor staleness
 //! checks never use this cache. Failed reads are never cached.
+
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
     time::SystemTime,
 };
+
 use tagrex_core::model::{TagEngine, TagIoError, TrackRead};
+
 #[derive(Clone, PartialEq, Eq)]
 struct Fingerprint {
     len: u64,
@@ -13,6 +16,7 @@ struct Fingerprint {
     #[cfg(unix)]
     identity: (u64, u64, i64, i64),
 }
+
 impl Fingerprint {
     fn of(path: &Path) -> Option<Self> {
         let m = std::fs::metadata(path).ok()?;
@@ -26,21 +30,30 @@ impl Fingerprint {
         })
     }
 }
+
 struct Entry {
     stamp: Fingerprint,
     read: TrackRead,
     bytes: usize,
 }
+
+/// Request-independent display snapshots bounded by entry count and estimated
+/// metadata bytes. Writes and Undo clear these; executor checks bypass them.
 #[derive(Default)]
 pub(crate) struct ReadCache {
     entries: HashMap<PathBuf, Entry>,
     bytes: usize,
 }
+
 impl ReadCache {
+    /// Discard all snapshots after writes or a session change.
     pub fn clear(&mut self) {
         self.entries.clear();
         self.bytes = 0;
     }
+
+    /// Reuse a snapshot only while its filesystem fingerprint still matches.
+    /// Failed or visibly concurrent reads are never added to the cache.
     pub fn read(&mut self, path: &Path) -> Result<TrackRead, TagIoError> {
         let before = Fingerprint::of(path);
         if let Some(entry) = self.entries.get(path) {
@@ -52,8 +65,10 @@ impl ReadCache {
             self.bytes -= old.bytes;
         }
         let read = TagEngine::read_with_props(path)?;
-        // Don't publish a snapshot read concurrently with a write, or on a
-        // filesystem without a usable high-resolution fingerprint.
+        // Cache only when the observed fingerprint is unchanged across the read.
+        // This does not detect every concurrent or same-size external edit: on
+        // Windows, length + mtime can collide on coarse timestamp filesystems.
+        // Executor staleness checks always re-read the file independently.
         if let Some(stamp) = before.filter(|s| Some(s) == Fingerprint::of(path).as_ref()) {
             let bytes = 512
                 + path.as_os_str().len()

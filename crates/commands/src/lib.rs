@@ -2372,18 +2372,26 @@ impl App {
         })
     }
 
+    /// Read tags, audio properties and tag-block metadata from one validated
+    /// display snapshot. Executor preflight deliberately reads independently.
     fn read_snapshot(
         &self,
         path: &Path,
     ) -> Result<tagrex_core::model::TrackRead, tagrex_core::model::TagIoError> {
         self.read_cache.borrow_mut().read(path)
     }
+
+    /// Read only the tag-file view of the same cached snapshot.
     fn read_cached(
         &self,
         path: &Path,
     ) -> Result<tagrex_core::model::TrackFile, tagrex_core::model::TagIoError> {
         self.read_snapshot(path).map(|read| read.file)
     }
+
+    /// Build a table row from one probe: tags, playing time (#172) and tag
+    /// blocks (#47). Length and Tags columns must reuse that read, so they
+    /// remain free rather than probing the file again.
     fn track_dto(&self, path: &Path) -> TrackDto {
         match self.read_snapshot(path) {
             Ok(read) => TrackDto {
@@ -2396,6 +2404,9 @@ impl App {
             Err(_) => TrackDto::unreadable(path),
         }
     }
+
+    /// Gather only the file properties a mask needs, reusing cached audio
+    /// properties while reading filesystem size/date freshly when requested.
     fn file_context<'a>(
         &self,
         mask: &Mask,
