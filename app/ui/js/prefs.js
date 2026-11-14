@@ -65,6 +65,32 @@ function applyCheckboxCol(on) {
   }
 }
 
+// How the mode switcher in the top bar looks: "pill" (one segmented control,
+// the default) or "classic" (flat tabs with an accent underline). The two have
+// different widths, so a change announces itself and app.js re-runs the
+// icon-only width check.
+const MODE_TABS_STYLE_STORAGE_KEY = "tagrex.modeTabsStyle";
+const MODE_TABS_STYLES = ["pill", "classic"];
+const MODE_TABS_STYLE_DEFAULT = "pill";
+function modeTabsStyle() {
+  try {
+    const v = localStorage.getItem(MODE_TABS_STYLE_STORAGE_KEY);
+    return MODE_TABS_STYLES.includes(v) ? v : MODE_TABS_STYLE_DEFAULT;
+  } catch (e) {
+    return MODE_TABS_STYLE_DEFAULT;
+  }
+}
+function applyModeTabsStyle(style) {
+  const s = MODE_TABS_STYLES.includes(style) ? style : MODE_TABS_STYLE_DEFAULT;
+  document.body.classList.toggle("tabs-classic", s === "classic");
+  try {
+    localStorage.setItem(MODE_TABS_STYLE_STORAGE_KEY, s);
+  } catch (e) {
+    /* localStorage unavailable — preference just won't persist */
+  }
+  document.dispatchEvent(new Event("tagrex:mode-tabs-style"));
+}
+
 // Filter mode prefs (#44): regex on/off and case sensitivity. Pure view choices,
 // persisted like the other display prefs. Read once at startup, then flipped by
 // the toolbar toggles.
@@ -458,6 +484,9 @@ export {
   applyValueFont,
   checkboxColEnabled,
   applyCheckboxCol,
+  MODE_TABS_STYLE_DEFAULT,
+  modeTabsStyle,
+  applyModeTabsStyle,
   regexModeEnabled,
   caseSensitiveEnabled,
   saveFilterMode,

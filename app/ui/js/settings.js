@@ -32,6 +32,9 @@ import {
   clampTableFont,
   clampTracklistFont,
   applyCheckboxCol,
+  applyModeTabsStyle,
+  MODE_TABS_STYLE_DEFAULT,
+  modeTabsStyle,
   applyTableFont,
   applyTheme,
   ACCENT_PRESETS,
@@ -127,6 +130,17 @@ function setThemeChoice(mode) {
   el("set-theme")
     .querySelectorAll(".seg-btn")
     .forEach((b) => b.classList.toggle("active", b.dataset.themeMode === mode));
+}
+
+// The mode switcher's look, live like the theme: apply and tick the matching card.
+function setModeTabsChoice(style) {
+  applyModeTabsStyle(style);
+  const current = modeTabsStyle();
+  el("set-tabs-style")
+    .querySelectorAll('input[name="tabs-style"]')
+    .forEach((r) => {
+      r.checked = r.value === current;
+    });
 }
 
 // Accent colour (#431), live like the theme: pick a swatch or a custom colour and
@@ -418,6 +432,7 @@ async function openSettings() {
   reflectAccentChoice();
   setLanguageChoice(langMode());
   el("set-checkbox-col").checked = checkboxColEnabled();
+  setModeTabsChoice(modeTabsStyle());
   setValueFontChoice(valueFont());
   el("set-table-font").value = tableFontPx();
   el("set-table-font-val").textContent = `${tableFontPx()}px`;
@@ -644,6 +659,10 @@ el("set-accent").addEventListener("click", (e) => {
 });
 el("set-accent-custom").addEventListener("input", (e) => setAccentChoice(e.target.value));
 el("set-accent-reset").addEventListener("click", () => setAccentChoice(null));
+// The mode switcher's look is live too, so the top bar changes behind the sheet.
+el("set-tabs-style").addEventListener("change", (e) => {
+  if (e.target.name === "tabs-style") setModeTabsChoice(e.target.value);
+});
 // Value font is live too — swap on click so the effect shows behind the sheet.
 el("set-value-font").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-value-font]");
@@ -753,12 +772,14 @@ initGroupResets([
       langMode() === "auto" &&
       themeMode() === "auto" &&
       accentColor() === null &&
+      modeTabsStyle() === MODE_TABS_STYLE_DEFAULT &&
       !el("set-checkbox-col").checked &&
       el("set-check-updates").checked,
     reset: () => {
       setLanguageChoice("auto");
       setThemeChoice("auto");
       setAccentChoice(null);
+      setModeTabsChoice(MODE_TABS_STYLE_DEFAULT);
       el("set-checkbox-col").checked = false;
       el("set-check-updates").checked = true;
     },
