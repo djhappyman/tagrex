@@ -655,6 +655,9 @@ mod tests {
             Set-Acl -LiteralPath $env:TAGREX_PIN_TEST_PARENT -AclObject $acl
         "#;
         let status = std::process::Command::new("powershell.exe")
+            // Cargo may itself run under PowerShell 7, whose module paths
+            // cannot be loaded by the Windows PowerShell 5.1 child.
+            .env_remove("PSModulePath")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .env("TAGREX_PIN_TEST_PARENT", &root)
             .status()
