@@ -6248,21 +6248,22 @@ fn fill_by_length(aligned: &mut [Option<usize>], locals: &[TrackRef], candidates
 /// the order is total and stable.
 pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let (mut left, mut right) = (a.chars().peekable(), b.chars().peekable());
+    let (mut left, mut right) = (a.chars(), b.chars());
     loop {
-        match (left.peek().copied(), right.peek().copied()) {
+        match (left.clone().next(), right.clone().next()) {
             (None, None) => return a.cmp(b),
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(l), Some(r)) if l.is_ascii_digit() && r.is_ascii_digit() => {
-                let take = |chars: &mut std::iter::Peekable<std::str::Chars>| {
-                    let mut digits = String::new();
-                    while let Some(c) = chars.peek().copied().filter(char::is_ascii_digit) {
-                        digits.push(c);
-                        chars.next();
-                    }
+                // Borrow the digit run from the original UTF-8 string. ASCII
+                // digits are one byte, so the boundary is also a char boundary.
+                fn take<'a>(chars: &mut std::str::Chars<'a>) -> &'a str {
+                    let suffix = chars.as_str();
+                    let len = suffix.bytes().take_while(u8::is_ascii_digit).count();
+                    let (digits, rest) = suffix.split_at(len);
+                    *chars = rest.chars();
                     digits
-                };
+                }
                 let (l, r) = (take(&mut left), take(&mut right));
                 let (l_value, r_value) = (l.trim_start_matches('0'), r.trim_start_matches('0'));
                 let by_value = l_value
@@ -8913,6 +8914,26 @@ mod tests {
                 "/m/CD2/1 Audio Track.aiff",
                 "/m/CD10/1 x.aiff",
             ]
+        );
+    }
+
+    #[test]
+    fn natural_cmp_handles_digit_boundaries_and_unicode() {
+        use std::cmp::Ordering::{Greater, Less};
+        assert_eq!(natural_cmp("音楽2🎵", "音楽10🎵"), Less);
+        assert_eq!(natural_cmp("é0002a", "É2b"), Less);
+        assert_eq!(natural_cmp("x000", "x0"), "x000".cmp("x0"));
+        assert_eq!(natural_cmp("a٢", "a10"), Greater);
+        assert_eq!(natural_cmp("İ02", "i2"), Greater);
+        assert_eq!(natural_cmp("🎵", "🎵0"), Less);
+        let long = "9".repeat(500);
+        assert_eq!(
+            natural_cmp(&format!("音{long}"), &format!("音1{long}")),
+            Less
+        );
+        assert_eq!(
+            natural_cmp(&format!("音00{long}"), &format!("音{long}")),
+            format!("音00{long}").cmp(&format!("音{long}"))
         );
     }
 
