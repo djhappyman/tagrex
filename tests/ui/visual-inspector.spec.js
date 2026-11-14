@@ -56,7 +56,7 @@ async function sizeInspector(page, width) {
   await page.mouse.down();
   await page.mouse.move(area.x + area.width - width - handle.width / 2, handle.y + handle.height / 2, { steps: 4 });
   await page.mouse.up();
-  await expect.poll(async () => (await page.locator('.mode-col').boundingBox()).width).toBeLessThan(width + 60);
+  await expect.poll(async () => (await page.locator('.mode-col').boundingBox()).width).toBeLessThan(Math.max(width + 60, 448));
 }
 
 const box = (page, selector) => page.locator(selector).first().evaluate((node) => {
@@ -70,6 +70,44 @@ const style = (page, selector, keys) => page.locator(selector).first().evaluate(
 );
 
 const number = (value) => Number.parseFloat(value);
+
+for (const theme of ['dark', 'light']) {
+  test(`compact metadata fills its columns and paired rows keep their spacing (${theme})`, async ({ page }, testInfo) => {
+    await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
+    await tab(page, 'editor');
+    await page.locator('[data-group="standard"] .fe-group-head').click();
+    for (const width of [360, 440, 605]) {
+      await sizeInspector(page, width);
+      const geometry = await page.locator('#fields-body').evaluate(root => {
+        const b = node => node.getBoundingClientRect();
+        return {
+          compact: [...root.querySelectorAll('.fe-inline-fields .field-input')].map(input => ({
+            key: input.dataset.key, width: b(input).width, available: b(input.closest('.fe-cell')).width,
+            x: b(input).x, labelRight: b(input.closest('.fe-row').querySelector('.fe-label')).right,
+          })),
+          pairs: [...root.querySelectorAll('.fe-duo-unit')].map(unit => ({
+            labelRight: b(unit.querySelector('label')).right, input: b(unit.querySelector('input')).x,
+          })),
+          gaps: [...root.querySelectorAll('.fe-grid')].flatMap(grid => [...grid.children].slice(1).map((row, i) => b(row).top - b(grid.children[i]).bottom)),
+        };
+      });
+      for (const input of geometry.compact) {
+        expect(Math.abs(input.width - input.available), `${width}px ${input.key} fills its column`).toBeLessThan(1);
+        expect(input.x - input.labelRight, `${width}px ${input.key} label is beside its value`).toBeCloseTo(4, 0);
+      }
+      for (const pair of geometry.pairs) {
+        expect(pair.input - pair.labelRight, `${width}px number-pair label is beside its value`).toBeCloseTo(4, 0);
+      }
+      for (const gap of geometry.gaps) expect(gap, `${width}px row spacing includes paired rows`).toBeCloseTo(8, 0);
+      if (process.env.COMPACT_INPUT_CAPTURE === '1') {
+        await page.locator('.editor-scroll').evaluate(node => { node.scrollTop = 0; });
+        await page.locator('.mode-col').screenshot({ path: testInfo.outputPath(`compact-${theme}-${width}.png`) });
+        await page.locator('[data-group="standard"] .fe-group-head').scrollIntoViewIfNeeded();
+        await page.locator('.mode-col').screenshot({ path: testInfo.outputPath(`more-tags-${theme}-${width}.png`) });
+      }
+    }
+  });
+}
 
 test('every mode panel and Tagger tab uses the shared heading, body and help roles', async ({ page }) => {
   const bodyInk = await page.evaluate(() => getComputedStyle(document.body).color);
@@ -117,7 +155,7 @@ test('every mode panel and Tagger tab uses the shared heading, body and help rol
   expect(number((await style(page, '.subtab', ['height'])).height)).toBe(28);
 });
 
-test('field groups keep one 24px separation and rows one 4px substep without doubled gaps', async ({ page }) => {
+test('field groups keep one 24px separation and rows one 8px gap without doubled gaps', async ({ page }) => {
   await tab(page, 'editor');
   expect(number((await style(page, '#fields-body', ['rowGap'])).rowGap)).toBe(24);
   const groups = await page.locator('#fields-body > .fe-group').evaluateAll((nodes) => nodes.map((node) => {
@@ -127,7 +165,7 @@ test('field groups keep one 24px separation and rows one 4px substep without dou
       marginTop: getComputedStyle(node).marginTop,
       gap: getComputedStyle(node).rowGap,
       top: node.getBoundingClientRect().top,
-      headBottom: head.getBoundingClientRect().bottom,
+      headBottom: head?.getBoundingClientRect().bottom ?? null,
       gridTop: grid.getBoundingClientRect().top,
       bottom: node.getBoundingClientRect().bottom,
       firstRow: grid.querySelector('.fe-row')?.getBoundingClientRect().top ?? null,
@@ -138,16 +176,17 @@ test('field groups keep one 24px separation and rows one 4px substep without dou
   expect(groups.slice(1).every((group) => group.marginTop === '0px')).toBe(true);
   expect(groups[1].top - groups[0].bottom).toBeCloseTo(24, 0);
   // Head to first row is one 4px substep.
-  expect(Math.abs(groups[0].firstRow - groups[0].headBottom - 4)).toBeLessThan(0.6);
-  // Two adjacent plain rows keep the 36px pitch (32px control + 4px substep).
+  expect(groups[0].headBottom).toBeNull();
+  expect(groups[0].firstRow).toBeCloseTo(groups[0].gridTop, 0);
+  // Two adjacent plain rows keep the 40px pitch (32px control + 8px gap).
   const rows = await page.locator('#fields-body .fe-grid > .fe-row').evaluateAll((nodes) => nodes
     .filter((node) => node.getBoundingClientRect().height < 34)
     .slice(0, 3)
     .map((node) => ({ top: node.getBoundingClientRect().top, height: node.getBoundingClientRect().height, marginTop: getComputedStyle(node).marginTop })));
   expect(rows.length).toBeGreaterThanOrEqual(2);
   expect(Math.abs(rows[0].height - 32)).toBeLessThan(0.6);
-  expect(rows[1].top - rows[0].top).toBeCloseTo(36, 3);
-  expect(number(rows[1].marginTop)).toBe(4);
+  expect(rows[1].top - rows[0].top).toBeCloseTo(40, 3);
+  expect(number(rows[1].marginTop)).toBe(0);
   // Section separation is 32px and comes from the block margin, not from a gap.
   const scroll = await page.locator('#subtab-editor .editor-scroll').evaluate((node) => ({
     gap: getComputedStyle(node).rowGap,
@@ -166,6 +205,7 @@ test('a staged field paints the same 10px contour as its control', async ({ page
   await title.fill('Contour check');
   const dirty = page.locator('#fields-body .fe-row').filter({ has: page.locator('input[data-key="title"]') });
   await expect(dirty).toHaveClass(/dirty/);
+  await expect(dirty.locator('.fe-hint')).toHaveCSS('display', 'none');
   const metrics = await dirty.evaluate((row) => {
     const input = row.querySelector('.field-input');
     const marker = row.querySelector('.fe-marker');
@@ -191,7 +231,7 @@ test('a staged field paints the same 10px contour as its control', async ({ page
   expect(number(metrics.markerRadius)).toBeLessThanOrEqual(2);
 });
 
-test('the narrow dock stacks labels above fields instead of compressing them', async ({ page }) => {
+test('a narrow dock preserves the desktop editor structure in its own scrollport', async ({ page }) => {
   await sizeInspector(page, 212);
   // The compression is driven by the dock's own width, not the window.
   expect(await page.locator('.mode-col').evaluate((node) => getComputedStyle(node).containerType)).toBe('inline-size');
@@ -226,13 +266,13 @@ test('the narrow dock stacks labels above fields instead of compressing them', a
     }, name);
     expect(layout.column.scroll).toBeLessThanOrEqual(layout.column.client + 1);
     for (const row of layout.rows) {
-      expect(row.labelAbove, `${name}: label above its field`).toBe(true);
-      expect(row.labelWidth, `${name}: label spans the value rail`).toBeCloseTo(row.railWidth, 0);
+      expect(row.labelAbove, `${name}: label remains beside its field`).toBe(false);
+      expect(row.labelWidth, `${name}: fixed label rail`).toBeGreaterThanOrEqual(32);
       expect(row.inputWidth, `${name}: value stays inside its rail`).toBeLessThanOrEqual(row.railWidth + 1);
-      expect(row.inputWidth, `${name}: compact input stays usable`).toBeGreaterThanOrEqual(56);
+      expect(row.inputWidth, `${name}: compact input stays usable`).toBeGreaterThanOrEqual(48);
       expect(row.overflow, `${name}: row overflow`).toBeLessThanOrEqual(1);
     }
-    if (layout.duo.length) expect(Math.min(...layout.duo), `${name}: number pair input`).toBeGreaterThanOrEqual(64);
+    if (layout.duo.length) expect(Math.min(...layout.duo), `${name}: number pair input`).toBeGreaterThanOrEqual(40);
   }
   await tab(page, 'editor');
   const title = await box(page, '#fields-body input[data-key="title"]');
@@ -269,7 +309,6 @@ test('dock menus use menu geometry and compact controls keep a 24px hit box', as
     return {
       lock: size(pick('#fields-body .fe-lock')),
       subtab: size(pick('.subtab')),
-      action: size(pick('.editor-actions button')),
       help: size(pick('#subtab-editor .inspector-help')),
     };
   });

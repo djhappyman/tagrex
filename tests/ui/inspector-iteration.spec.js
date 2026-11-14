@@ -44,9 +44,9 @@ test('mixed and empty placeholders never become pending values; compact fields a
   await tab(page,'editor');
   const title = page.locator('#editor-field-title');
   await expect(title).toHaveValue('');
-  await expect(title).toHaveAttribute('placeholder','<mixed values>');
+  await expect(title).toHaveAttribute('placeholder','Mixed values');
   const comment = page.locator('#editor-field-comment');
-  await expect(comment).toHaveAttribute('placeholder','<empty>');
+  await expect(comment).toHaveAttribute('placeholder','');
   await expect(page.locator('#diff-apply')).toBeDisabled();
   await expect(page.locator('[data-group="standard"] .fe-group-head')).toHaveAttribute('aria-expanded','false');
   await page.locator('[data-group="standard"] .fe-group-head').click();

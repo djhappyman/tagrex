@@ -13,11 +13,21 @@
 .dock-frame { display:flex; flex:1; flex-direction:column; min-width:0; min-height:0; height:100%; overflow:hidden; }
 .dock-workspace { display:grid; flex:1; min-height:0; min-width:0; grid-template-rows:var(--dock-top-size) var(--dock-top-handle) minmax(0,1fr) var(--dock-bottom-handle) var(--dock-bottom-size); }
 .dock-middle { display:grid; grid-template-columns:minmax(0,var(--dock-left)) 4px minmax(0,1fr); min-width:0; min-height:0; }
+/* The desktop inspector keeps its compact form intact instead of changing
+   label placement or clipping controls as the split is dragged smaller. */
+body .dock-frame[data-dock-compact='false'] .dock-workspace[data-has-left='true'][data-has-right='true'] > .dock-middle:has(> .dock-right #dock-module-inspector) {
+  grid-template-columns:minmax(0,min(var(--dock-left),calc(100% - 404px))) 4px minmax(0,1fr);
+}
+body .dock-frame[data-dock-compact='false'] .dock-workspace[data-has-left='true'][data-has-right='true'] > .dock-middle:has(> .dock-left #dock-module-inspector) {
+  grid-template-columns:minmax(400px,var(--dock-left)) 4px minmax(0,1fr);
+}
 .dock-workspace[data-has-right='false'] .dock-middle { grid-template-columns:minmax(0,1fr) 0 0; }
 .dock-workspace[data-has-left='false'] .dock-middle { grid-template-columns:0 0 minmax(0,1fr); }
 .dock-workspace[data-has-left='false'] .dock-left, .dock-workspace[data-has-right='false'] .dock-right { display:none; }
 .dock-area { display:flex; flex-direction:column; min-height:0; min-width:0; overflow:auto; position:relative; gap:0; }
-.dock-module { display:flex; flex:var(--dock-weight,1) 1 0%; flex-direction:column; min-width:0; min-height:72px; overflow:hidden; background:var(--workbench-chrome,var(--panel)); }
+/* Grow factors below one leave a fraction of free space unused when a sibling
+   collapses. Scale every weight equally: ratios persist and the area fills. */
+.dock-module { display:flex; flex:calc(var(--dock-weight,1) * 100) 1 0%; flex-direction:column; min-width:0; min-height:72px; overflow:hidden; background:var(--workbench-chrome,var(--panel)); }
 .dock-module-body { flex:1; min-height:0; min-width:0; overflow:hidden; display:flex; flex-direction:column; }
 .dock-module-body > * { min-height:0; min-width:0; }
 

@@ -84,7 +84,7 @@ body .statusbar.narrow-actions .diff-actionbar { position:absolute; inset:auto v
    controls instead of painting the absolute actionbar over it. */
 body .statusbar.narrow-actions .sb-right:has(#busy-pill:not([hidden])) .diff-actionbar { bottom:calc(100% + var(--sp-2)); }
 body:has(.statusbar.narrow-actions #busy-pill:not([hidden])):has(.statusbar.narrow-actions #diff-actionbar:not([hidden])) .mode-col { padding-bottom:calc(var(--sp-7) * 2); }
-body:has(.statusbar.narrow-actions #diff-actionbar:not([hidden])) .mode-col { padding-bottom:var(--sp-7); }
+
 body .statusbar.narrow-actions:has(#diff-actionbar:not([hidden])) .footer-feedback { bottom:calc(100% + var(--sp-7)); }
 /* Scope and lock feedback must not resize the table during a live cell edit. */
 body .statusbar .footer-feedback { position:absolute; left:9px; right:12px; bottom:calc(100% + 3px); display:flex; flex-direction:column; background:var(--panel); }
@@ -109,13 +109,9 @@ body #player .pl-vol { gap:var(--sp-2); }
    original controls and state; no viewport-dependent DOM reparenting is needed. */
 body .statusbar .diff-actionbar { position:static; inset:auto; transform:none; display:grid; grid-template-columns:minmax(0,1fr) auto auto; align-items:center; width:100%; min-width:0; max-width:none; border:0; border-radius:0; background:transparent; box-shadow:none; padding:0; margin:0; gap:4px 12px; }
 body .statusbar .diff-actionbar[hidden] { display:none; }
-body .statusbar .diff-actionbar .toggle-old { justify-self:start; min-height:var(--ctl-h); padding:var(--sp-1); gap:5px; border-radius:var(--r-compact); font-size:var(--text-xs); }
-body .statusbar .diff-actionbar .toggle-old:hover, body .statusbar .diff-actionbar .toggle-old:has(#diff-show-old:checked) { color:var(--text); background:var(--row-hover); }
-body .statusbar .diff-actionbar .toggle-old:has(:focus-visible) { outline:2px solid var(--accent); outline-offset:0; }
-body .statusbar .diff-actionbar .toggle-old .compat-checkbox:focus-visible { outline:none; }
 body .statusbar .diff-actionbar .btn { height:var(--ctl-h); min-height:var(--ctl-h); padding:var(--sp-1) var(--sp-3); border-radius:var(--r-compact); font-size:var(--text-xs); }
-body .statusbar #diff-discard { border:0; background:transparent; color:var(--muted); box-shadow:none; }
-body .statusbar #diff-discard:hover { color:var(--text); background:var(--row-hover); }
+body .statusbar #diff-preview { grid-column:2; border:0; background:var(--bg); color:var(--text); }
+body .statusbar .diff-actionbar.applying #diff-preview { display:none; }
 body .statusbar #diff-apply { gap:var(--sp-2); padding-inline:var(--sp-4); border-radius:var(--r-pill); max-width:100%; min-width:0; height:auto; min-height:var(--ctl-h); white-space:normal; line-height:1.3; text-align:center; }
 body .statusbar #diff-cancel-apply { grid-column:3; }
 body .statusbar .diff-actionbar.applying .toggle-old { display:none; }
@@ -125,7 +121,8 @@ body .statusbar .diff-actionbar .ab-file { max-width:none; flex:1; }
 @container (max-width:280px) {
   body .statusbar .diff-actionbar { grid-template-columns:minmax(0,1fr) auto; gap:4px; }
   body .statusbar .diff-actionbar .btn { padding-inline:8px; }
-  body .statusbar #diff-apply { grid-column:1 / -1; justify-self:end; }
+  body .statusbar #diff-apply { grid-column:2; justify-self:end; }
+  body .statusbar #diff-preview { grid-column:1; justify-self:end; }
   body .statusbar #diff-cancel-apply { grid-column:2; }
   body .statusbar .diff-actionbar.applying .ab-progress { grid-column:1; }
 }

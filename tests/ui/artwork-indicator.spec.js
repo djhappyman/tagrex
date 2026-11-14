@@ -147,12 +147,15 @@ test('group labels and collapse carets remain visible when the file table scroll
   await wrap.evaluate(node => { node.scrollLeft = 400; });
   await expect.poll(() => wrap.evaluate(node => node.scrollLeft)).toBeGreaterThan(100);
   const group = page.locator('#tracks-body tr.group-head').first();
-  const bounds = await wrap.boundingBox();
-  const label = await group.locator('.group-label').boundingBox();
-  const caret = await group.locator('.group-caret').boundingBox();
-  expect(caret.x).toBeGreaterThanOrEqual(bounds.x);
-  expect(label.x).toBeGreaterThanOrEqual(bounds.x);
-  expect(label.x).toBeLessThan(bounds.x + bounds.width - 50);
+  // Resizing schedules a virtual-window repaint. Read the header and its
+  // scrollport in one browser turn, retrying while that replacement settles.
+  await expect.poll(() => group.evaluate(node => {
+    const label = node.querySelector('.group-label')?.getBoundingClientRect();
+    const caret = node.querySelector('.group-caret')?.getBoundingClientRect();
+    const bounds = node.closest('.table-wrap').getBoundingClientRect();
+    return !!label?.width && !!caret?.width && caret.x >= bounds.x &&
+      label.x >= bounds.x && label.x < bounds.x + bounds.width - 50;
+  })).toBe(true);
   await group.locator('.group-caret').click();
   await expect(page.locator('#tracks-body tr[data-path]')).toHaveCount(0);
 });

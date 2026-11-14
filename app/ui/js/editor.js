@@ -93,8 +93,17 @@ function refreshFieldEditor({ force = false, resetDraft = false } = {}) {
 // change. A new selection/content revision still gets a full, fresh render.
 function reflectFieldLocks() {
   for (const row of el("fields-body").querySelectorAll(".fe-row")) {
+    if (row.classList.contains('fe-compilation')) {
+      const input = row.querySelector('input[type="checkbox"]');
+      const keys = JSON.parse(row.dataset.compilationKeys);
+      input.disabled = row.dataset.supported !== 'true' || keys.some(isFieldLocked);
+      row.classList.toggle('locked', keys.length > 0 && keys.some(isFieldLocked));
+      const button = row.querySelector('.fe-lock');
+      if (button) reflectLockButton(button);
+      continue;
+    }
     const inputs = [...row.querySelectorAll(".field-input")];
-    for (const input of inputs) input.disabled = isFieldLocked(input.dataset.key);
+    for (const input of inputs) input.disabled = !editorPaths.size || isFieldLocked(input.dataset.key);
     row.classList.toggle("locked", inputs.length > 0 && inputs.every(input => input.disabled));
     const button = row.querySelector(".fe-lock");
     if (button) reflectLockButton(button);
@@ -175,6 +184,9 @@ function renderTagBlocks(paths) {
   renderConvertButton(line, readKinds);
   renderFixEncodingButton(line);
 }
+
+// The format dialog is reachable from every tool, independently of the Editor.
+function refreshTagFormats() { renderTagBlocks(selectedPaths()); }
 
 // "Fix encoding" (#698), only with a code page chosen: without one nothing here
 // reads as anything but what the standard says, so there is nothing to fix.
@@ -453,18 +465,19 @@ const EDITOR_CORE_LAYOUT = [
   { key: "artist" },
   { key: "album" },
   { key: "albumartist" },
-  { inline: ["year", "genre"] },
-  { inline: ["bpm", "key"] },
+  { yearOptions: true },
+  { key: "genre" },
   { key: "comment" },
+  { inline: ["bpm", "key"] },
 ];
 // Numeric/typed fields get a narrow right-aligned input and inline validation
 // mirroring the backend's is_writable_value rule, so a bad value shows as an
 // error as you type instead of only being rejected at apply.
-const EDITOR_NUMERIC_KEYS = new Set(["track", "tracktotal", "disc", "bpm", "year"]);
+const EDITOR_NUMERIC_KEYS = new Set(["track", "tracktotal", "disc", "disctotal", "bpm", "year"]);
 // Whether each collapsible group is folded; persists across re-renders in a
 // session. Core is open by default; More tags and Advanced start folded
 // so the everyday form isn't buried under technical noise (#136).
-const editorGroupCollapsed = { core: false, standard: true, advanced: true };
+const editorGroupCollapsed = { standard: true, advanced: true };
 
 // A vinyl position as a track or disc number (#641), the backend's
 // is_vinyl_position: one or two letters with up to three digits ("A", "B2",
@@ -527,6 +540,7 @@ function renderFieldEditor(paths) {
   const coreRows = EDITOR_CORE_LAYOUT.map((r) =>
     r.duo
       ? { duo: r.duo.map((d) => ({ ...d, label: catalogueLabel(d.key) })) }
+      : r.yearOptions ? r
       : r.inline ? { inline: r.inline.map(key => ({ key, label: catalogueLabel(key) })) }
       : { key: r.key, label: catalogueLabel(r.key) }
   );
@@ -539,7 +553,9 @@ function renderFieldEditor(paths) {
   );
   const promoted = [];
   const advancedRows = [];
+  const compilationKeys = new Set(paths.map(path => trackAt(path)?.compilation_field).filter(Boolean));
   for (const key of [...customs].sort()) {
+    if (compilationKeys.has(key)) continue; // the dedicated flag already edits this native field
     const raw = key.slice("custom:".length);
     const friendly = customLabel(raw.toUpperCase());
     if (friendly) promoted.push({ key, label: friendly });
@@ -566,14 +582,15 @@ function renderFieldEditor(paths) {
 // All groups fold in place. Their session preferences are independent of the
 // selected files; drafts remain tied to editorPaths in refreshFieldEditor.
 function fieldGroup(title, rows, paths, kind) {
-  const collapsed = editorGroupCollapsed[kind];
+  const collapsible = kind !== 'core';
+  const collapsed = collapsible && editorGroupCollapsed[kind];
 
   const group = document.createElement("div");
-  group.className = "fe-group collapsible";
+  group.className = "fe-group" + (collapsible ? " collapsible" : "");
   group.dataset.group = kind;
   if (collapsed) group.classList.add("collapsed");
 
-  const head = createComponentElement("button");
+  const head = collapsible ? createComponentElement("button") : document.createElement('div');
   head.className = "fe-group-head";
   head.textContent = title;
   head.type = "button";
@@ -588,14 +605,19 @@ function fieldGroup(title, rows, paths, kind) {
   caret.setAttribute("aria-hidden", "true");
   caret.innerHTML = ico("caret-down");
   head.append(" ", count, caret);
-  group.appendChild(head);
+  if (collapsible) group.appendChild(head);
 
   const grid = document.createElement("div");
   grid.className = "fe-grid";
   grid.id = `editor-group-${kind}`;
   grid.inert = collapsed;
   for (const r of rows) {
-    if (r.inline) {
+    if (r.yearOptions) {
+      const shared = document.createElement('div');
+      shared.className = 'fe-year-options';
+      shared.append(fieldRow('year', catalogueLabel('year'), paths), compilationRow(paths));
+      grid.append(shared);
+    } else if (r.inline) {
       const shared = document.createElement("div");
       shared.className = "fe-inline-fields";
       for (const field of r.inline) shared.append(fieldRow(field.key, field.label, paths));
@@ -613,8 +635,50 @@ function fieldGroup(title, rows, paths, kind) {
   return group;
 }
 
+function compilationRow(paths) {
+  const row = document.createElement('div');
+  row.className = 'fe-row fe-compilation';
+  const byField = new Map();
+  let supported = paths.length > 0;
+  const values = [];
+  for (const path of paths) {
+    const field = trackAt(path)?.compilation_field;
+    if (!field) { supported = false; continue; }
+    if (!byField.has(field)) byField.set(field, []);
+    byField.get(field).push(path);
+    values.push(/^(1|true|yes)$/i.test(currentFieldValue(path, field).trim()));
+  }
+  const keys = [...byField.keys()];
+  row.dataset.compilationKeys = JSON.stringify(keys);
+  row.dataset.supported = String(supported);
+  const marker = document.createElement('span'); marker.className = 'fe-marker';
+  const label = document.createElement('label'); label.className = 'fe-compilation-label';
+  const input = createComponentElement('input', { type: 'checkbox' });
+  input.id = 'editor-compilation';
+  input.checked = values.length > 0 && values.every(Boolean);
+  input.indeterminate = values.some(Boolean) && !values.every(Boolean);
+  input.disabled = !supported || keys.some(isFieldLocked);
+  label.htmlFor = input.id;
+  label.title = !supported ? tr('editor.compilationUnsupported') : input.indeterminate ? tr('editor.compilationMixed') : '';
+  label.append(input, document.createTextNode(tr('editor.compilation')));
+  input.addEventListener('change', () => {
+    if (input.disabled) return;
+    input.indeterminate = false;
+    const value = input.checked ? '1' : '0';
+    row.classList.add('dirty');
+    label.title = '';
+    for (const [field, targets] of byField) {
+      stagedFields.set(field, value);
+      recordLiveField(targets, field, value);
+    }
+  });
+  row.append(marker, label);
+  if (keys.length) row.append(lockButton(keys, tr('editor.compilation'), refreshFieldEditor));
+  return row;
+}
+
 function sharedFieldValue(paths, key) {
-  if (!paths.length) return null;
+  if (!paths.length) return '';
   const first = currentFieldValue(paths[0], key);
   for (let i = 1; i < paths.length; i++) if (currentFieldValue(paths[i], key) !== first) return null;
   return first;
@@ -666,16 +730,15 @@ function fieldRow(key, label, paths) {
   if (shared === null) {
     row.classList.add("multiple");
     input.classList.add("multiple");
-    input.placeholder = tr("editor.multipleValues");
+    input.placeholder = numeric ? '—' : tr("editor.mixedValue");
+    if (numeric) input.title = tr("editor.multipleValues");
   } else {
     input.value = shared;
-    input.placeholder = tr("editor.emptyValue");
+    input.placeholder = '';
   }
 
   const hint = document.createElement("span");
   hint.className = "fe-hint";
-  const { hint: ruleText } = validateFieldValue(key, "");
-  if (ruleText) hint.innerHTML = `<span class="rule">${escapeHtml(ruleText)}</span>`;
 
   // Reflect the field's state (dirty / error) on the row and input.
   const reflect = () => {
@@ -700,6 +763,8 @@ function fieldRow(key, label, paths) {
   // should show its error state on first render too.
   restoreDraft(input, row, key);
   if (shared || stagedFields.has(key)) reflect();
+  if (!paths.length) input.disabled = true;
+  if (numeric) numericEntry(input, key);
 
   cell.append(input, hint);
   if (key === "genre") attachGenrePicker(input,
@@ -751,12 +816,13 @@ function fieldDuoRow(pairs, paths) {
     input.setAttribute("aria-label", aria);
     if (shared === null) {
       input.classList.add("multiple");
-      input.placeholder = tr("editor.mixedShort");
+      input.placeholder = '—';
+      input.title = tr("editor.multipleValues");
     } else {
       input.value = shared;
-      input.placeholder = tr("editor.emptyValue");
+      input.placeholder = '';
     }
-    if (isFieldLocked(key)) input.disabled = true;
+    if (!paths.length || isFieldLocked(key)) input.disabled = true;
     input.addEventListener("input", () => {
       stagedFields.set(key, input.value);
       input.classList.remove("multiple");
@@ -766,6 +832,7 @@ function fieldDuoRow(pairs, paths) {
       recordLiveField(paths, key, input.value, validateFieldValue(key, input.value, paths).ok);
     });
     restoreDraft(input, row, key);
+    numericEntry(input, key);
     inputs.push(input);
     return input;
   };
@@ -804,6 +871,23 @@ function fieldDuoRow(pairs, paths) {
 
 // Push the staged fields into the shared pending-edits buffer for every
 // selected file, then preview them alongside any other pending edits.
+// Reject non-numeric entry before it reaches staging. Existing on-disk values
+// remain readable until the user explicitly replaces them.
+function numericEntry(input, key) {
+  const valid = value => (key === 'bpm' ? /^(?:\d+(?:\.\d*)?)?$/ : /^\d*$/).test(value);
+  let accepted = input.value;
+  input.addEventListener('beforeinput', event => {
+    if (event.isComposing || event.data == null || !event.inputType.startsWith('insert')) return;
+    const next = input.value.slice(0, input.selectionStart) + event.data + input.value.slice(input.selectionEnd);
+    if (!valid(next)) event.preventDefault();
+  });
+  input.addEventListener('input', event => {
+    if (event.isComposing) return;
+    if (!valid(input.value)) { input.value = accepted; event.stopImmediatePropagation(); }
+    else accepted = input.value;
+  }, true);
+}
+
 async function applyFieldEditor() {
   // Compatibility entry point for tools that formerly staged the Editor.
   liveInputChanged();
@@ -815,6 +899,7 @@ export {
   hasEditorDraft,
   resetFieldEditor,
   refreshFieldEditor,
+  refreshTagFormats,
   validateFieldValue,
   applyFieldEditor,
 };

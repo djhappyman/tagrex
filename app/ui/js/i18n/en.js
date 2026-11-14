@@ -1371,6 +1371,22 @@ export const en = {
   "inspector.skippedLines": {"one": "{n} line skipped", "other": "{n} lines skipped"},
   "editor.emptyValue": "<empty>",
   "editor.mixedShort": "<mixed>",
+
+  "editor.compilation": "Mark as compilation",
+  "editor.compilationMixed": "Mixed compilation flags. Choose a value for all selected files.",
+  "editor.compilationUnsupported": "This selection's tag blocks do not support a compilation flag.",
   "settings.interfaceFont": "Interface font",
   "settings.interfaceFontHint": "Controls and labels. Saves immediately; your data font stays separate.",
+  "editor.mixedValue": "Mixed values",
+  "staging.heading": "Staged edits",
+  'staging.fileCount': '{files} staged',
+  'staging.views': 'File views',
+  'staging.files': 'Files',
+  'staging.tab': 'Staged',
+  'staging.clear': 'Clear staged edits',
+  'staging.preview': 'Preview',
+
+  "staging.empty": "No staged edits",
+  "staging.tagFormats": "Tag formats…",
+  "staging.applyFirst": "Apply or discard staged edits before removing files.",
 };

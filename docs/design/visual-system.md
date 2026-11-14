@@ -18,6 +18,13 @@ stylesheet or another copy of a token scale.
 
 Use `--sp-1…7`: **4, 8, 12, 16, 24, 32, 48px**. Related labels/help use 4px;
 control clusters use 8–12px; task groups use 16px; separate sections use 24–32px.
+Inspector fields share a left-hand label rail and an 8px vertical gap. Compact
+fields reuse that row layout. Track/Disc, Year/Compilation and BPM/Key keep
+their desktop rows at every dock width; input text is left aligned and labels
+are vertically centred. The everyday fields are always visible. Keep the form
+at a usable minimum width inside its own scrollport rather than stacking fields
+or moving labels above them. Keep gaps on the parent so paired
+rows do not lose their separation from ordinary rows.
 A parent gap and child margin must not both own the same separation. Optical
 1–2px adjustments, border-inclusive menu insets, splitters and typography-derived
 data-row pitch are deliberate exceptions. Legacy `--space-*` values are retained
@@ -101,6 +108,30 @@ coverage, internal naming, licence notices and source hashes; rebuild them with
 
 Browser mocks prove their exercised UI scope. Native dialogs, media writes,
 platform rasterization and OS scaling require separate evidence before claims.
+
+## Pending work
+
+Keep one compact recessed **Staged edits** summary pinned at the inspector's
+bottom, aligned with the table bottom. It appears only while the actual plan
+contains changes and shows the unique file count plus an × to clear the draft.
+Clear never erases file tags. Preview and Apply sit together in the footer;
+Apply is the sole primary save action and names its actual file scope.
+
+Files and Staged use the same virtualized table, columns and grouping. Compact
+browser-style tabs have a darker inactive fill; the active tab joins the rounded
+folder bar, with an 8px gap before the table. Files retains its ordinary readable
+rows. Staged lists every pending file regardless of the Files filter, keeps
+old/new comparison on, and dims only unchanged cells. Switching tabs preserves
+selection, drafts and each view's scroll position. Returning a staged tag cell
+to its on-disk value removes that proposal after editing finishes, so the row
+does not disappear mid-keystroke. Tag-only plans retain normal cell editing;
+explicit rename/artwork/block previews retain their existing review safeguards.
+
+Empty selection leaves the inspector blank while work already staged on other
+files remains available. The everyday metadata form retains its desktop rows,
+left labels and left-aligned values as the dock narrows. Tag-block inspection
+and conversion belong in file context actions, not a permanent line above the
+fields. Text-tag clearing stays in the context menu/More actions.
 
 ## Popup behaviour
 

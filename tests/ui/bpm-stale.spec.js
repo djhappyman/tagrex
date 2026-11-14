@@ -109,13 +109,13 @@ test('late BPM results preserve a different preview created during detection', a
   expect(await page.evaluate(() => window.tagrex.previewPlan)).toEqual(newer);
 });
 
-test('a narrow footer keeps BPM Stop reachable alongside a staged edit', async ({ page }, testInfo) => {
+test('the desktop footer keeps BPM Stop reachable alongside staged edits', async ({ page }, testInfo) => {
   await page.setViewportSize({width:1024,height:800});
   await page.locator('#tracks-body tr[data-path]').first().click();
   await page.locator('.subtab[data-subtab="editor"]').click();
   await page.locator('#editor-field-title').fill('Keep this staged title');
   await expect(page.locator('#diff-apply')).toBeEnabled();
-  await expect(page.locator('.statusbar')).toHaveClass(/narrow-actions/);
+  await expect(page.locator('#staged-edits')).toBeVisible();
   await startScan(page);
   const stop=page.locator('#busy-stop');
   await expect(stop).toBeVisible();

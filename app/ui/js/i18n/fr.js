@@ -1374,4 +1374,20 @@ export const fr = {
   "inspector.skippedLines": {"one": "{n} ligne ignorée", "other": "{n} lignes ignorées"},
   "settings.interfaceFont": "Police de l’interface",
   "settings.interfaceFontHint": "Pour les commandes et libellés. Enregistrement immédiat ; la police des données reste indépendante.",
+
+  "editor.compilation": "Marquer comme compilation",
+  "editor.compilationMixed": "Valeurs différentes. Choisissez une valeur pour tous les fichiers sélectionnés.",
+  "editor.compilationUnsupported": "Les formats de tags de cette sélection ne prennent pas en charge l’indicateur de compilation.",
+  "editor.mixedValue": "Valeurs différentes",
+  "staging.heading": "Modifications en attente",
+  "staging.fileCount": "{files} en attente",
+  "staging.views": "Vues des fichiers",
+  "staging.files": "Fichiers",
+  "staging.tab": "En attente",
+  "staging.clear": "Annuler les modifications en attente",
+  "staging.preview": "Aperçu",
+
+  "staging.empty": "Aucune modification en attente",
+  "staging.tagFormats": "Formats de tags…",
+  "staging.applyFirst": "Appliquez ou annulez les modifications avant de retirer des fichiers.",
 };

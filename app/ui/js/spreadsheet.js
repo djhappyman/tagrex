@@ -510,5 +510,13 @@ export function initSpreadsheet(options) {
   new MutationObserver(refresh).observe(wrap, { attributes: true, attributeFilter: ['hidden'] });
   new MutationObserver(refresh).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   refresh();
-  return { refresh, beforePaint, focusActive: focus, clearRange: ({refresh = true} = {}) => clear(false, refresh) };
+  return {
+    refresh, beforePaint, focusActive: focus,
+    hasRangeAt(target) {
+      if (options.isReviewing() || !active || !anchor || (active.path === anchor.path && active.key === anchor.key)) return false;
+      const point = pointOf(target), selected = point && range();
+      return !!selected && selected.paths.includes(point.path) && selected.keys.includes(point.key);
+    },
+    clearRange: ({refresh = true} = {}) => clear(false, refresh),
+  };
 }

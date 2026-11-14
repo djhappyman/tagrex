@@ -236,6 +236,10 @@
   <DockWorkspace bind:controller={dock}>
   <DockModule moduleId="files" title="Files" defaultArea="left" headerless={!arranging}>
   <section class="files-col">
+    <div class="file-view-tabs" role="tablist" aria-label="File views" data-i18n-aria-label="staging.views">
+      <Button id="files-tab" variant="ghost" size="sm" role="tab" aria-selected="true" aria-controls="files-view" data-i18n="staging.files">Files</Button>
+      <Button id="staged-tab" variant="ghost" size="sm" role="tab" aria-selected="false" aria-controls="files-view" tabindex={-1}><span data-i18n="staging.tab">Staged</span><span id="staged-tab-count" class="staged-tab-count"></span></Button>
+    </div>
     <div class="library-header">
       <div class="lib">
 
@@ -259,7 +263,7 @@
 
     </div>
 
-    <div id="files-view" class="table-wrap">
+    <div id="files-view" class="table-wrap" role="tabpanel" aria-labelledby="files-tab">
       <Table.Root id="tracks" containerClass="contents">
         <Table.Header>
           <tr>
@@ -477,10 +481,6 @@
           <div class="panel-block">
             <span id="fields-count" hidden></span>
 
-            <p id="fields-blocks" class="hint muted" style="padding: 0" hidden></p>
-
-            <div id="fields-blocks-convert" class="blocks-convert" hidden></div>
-
             <div id="fields-body" class="fe"></div>
 
           </div>
@@ -491,11 +491,6 @@
           </div>
         </div>
 
-        <div class="panel-actions editor-actions">
-          <Button variant="outline" size="sm" id="fields-clear" data-i18n-title="editor.clearTagsTitle" title="Clears every text tag on the selected files. Cover art and DJ cue points are kept. Undo restores them." data-i18n="editor.clearTags">Clear tags</Button>
-          <div class="spacer"></div>
-          <span class="hint muted" data-i18n="editor.livePreview">Changes preview automatically</span>
-        </div>
       </Tabs.Content>
 
       <Tabs.Content value="filename" id="subtab-filename" class="subtab-panel from-name" hidden>
@@ -682,6 +677,9 @@
       </div>
     </Tabs.Content>
 
+    <section id="staged-edits" class="staged-edits" tabindex="-1" aria-labelledby="staged-heading" hidden>
+      <div class="staged-head"><div><h3 id="staged-heading" data-i18n="staging.heading">Staged edits</h3><span id="staged-count" class="staged-count"></span></div><Button id="diff-discard" variant="ghost" size="icon-sm" class="icon staged-remove" data-i18n-aria-label="staging.clear" aria-label="Clear staged edits" data-i18n-title="staging.clear" title="Clear staged edits"><svg class="ico"><use href="#i-close"/></svg></Button></div>
+    </section>
   </aside>
   </DockModule>
   <DockModule moduleId="transformations" title="Transformations" defaultArea="right" defaultIndex={0} defaultWeight={0.6} chromeTarget="h2" collapsible>
@@ -734,10 +732,9 @@
   <div class="sb-right">
     <div id="diff-actionbar" class="diff-actionbar" hidden>
       <span class="ab-summary sr-only"><span id="ab-state">files ready</span><span class="ab-plan" id="ab-plan"></span></span>
-      <label class="toggle-old" data-i18n-title="diff.showOldTitle" title="Shows the old value under each changed cell."><NativeCheckbox id="diff-show-old" /> <span data-i18n="diff.compare">Compare</span></label>
+      <Button variant="outline" size="sm" id="diff-preview" class="btn" data-i18n="staging.preview">Preview</Button>
       <span class="ab-progress" id="ab-progress"><span class="ab-bar"><span class="ab-bar-fill" id="ab-bar-fill"></span></span><span class="ab-file" id="ab-file"></span></span>
       <Button variant="outline" size="sm" id="diff-cancel-apply" class="btn" data-i18n="action.cancel">Cancel</Button>
-      <Button variant="ghost" size="sm" id="diff-discard" class="btn" data-i18n="action.discard">Discard</Button>
       <Button variant="default" size="sm" id="diff-apply" class="btn primary" disabled><span id="ab-apply-label">Apply changes</span><span id="ab-count" class="sr-only">0</span></Button>
     </div>
 
