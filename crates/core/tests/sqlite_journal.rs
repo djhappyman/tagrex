@@ -81,6 +81,31 @@ fn set_artist(path: &Path, old: Option<&str>, new: Option<&str>) -> ChangePlan {
 }
 
 #[test]
+fn history_headers_never_hydrate_snapshot_tables() {
+    let dir = TempDir::new("headers-only");
+    let track = dir.flac("track.flac");
+    let mut journal = SqliteJournal::open(&dir.db()).unwrap();
+    let batch = Executor::apply(
+        &set_artist(&track, None, Some("A")),
+        &mut journal,
+        &roots(dir.path()),
+    )
+    .unwrap();
+    let conn = rusqlite::Connection::open(dir.db()).unwrap();
+    // A header query must not need even the text-snapshot table, let alone
+    // images. Damage is deliberate and confined to this disposable journal.
+    conn.execute("DROP TABLE field_changes", []).unwrap();
+    assert!(journal.batch(batch.id).is_err());
+    let headers = journal.headers(&roots(dir.path())).unwrap();
+    assert_eq!(headers.len(), 1);
+    assert_eq!(headers[0].id, batch.id);
+    assert!(journal
+        .headers(&[dir.path().join("other-library")])
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn batch_survives_reopening_the_database() {
     let dir = TempDir::new("persist");
     let track = dir.flac("track.flac");
@@ -489,7 +514,11 @@ fn a_batch_is_journaled_before_its_first_write() {
         &plan,
         &mut journal,
         &roots(dir.path()),
-        &mut |_| {
+        &mut |progress| {
+            // Preflight reports before a batch exists and writes nothing.
+            if progress.done < plan.changes.len() {
+                return;
+            }
             // What another process would find, were this one to stop here.
             let other = SqliteJournal::open(&dir.db()).unwrap();
             seen.push(

@@ -13,6 +13,7 @@
 //! keys use [`TagField`]'s lossless storage-key codec.
 
 mod cover_encoding;
+mod sidecars;
 
 use std::path::{Component, Path, PathBuf};
 
@@ -26,7 +27,7 @@ use thiserror::Error;
 
 use base64::Engine as _;
 use tagrex_core::export::{self, CueTrack, PlaylistTrack};
-use tagrex_core::journal::{BatchId, SqliteJournal, UndoJournal};
+use tagrex_core::journal::{BatchHeader, BatchId, SqliteJournal};
 use tagrex_core::mask::{portable_file_name, FileContext, Mask, MaskError};
 use tagrex_core::matching::{self, MatchOptions, TrackRef};
 use tagrex_core::model::{
@@ -1762,6 +1763,12 @@ fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
 /// the four commands that talk to a provider.
 #[derive(Default)]
 pub struct ProviderHub {
+    discogs: RefCell<Option<(String, DiscogsProvider)>>,
+    musicbrainz: RefCell<Option<MusicBrainzProvider>>,
+    beatport: RefCell<Option<(String, BeatportProvider)>>,
+    bandcamp: RefCell<Option<BandcampProvider>>,
+    soundeo: RefCell<Option<SoundeoProvider>>,
+
     /// Live proxy URL (None = direct), from settings.
     proxy: RefCell<Option<String>>,
     /// Minimum spacing between requests (None = no throttle), from the
@@ -1797,6 +1804,14 @@ impl ProviderHub {
     /// across libraries (#166).
     pub fn apply_settings(&self, settings: &SettingsDto) {
         let proxy = settings.proxy.trim();
+        let next_proxy = (!proxy.is_empty()).then(|| proxy.to_string());
+        if *self.proxy.borrow() != next_proxy {
+            self.discogs.borrow_mut().take();
+            self.musicbrainz.borrow_mut().take();
+            self.beatport.borrow_mut().take();
+            self.bandcamp.borrow_mut().take();
+            self.soundeo.borrow_mut().take();
+        }
         *self.proxy.borrow_mut() = (!proxy.is_empty()).then(|| proxy.to_string());
         self.min_interval.set(
             (settings.rate_limit_per_min > 0)
@@ -1806,19 +1821,26 @@ impl ProviderHub {
 
     /// Build a Discogs provider using the current proxy setting.
     fn discogs_provider(&self, token: &str) -> Result<DiscogsProvider, AppError> {
-        Ok(DiscogsProvider::with_proxy(
-            token,
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some((key, provider)) = self.discogs.borrow().as_ref() {
+            if key == token {
+                return Ok(provider.clone());
+            }
+        }
+        let provider = DiscogsProvider::with_proxy(token, self.proxy.borrow().as_deref())?;
+        *self.discogs.borrow_mut() = Some((token.to_string(), provider.clone()));
+        Ok(provider)
     }
 
     /// Build a MusicBrainz provider using the current proxy setting (#33). No
     /// token — MusicBrainz is unauthenticated. Reuses the same network proxy the
     /// Discogs provider uses.
     fn musicbrainz_provider(&self) -> Result<MusicBrainzProvider, AppError> {
-        Ok(MusicBrainzProvider::with_proxy(
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some(provider) = self.musicbrainz.borrow().as_ref() {
+            return Ok(provider.clone());
+        }
+        let provider = MusicBrainzProvider::with_proxy(self.proxy.borrow().as_deref())?;
+        *self.musicbrainz.borrow_mut() = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Build a Beatport provider (#162). The "token" is the OAuth access token
@@ -1826,24 +1848,36 @@ impl ProviderHub {
     /// the credential behind it is a different animal. Reuses the same network
     /// proxy as the other two.
     fn beatport_provider(&self, access_token: &str) -> Result<BeatportProvider, AppError> {
-        Ok(BeatportProvider::with_proxy(
-            access_token,
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some((key, provider)) = self.beatport.borrow().as_ref() {
+            if key == access_token {
+                return Ok(provider.clone());
+            }
+        }
+        let provider = BeatportProvider::with_proxy(access_token, self.proxy.borrow().as_deref())?;
+        *self.beatport.borrow_mut() = Some((access_token.to_string(), provider.clone()));
+        Ok(provider)
     }
 
     /// Build a Bandcamp provider. No token — Bandcamp needs none. Reuses the same
     /// network proxy as the others.
     fn bandcamp_provider(&self) -> Result<BandcampProvider, AppError> {
-        Ok(BandcampProvider::with_proxy(
-            self.proxy.borrow().as_deref(),
-        )?)
+        if let Some(provider) = self.bandcamp.borrow().as_ref() {
+            return Ok(provider.clone());
+        }
+        let provider = BandcampProvider::with_proxy(self.proxy.borrow().as_deref())?;
+        *self.bandcamp.borrow_mut() = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Build a Soundeo provider. No token — Soundeo's pages are anonymous.
     /// Reuses the same network proxy as the others.
     fn soundeo_provider(&self) -> Result<SoundeoProvider, AppError> {
-        Ok(SoundeoProvider::with_proxy(self.proxy.borrow().as_deref())?)
+        if let Some(provider) = self.soundeo.borrow().as_ref() {
+            return Ok(provider.clone());
+        }
+        let provider = SoundeoProvider::with_proxy(self.proxy.borrow().as_deref())?;
+        *self.soundeo.borrow_mut() = Some(provider.clone());
+        Ok(provider)
     }
 
     /// Throttle the next provider request for `source`.
@@ -1961,15 +1995,16 @@ impl ProviderHub {
         token: &str,
         query: &SearchQueryDto,
     ) -> Result<Vec<CandidateDto>, AppError> {
-        self.throttle(source);
         let search = query.to_search_query();
-        let candidates = match source {
-            "musicbrainz" => self.musicbrainz_provider()?.search(&search)?,
-            "beatport" => self.beatport_provider(token)?.search(&search)?,
-            "bandcamp" => self.bandcamp_provider()?.search(&search)?,
-            "soundeo" => self.soundeo_provider()?.search(&search)?,
-            _ => self.discogs_provider(token)?.search(&search)?,
-        };
+        let candidates = self.with_retry(source, || {
+            Ok(match source {
+                "musicbrainz" => self.musicbrainz_provider()?.search(&search)?,
+                "beatport" => self.beatport_provider(token)?.search(&search)?,
+                "bandcamp" => self.bandcamp_provider()?.search(&search)?,
+                "soundeo" => self.soundeo_provider()?.search(&search)?,
+                _ => self.discogs_provider(token)?.search(&search)?,
+            })
+        })?;
         let mut results: Vec<CandidateDto> = candidates.iter().map(CandidateDto::from).collect();
 
         let wanted = [
@@ -1998,15 +2033,16 @@ impl ProviderHub {
         token: &str,
         id: &str,
     ) -> Result<ReleaseDto, AppError> {
-        self.throttle(source);
         let rid = ReleaseId(id.to_string());
-        let release = match source {
-            "musicbrainz" => self.musicbrainz_provider()?.fetch_release(&rid)?,
-            "beatport" => self.beatport_provider(token)?.fetch_release(&rid)?,
-            "bandcamp" => self.bandcamp_provider()?.fetch_release(&rid)?,
-            "soundeo" => self.soundeo_provider()?.fetch_release(&rid)?,
-            _ => self.discogs_provider(token)?.fetch_release(&rid)?,
-        };
+        let release = self.with_retry(source, || {
+            Ok(match source {
+                "musicbrainz" => self.musicbrainz_provider()?.fetch_release(&rid)?,
+                "beatport" => self.beatport_provider(token)?.fetch_release(&rid)?,
+                "bandcamp" => self.bandcamp_provider()?.fetch_release(&rid)?,
+                "soundeo" => self.soundeo_provider()?.fetch_release(&rid)?,
+                _ => self.discogs_provider(token)?.fetch_release(&rid)?,
+            })
+        })?;
         Ok(ReleaseDto::from(&release))
     }
 
@@ -2022,14 +2058,7 @@ impl ProviderHub {
         token: &str,
         url: &str,
     ) -> Result<CoverArtDto, AppError> {
-        self.throttle(source);
-        let image = match source {
-            "musicbrainz" => self.musicbrainz_provider()?.fetch_image(url)?,
-            "beatport" => self.beatport_provider(token)?.fetch_image(url)?,
-            "bandcamp" => self.bandcamp_provider()?.fetch_image(url)?,
-            "soundeo" => self.soundeo_provider()?.fetch_image(url)?,
-            _ => self.discogs_provider(token)?.fetch_image(url)?,
-        };
+        let image = self.fetch_image_bytes(source, token, url)?;
         Ok(CoverArtDto {
             data_ref: None,
             mime: display_safe_mime(&image.mime, &image.data),
@@ -2050,13 +2079,157 @@ impl ProviderHub {
         token: &str,
         url: &str,
     ) -> Result<FetchedImage, AppError> {
+        self.with_retry(source, || {
+            Ok(match source {
+                "musicbrainz" => self.musicbrainz_provider()?.fetch_image(url)?,
+                "beatport" => self.beatport_provider(token)?.fetch_image(url)?,
+                "bandcamp" => self.bandcamp_provider()?.fetch_image(url)?,
+                "soundeo" => self.soundeo_provider()?.fetch_image(url)?,
+                _ => self.discogs_provider(token)?.fetch_image(url)?,
+            })
+        })
+    }
+
+    /// Run one provider request, spaced by [`throttle`](Self::throttle), and
+    /// try it once more after a short rate-limit refusal (#747). A provider
+    /// shedding load (MusicBrainz answers `503` with `Retry-After: 0`) usually
+    /// serves the same request a second later. A longer stated wait is reported
+    /// at once, so the interface's own pause-and-resume handling stays in charge.
+    fn with_retry<T>(
+        &self,
+        source: &str,
+        request: impl FnMut() -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
         self.throttle(source);
-        Ok(match source {
-            "musicbrainz" => self.musicbrainz_provider()?.fetch_image(url)?,
-            "beatport" => self.beatport_provider(token)?.fetch_image(url)?,
-            "bandcamp" => self.bandcamp_provider()?.fetch_image(url)?,
-            "soundeo" => self.soundeo_provider()?.fetch_image(url)?,
-            _ => self.discogs_provider(token)?.fetch_image(url)?,
+        retry_after_short_limit(request, || self.throttle(source))
+    }
+
+    /// Take an image download out of the hub (#749). Building the fetcher is
+    /// all that needs the hub, and it takes an instant; the caller runs the
+    /// download without holding the provider lock, so a slow image no longer
+    /// holds up every search, lookup and other image behind it.
+    ///
+    /// MusicBrainz images come from the Cover Art Archive, which the
+    /// MusicBrainz API spacing does not cover, so they are not throttled. Every
+    /// other source keeps its spacing, taken here before the fetcher is handed
+    /// out.
+    pub fn image_fetch(&self, source: &str, token: &str) -> Result<ImageFetch, AppError> {
+        if source != "musicbrainz" {
+            self.throttle(source);
+        }
+        Ok(ImageFetch(match source {
+            "musicbrainz" => ImageProvider::MusicBrainz(self.musicbrainz_provider()?),
+            "beatport" => ImageProvider::Beatport(self.beatport_provider(token)?),
+            "bandcamp" => ImageProvider::Bandcamp(self.bandcamp_provider()?),
+            "soundeo" => ImageProvider::Soundeo(self.soundeo_provider()?),
+            _ => ImageProvider::Discogs(self.discogs_provider(token)?),
+        }))
+    }
+}
+
+/// Run a provider request and try it once more after a short rate-limit
+/// refusal (#747): wait what the provider asked (at least a second), call
+/// `before_retry` (the throttle, for an API request), then send it again. A
+/// longer stated wait goes back to the caller at once.
+fn retry_after_short_limit<T>(
+    mut request: impl FnMut() -> Result<T, AppError>,
+    before_retry: impl FnOnce(),
+) -> Result<T, AppError> {
+    match request() {
+        Err(AppError::Provider(tagrex_core::provider::ProviderError::RateLimited {
+            retry_after_secs,
+        })) if retry_after_secs <= SHORT_RATE_LIMIT_SECS => {
+            std::thread::sleep(Duration::from_secs(retry_after_secs.max(1)));
+            before_retry();
+            request()
+        }
+        other => other,
+    }
+}
+
+/// The longest stated rate-limit wait a provider request is retried after
+/// (#747); anything longer goes back to the caller as it always did.
+const SHORT_RATE_LIMIT_SECS: u64 = 5;
+
+/// One provider's image download, taken out of the [`ProviderHub`] by
+/// [`ProviderHub::image_fetch`] so it can run without the provider lock (#749).
+pub struct ImageFetch(ImageProvider);
+
+enum ImageProvider {
+    MusicBrainz(MusicBrainzProvider),
+    Beatport(BeatportProvider),
+    Bandcamp(BandcampProvider),
+    Soundeo(SoundeoProvider),
+    Discogs(DiscogsProvider),
+}
+
+/// How many image downloads may run at once (#749). Out of the provider lock
+/// they would otherwise all go together: a page of Discogs cards asks for its
+/// thumbnails at once, and two dozen simultaneous requests to one image host
+/// is a good way to get refused. Six is what browsers allow per host.
+const MAX_IMAGE_DOWNLOADS: usize = 6;
+static IMAGE_DOWNLOADS: std::sync::Mutex<usize> = std::sync::Mutex::new(0);
+static IMAGE_DOWNLOAD_FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+/// A held image-download slot; dropping it frees the slot for the next one.
+struct ImageDownloadSlot;
+
+impl ImageDownloadSlot {
+    /// Wait for a free slot. Blocking, like the download it guards, so call it
+    /// off the async runtime.
+    fn acquire() -> Self {
+        let mut running = IMAGE_DOWNLOADS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        while *running >= MAX_IMAGE_DOWNLOADS {
+            running = IMAGE_DOWNLOAD_FREED
+                .wait(running)
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        *running += 1;
+        ImageDownloadSlot
+    }
+}
+
+impl Drop for ImageDownloadSlot {
+    fn drop(&mut self) {
+        let mut running = IMAGE_DOWNLOADS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *running -= 1;
+        IMAGE_DOWNLOAD_FREED.notify_one();
+    }
+}
+
+impl ImageFetch {
+    /// Download the image as raw bytes, retrying once after a short rate-limit
+    /// refusal (#747). Blocking: run it off the async runtime.
+    pub fn fetch_bytes(&self, url: &str) -> Result<FetchedImage, AppError> {
+        let _slot = ImageDownloadSlot::acquire();
+        retry_after_short_limit(
+            || {
+                Ok(match &self.0 {
+                    ImageProvider::MusicBrainz(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Beatport(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Bandcamp(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Soundeo(provider) => provider.fetch_image(url)?,
+                    ImageProvider::Discogs(provider) => provider.fetch_image(url)?,
+                })
+            },
+            || {},
+        )
+    }
+
+    /// Download the image as the cover DTO the cover well and the release
+    /// cards take, like [`ProviderHub::provider_fetch_image`].
+    pub fn fetch_cover(&self, url: &str) -> Result<CoverArtDto, AppError> {
+        let image = self.fetch_bytes(url)?;
+        Ok(CoverArtDto {
+            mime: display_safe_mime(&image.mime, &image.data),
+            data_base64: base64::engine::general_purpose::STANDARD
+                .encode(&image.data)
+                .into(),
+            ..CoverArtDto::default()
         })
     }
 }
@@ -2506,14 +2679,26 @@ impl App {
                     (duration > 0).then(|| (format!("duration:{duration}"), format!("{duration}s")))
                 }
                 "size" => (size > 0).then(|| (format!("size:{size}"), format!("{size} bytes"))),
-                "hash" => std::fs::read(&path).ok().map(|bytes| {
+                "hash" => (|| -> std::io::Result<_> {
+                    use std::io::Read;
+                    let mut file = std::fs::File::open(&path)?;
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    bytes.hash(&mut hasher);
-                    (
+                    let length = file.metadata()?.len();
+                    length.hash(&mut hasher);
+                    let mut buffer = [0u8; 64 * 1024];
+                    loop {
+                        let read = file.read(&mut buffer)?;
+                        if read == 0 {
+                            break;
+                        }
+                        hasher.write(&buffer[..read]);
+                    }
+                    Ok((
                         format!("hash:{:016x}", hasher.finish()),
                         "identical bytes".to_string(),
-                    )
-                }),
+                    ))
+                })()
+                .ok(),
                 // default: artist + title
                 _ => {
                     let (a, t) = (norm_key(&artist), norm_key(&title));
@@ -2659,69 +2844,46 @@ impl App {
         carried
     }
 
+    /// The sidecar pairs that a rename from `src` to `dst` should carry (#58):
+    /// matching-stem files in `src`'s folder whose extension is in the
+    /// configured set, retargeted to `dst`. No-op when the feature is off, the
+    /// set is empty, or `src` and `dst` are the same path (nothing is moving,
+    /// so nothing travels).
+    ///
+    /// `scan` is the preview's own one-ask view of the source folders; the scan
+    /// itself decides what "matching" means (see [`sidecars::SidecarScan`]).
+    /// Every public preview builds one and threads it through its call sites,
+    /// so the same folder is listed once per preview instead of once per file,
+    /// while a *new* preview always re-reads the disk.
+    fn sidecar_pairs(
+        &self,
+        scan: &mut sidecars::SidecarScan,
+        src: &Path,
+        dst: &Path,
+    ) -> Option<Vec<(String, String)>> {
+        if !self.carry_sidecars.get() || src == dst {
+            return None;
+        }
+        let exts = self.sidecar_extensions.borrow();
+        if exts.is_empty() {
+            return None;
+        }
+        scan.pairs(src, dst, &exts)
+    }
+
     /// Detect sidecar files that should travel with `change`'s rename/move (#58)
     /// and record them on it. A sidecar is a file in the source directory whose
     /// stem matches the audio file's and whose extension is in the configured
     /// set; its target keeps the destination directory and the new stem. No-op
     /// when the feature is off or the change carries no real rename.
-    fn attach_sidecars(&self, change: &mut FileChangeDto) {
-        if !self.carry_sidecars.get() {
-            return;
-        }
+    fn attach_sidecars(&self, change: &mut FileChangeDto, scan: &mut sidecars::SidecarScan) {
         let Some(rename_to) = change.rename_to.as_deref() else {
             return;
         };
-        let src = Path::new(&change.path);
-        let dst = Path::new(rename_to);
-        if src == dst {
-            return;
+        if let Some(pairs) = self.sidecar_pairs(scan, Path::new(&change.path), Path::new(rename_to))
+        {
+            change.sidecar_renames = pairs;
         }
-        let (Some(src_dir), Some(src_stem)) =
-            (src.parent(), src.file_stem().and_then(|s| s.to_str()))
-        else {
-            return;
-        };
-        let (Some(dst_dir), Some(dst_stem)) =
-            (dst.parent(), dst.file_stem().and_then(|s| s.to_str()))
-        else {
-            return;
-        };
-        let exts = self.sidecar_extensions.borrow();
-        if exts.is_empty() {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(src_dir) else {
-            return;
-        };
-        let mut pairs = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            // Never the audio file itself, and only real files.
-            if path == *src || !path.is_file() {
-                continue;
-            }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if stem != src_stem {
-                continue;
-            }
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-                continue; // an extension-less file can't match the set
-            };
-            if !exts.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
-                continue;
-            }
-            let from = path.to_string_lossy().into_owned();
-            let to = dst_dir
-                .join(format!("{dst_stem}.{ext}"))
-                .to_string_lossy()
-                .into_owned();
-            pairs.push((from, to));
-        }
-        // Deterministic order so preview and journal read consistently.
-        pairs.sort();
-        change.sidecar_renames = pairs;
     }
 
     /// Render `mask` against `path`'s own tags and turn the result into a
@@ -2805,6 +2967,9 @@ impl App {
         let mask = Mask::parse(mask_pattern)?;
         let mut changes = Vec::new();
         let mut unrendered = Vec::new();
+        // One listing per source folder for this preview (#58); a later
+        // preview builds its own and sees the disk as it is then.
+        let mut scan = sidecars::SidecarScan::default();
         for path in paths {
             let root = path.parent().unwrap_or(path);
             let target = match self.render_target_under(&mask, path, root) {
@@ -2830,7 +2995,7 @@ impl App {
                 creates_folder: creates_folder(&target),
                 folder_extras: Vec::new(),
             };
-            self.attach_sidecars(&mut change);
+            self.attach_sidecars(&mut change, &mut scan);
             changes.push(change);
         }
         let mut plan = self.plan(
@@ -3176,6 +3341,8 @@ impl App {
         let _encoding_scope = cover_encoding::Scope::new();
         let chain = build_chain(rules)?;
         let mut changes = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
 
         for path in paths {
             let Ok(track) = TagEngine::read(path) else {
@@ -3219,7 +3386,7 @@ impl App {
                     creates_folder: false,
                     folder_extras: Vec::new(),
                 };
-                self.attach_sidecars(&mut change);
+                self.attach_sidecars(&mut change, &mut scan);
                 changes.push(change);
                 continue;
             }
@@ -3266,7 +3433,7 @@ impl App {
                     creates_folder: false,
                     folder_extras: Vec::new(),
                 };
-                self.attach_sidecars(&mut change);
+                self.attach_sidecars(&mut change, &mut scan);
                 changes.push(change);
                 continue;
             }
@@ -3342,6 +3509,8 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut changes = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
         for path in paths {
             let Ok(track) = TagEngine::read(path) else {
                 continue;
@@ -3424,7 +3593,7 @@ impl App {
                 folder_extras: Vec::new(),
             };
             if renamed {
-                self.attach_sidecars(&mut change);
+                self.attach_sidecars(&mut change, &mut scan);
             }
             changes.push(change);
         }
@@ -3478,6 +3647,8 @@ impl App {
             .collect::<Vec<_>>();
 
         let mut changes = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
         for change in &plan.changes {
             let path = Path::new(&change.path);
 
@@ -3610,26 +3781,6 @@ impl App {
             if tag_changes.is_empty() && !renamed && change.cover_change.is_none() {
                 continue;
             }
-            // Folder extras (#161) ride on a change as sidecar pairs that do not
-            // follow the stem. They go where the folder goes — re-based from the
-            // folder as staged onto the folder as cleaned (#384) — while only the
-            // stem sidecars are recomputed below. Which pairs are stem sidecars
-            // is asked of the same code that attached them, against the change
-            // as it arrived.
-            let mut as_staged = change.clone();
-            self.attach_sidecars(&mut as_staged);
-            let extras: Vec<(String, String)> = change
-                .sidecar_renames
-                .iter()
-                .filter(|(from, _)| !as_staged.sidecar_renames.iter().any(|(own, _)| own == from))
-                .map(|(from, to)| {
-                    let to = match Path::new(to).strip_prefix(&proposed_dir) {
-                        Ok(rest) => target_dir.join(rest).to_string_lossy().into_owned(),
-                        Err(_) => to.clone(),
-                    };
-                    (from.clone(), to)
-                })
-                .collect();
             let mut revised = FileChangeDto {
                 path: change.path.clone(),
                 rename_to: renamed.then(|| target.to_string_lossy().into_owned()),
@@ -3649,7 +3800,43 @@ impl App {
                 folder_extras: Vec::new(),
             };
             if renamed {
-                self.attach_sidecars(&mut revised);
+                // Only a change that still moves has sidecars to work out, and
+                // only a move can carry a folder's extras: everything below is
+                // invisible to the plan when nothing is renamed, so a tag-only
+                // cleanup (every live edit) pays none of it.
+                //
+                // Folder extras (#161) ride on a change as sidecar pairs that do
+                // not follow the stem. They go where the folder goes — re-based
+                // from the folder as staged onto the folder as cleaned (#384) —
+                // while only the stem sidecars are recomputed below. Which pairs
+                // are stem sidecars is asked of the same code that attached
+                // them, against the change as it arrived.
+                let src = Path::new(&change.path);
+                let staged_pairs = self.sidecar_pairs(&mut scan, src, proposed);
+                // A no-op/failed scan used to leave the clone's original pairs
+                // intact. Preserve that classification without cloning the DTO.
+                let own_pairs = staged_pairs.as_deref().unwrap_or(&change.sidecar_renames);
+                let extras: Vec<(String, String)> = change
+                    .sidecar_renames
+                    .iter()
+                    .filter(|(from, _)| !own_pairs.iter().any(|(own, _)| own == from))
+                    .map(|(from, to)| {
+                        let to = match Path::new(to).strip_prefix(&proposed_dir) {
+                            Ok(rest) => target_dir.join(rest).to_string_lossy().into_owned(),
+                            Err(_) => to.clone(),
+                        };
+                        (from.clone(), to)
+                    })
+                    .collect();
+                // A chain that leaves the name alone lands on the pairs the
+                // staged rename already had, so the same listing answers the
+                // revised change too — only a changed name needs a second pass.
+                revised.sidecar_renames = if target.as_path() == proposed {
+                    staged_pairs.unwrap_or_default()
+                } else {
+                    self.sidecar_pairs(&mut scan, src, &target)
+                        .unwrap_or_default()
+                };
                 revised.sidecar_renames.extend(extras);
                 // Still the folder's, not the track's (#403): the marker is by
                 // source path, which the re-basing above leaves unchanged.
@@ -3704,6 +3891,8 @@ impl App {
         };
         let mut changes = Vec::new();
         let mut unrendered = Vec::new();
+        // One listing per source folder for this preview (#58).
+        let mut scan = sidecars::SidecarScan::default();
         for path in paths {
             let target = match self.render_target_under(&mask, path, &root) {
                 Ok(target) => target,
@@ -3728,7 +3917,7 @@ impl App {
                 creates_folder: creates_folder(&target),
                 folder_extras: Vec::new(),
             };
-            self.attach_sidecars(&mut change);
+            self.attach_sidecars(&mut change, &mut scan);
             changes.push(change);
         }
         // Whatever else lives in a folder every track is leaving (#161). Said in
@@ -4984,22 +5173,10 @@ impl App {
                 roots.push(canon);
             }
         }
-        let under_root = |path: &std::path::Path| roots.iter().any(|r| path.starts_with(r));
         Ok(self
             .journal
-            .batches()?
+            .headers(&roots)?
             .iter()
-            // Judged by where the files CAME FROM, not where they went (#153):
-            // a reorganize can now file them into a folder outside the library,
-            // and testing the destination would hide exactly the batch the user
-            // is most likely to want back.
-            .filter(|batch| {
-                batch
-                    .plan
-                    .changes
-                    .iter()
-                    .all(|change| under_root(&change.path))
-            })
             .map(BatchDto::from)
             .collect())
     }
@@ -5024,19 +5201,46 @@ impl App {
         urls: &[String],
         overwrite: bool,
     ) -> Result<SaveImagesDto, AppError> {
+        self.validate_image_target(track)?;
+        let images = urls
+            .iter()
+            .map(|url| providers.fetch_image_bytes(source, token, url))
+            .collect::<Result<Vec<_>, _>>()?;
+        self.save_fetched_release_images(track, &images, overwrite)
+    }
+
+    /// Validate the destination before starting network work. Repeated when
+    /// publishing downloaded images; callers must also preserve session identity.
+    pub fn validate_image_target(&self, track: &Path) -> Result<PathBuf, AppError> {
         let root = std::fs::canonicalize(&self.library_root)?;
         let dir = track.parent().unwrap_or(Path::new("."));
-        let canonical_dir = std::fs::canonicalize(dir)?;
-        if !canonical_dir.starts_with(&root) {
+        let canonical = std::fs::canonicalize(dir)?;
+        if !canonical.starts_with(&root) {
             return Err(AppError::OutsideRoot(track.to_string_lossy().into_owned()));
         }
-        let mut planned: Vec<(PathBuf, Vec<u8>)> = Vec::new();
-        for (index, url) in urls.iter().enumerate() {
-            let image = providers.fetch_image_bytes(source, token, url)?;
-            let ext = extension_for_mime(&image.mime);
-            let name = format!("{}.{ext}", image_basename(index));
-            planned.push((canonical_dir.join(name), image.data));
-        }
+        Ok(canonical)
+    }
+
+    /// Publish already-fetched images without holding the session during HTTP.
+    pub fn save_fetched_release_images(
+        &self,
+        track: &Path,
+        images: &[FetchedImage],
+        overwrite: bool,
+    ) -> Result<SaveImagesDto, AppError> {
+        let dir = self.validate_image_target(track)?;
+        let planned: Vec<_> = images
+            .iter()
+            .enumerate()
+            .map(|(index, image)| {
+                let name = format!(
+                    "{}.{}",
+                    image_basename(index),
+                    extension_for_mime(&image.mime)
+                );
+                (dir.join(name), image.data.clone())
+            })
+            .collect();
         let conflicts: Vec<String> = planned
             .iter()
             .filter(|(target, _)| target.exists())
@@ -5049,13 +5253,14 @@ impl App {
                 conflicts,
             });
         }
-        let mut written = Vec::new();
         for (target, data) in &planned {
             std::fs::write(target, data)?;
-            written.push(target.to_string_lossy().into_owned());
         }
         Ok(SaveImagesDto {
-            written,
+            written: planned
+                .iter()
+                .map(|(p, _)| p.to_string_lossy().into_owned())
+                .collect(),
             conflicts: Vec::new(),
         })
     }
@@ -6091,21 +6296,22 @@ fn fill_by_length(aligned: &mut [Option<usize>], locals: &[TrackRef], candidates
 /// the order is total and stable.
 pub fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
-    let (mut left, mut right) = (a.chars().peekable(), b.chars().peekable());
+    let (mut left, mut right) = (a.chars(), b.chars());
     loop {
-        match (left.peek().copied(), right.peek().copied()) {
+        match (left.clone().next(), right.clone().next()) {
             (None, None) => return a.cmp(b),
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(l), Some(r)) if l.is_ascii_digit() && r.is_ascii_digit() => {
-                let take = |chars: &mut std::iter::Peekable<std::str::Chars>| {
-                    let mut digits = String::new();
-                    while let Some(c) = chars.peek().copied().filter(char::is_ascii_digit) {
-                        digits.push(c);
-                        chars.next();
-                    }
+                // Borrow the digit run from the original UTF-8 string. ASCII
+                // digits are one byte, so the boundary is also a char boundary.
+                fn take<'a>(chars: &mut std::str::Chars<'a>) -> &'a str {
+                    let suffix = chars.as_str();
+                    let len = suffix.bytes().take_while(u8::is_ascii_digit).count();
+                    let (digits, rest) = suffix.split_at(len);
+                    *chars = rest.chars();
                     digits
-                };
+                }
                 let (l, r) = (take(&mut left), take(&mut right));
                 let (l_value, r_value) = (l.trim_start_matches('0'), r.trim_start_matches('0'));
                 let by_value = l_value
@@ -6953,6 +7159,19 @@ impl PlanDto {
 
 impl From<&tagrex_core::journal::AppliedBatch> for BatchDto {
     fn from(batch: &tagrex_core::journal::AppliedBatch) -> Self {
+        Self::from(&BatchHeader {
+            id: batch.id,
+            description: batch.description.clone(),
+            message: batch.message.clone(),
+            applied_at: batch.applied_at,
+            interrupted: batch.interrupted,
+            paths: Vec::new(),
+        })
+    }
+}
+
+impl From<&BatchHeader> for BatchDto {
+    fn from(batch: &BatchHeader) -> Self {
         let stored = decode_plan_message(batch.message.as_deref());
         let mut notes = stored.as_ref().map(|s| s.notes.clone()).unwrap_or_default();
         let mut description = batch.description.clone();
@@ -8254,6 +8473,107 @@ mod tests {
         assert!(hub.min_interval.get().is_none());
     }
 
+    /// A short rate-limit refusal is waited out and the request tried once more;
+    /// a long stated wait goes straight back to the caller (#747).
+    #[test]
+    fn a_musicbrainz_image_fetch_does_not_spend_the_api_spacing() {
+        // Cover Art Archive images are not MusicBrainz API requests (#749).
+        let hub = ProviderHub::default();
+        hub.image_fetch("musicbrainz", "").unwrap();
+        assert!(hub.last_musicbrainz_request.get().is_none());
+        // Any other source keeps its spacing.
+        hub.image_fetch("bandcamp", "").unwrap();
+        assert!(hub.last_bandcamp_request.get().is_some());
+    }
+
+    #[test]
+    fn no_more_than_six_image_downloads_run_at_once() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+        let running = Arc::new(AtomicUsize::new(0));
+        let most = Arc::new(AtomicUsize::new(0));
+        let workers: Vec<_> = (0..MAX_IMAGE_DOWNLOADS * 2)
+            .map(|_| {
+                let (running, most) = (Arc::clone(&running), Arc::clone(&most));
+                std::thread::spawn(move || {
+                    let _slot = ImageDownloadSlot::acquire();
+                    let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(200));
+                    running.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        // Capped, but still in parallel up to the cap (#749).
+        assert_eq!(most.load(Ordering::SeqCst), MAX_IMAGE_DOWNLOADS);
+        assert_eq!(*IMAGE_DOWNLOADS.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_short_rate_limit_is_retried_once_and_a_long_one_is_reported() {
+        use tagrex_core::provider::ProviderError;
+        let limited = |secs| {
+            Err::<u32, _>(AppError::Provider(ProviderError::RateLimited {
+                retry_after_secs: secs,
+            }))
+        };
+        let hub = ProviderHub::default();
+
+        // Refused once with `Retry-After: 0`, then served: one retry, after at
+        // least a second.
+        let calls = Cell::new(0);
+        let started = Instant::now();
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            if calls.get() == 1 {
+                limited(0)
+            } else {
+                Ok(7)
+            }
+        });
+        assert_eq!(result.unwrap(), 7);
+        assert_eq!(calls.get(), 2);
+        assert!(started.elapsed() >= Duration::from_secs(1));
+
+        // Refused twice: only one retry, then the refusal is reported.
+        let calls = Cell::new(0);
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            limited(0)
+        });
+        assert!(matches!(
+            result,
+            Err(AppError::Provider(ProviderError::RateLimited { .. }))
+        ));
+        assert_eq!(calls.get(), 2);
+
+        // A minute's wait is not sat out here: the caller decides.
+        let calls = Cell::new(0);
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            limited(60)
+        });
+        assert!(matches!(
+            result,
+            Err(AppError::Provider(ProviderError::RateLimited {
+                retry_after_secs: 60
+            }))
+        ));
+        assert_eq!(calls.get(), 1);
+
+        // Any other failure is never retried.
+        let calls = Cell::new(0);
+        let result = hub.with_retry("discogs", || {
+            calls.set(calls.get() + 1);
+            Err::<u32, _>(AppError::Provider(ProviderError::NotFound))
+        });
+        assert!(result.is_err());
+        assert_eq!(calls.get(), 1);
+    }
+
     #[test]
     fn the_hub_spaces_requests_out_per_source() {
         // Each source keeps its own timestamp, so a Discogs request does not
@@ -8993,6 +9313,26 @@ mod tests {
     }
 
     #[test]
+    fn natural_cmp_handles_digit_boundaries_and_unicode() {
+        use std::cmp::Ordering::{Greater, Less};
+        assert_eq!(natural_cmp("音楽2🎵", "音楽10🎵"), Less);
+        assert_eq!(natural_cmp("é0002a", "É2b"), Less);
+        assert_eq!(natural_cmp("x000", "x0"), "x000".cmp("x0"));
+        assert_eq!(natural_cmp("a٢", "a10"), Greater);
+        assert_eq!(natural_cmp("İ02", "i2"), Greater);
+        assert_eq!(natural_cmp("🎵", "🎵0"), Less);
+        let long = "9".repeat(500);
+        assert_eq!(
+            natural_cmp(&format!("音{long}"), &format!("音1{long}")),
+            Less
+        );
+        assert_eq!(
+            natural_cmp(&format!("音00{long}"), &format!("音{long}")),
+            format!("音00{long}").cmp(&format!("音{long}"))
+        );
+    }
+
+    #[test]
     fn read_text_list_decodes_utf8_and_utf16_and_refuses_binary() {
         let dir = TempDir::new("fromtext-read");
         let file = |name: &str, bytes: &[u8]| {
@@ -9453,6 +9793,365 @@ mod tests {
         app.undo(batch.id).unwrap();
         assert!(lrc.exists() && txt.exists(), "sidecars restored");
         assert!(!dir.0.join(format!("{stem}.lrc")).exists());
+    }
+
+    #[test]
+    fn sidecar_candidates_keep_file_and_extension_rules() {
+        let dir = TempDir::new("sidecar-candidates");
+        let track = dir.tagged_flac("original.flac", "Artist", "Title");
+        let cue = dir.0.join("original.CUE");
+        std::fs::write(&cue, b"cue").unwrap();
+        std::fs::write(dir.0.join("original.zzz"), b"unlisted").unwrap();
+        std::fs::write(dir.0.join("different.lrc"), b"other stem").unwrap();
+        std::fs::write(dir.0.join("original"), b"extensionless").unwrap();
+        std::fs::create_dir(dir.0.join("original.lrc")).unwrap();
+        let app = open_app(&dir);
+        let plan = app
+            .preview_rename("renamed", std::slice::from_ref(&track))
+            .unwrap();
+        assert_eq!(
+            plan.changes[0].sidecar_renames,
+            vec![(
+                cue.to_string_lossy().into_owned(),
+                dir.0.join("renamed.CUE").to_string_lossy().into_owned(),
+            )]
+        );
+        #[cfg(unix)]
+        {
+            let linked = dir.0.join("original.txt");
+            std::os::unix::fs::symlink(&cue, &linked).unwrap();
+            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("original.jpg")).unwrap();
+            let plan = app
+                .preview_rename("renamed", std::slice::from_ref(&track))
+                .unwrap();
+            let froms: Vec<_> = plan.changes[0]
+                .sidecar_renames
+                .iter()
+                .map(|(from, _)| from.as_str())
+                .collect();
+            assert_eq!(
+                froms.len(),
+                2,
+                "file symlink included, broken symlink excluded"
+            );
+            assert!(froms.contains(&linked.to_string_lossy().as_ref()));
+        }
+    }
+
+    // #58: one preview lists each source folder once, but the pairs are still
+    // taken per file — same stem in two folders, a subfolder that is not the
+    // file's own, a directory named like a sidecar, a live symlink and a
+    // dangling one are all judged exactly as the per-file walk judged them.
+    #[test]
+    fn each_files_sidecars_come_from_its_own_folder() {
+        let dir = TempDir::new("sidecar-per-folder");
+        let first = dir.tagged_flac_at("a/x.flac", "Artist", "First");
+        let second = dir.tagged_flac_at("b/x.flac", "Artist", "Second");
+        std::fs::write(dir.0.join("a").join("x.lrc"), b"a lyrics").unwrap();
+        std::fs::write(dir.0.join("b").join("x.lrc"), b"b lyrics").unwrap();
+        // A same-stem sidecar below the file's own folder is not the folder's.
+        std::fs::create_dir_all(dir.0.join("a").join("Nested")).unwrap();
+        std::fs::write(dir.0.join("a").join("Nested/x.lrc"), b"nested").unwrap();
+        // A directory that looks like a sidecar is not a file.
+        std::fs::create_dir(dir.0.join("a").join("x.cue")).unwrap();
+        // A live symlink to a file travels; a dangling one does not.
+        std::fs::write(dir.0.join("outside.txt"), b"outside").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("../outside.txt", dir.0.join("a").join("x.txt")).unwrap();
+            std::os::unix::fs::symlink(dir.0.join("missing"), dir.0.join("a").join("x.jpg"))
+                .unwrap();
+        }
+        let mut app = open_app(&dir);
+
+        let plan = app
+            .preview_rename("%title%", &[first.clone(), second.clone()])
+            .unwrap();
+        assert_eq!(plan.changes.len(), 2);
+        let position = |path: &Path| {
+            plan.changes
+                .iter()
+                .position(|change| change.path == path.to_string_lossy().as_ref())
+                .unwrap()
+        };
+        let first_change = &plan.changes[position(&first)];
+        #[allow(unused_mut)]
+        let mut expected = vec![(
+            dir.0.join("a").join("x.lrc").to_string_lossy().into_owned(),
+            dir.0
+                .join("a")
+                .join("First.lrc")
+                .to_string_lossy()
+                .into_owned(),
+        )];
+        #[cfg(unix)]
+        expected.push((
+            dir.0.join("a").join("x.txt").to_string_lossy().into_owned(),
+            dir.0
+                .join("a")
+                .join("First.txt")
+                .to_string_lossy()
+                .into_owned(),
+        ));
+        expected.sort();
+        assert_eq!(first_change.sidecar_renames, expected);
+        // The other folder's sidecar is not this file's.
+        assert_eq!(
+            plan.changes[position(&second)].sidecar_renames,
+            vec![(
+                dir.0.join("b").join("x.lrc").to_string_lossy().into_owned(),
+                dir.0
+                    .join("b")
+                    .join("Second.lrc")
+                    .to_string_lossy()
+                    .into_owned(),
+            )]
+        );
+
+        let batch = app.apply(&plan).unwrap();
+        assert!(dir.0.join("a").join("First.flac").exists());
+        assert!(dir.0.join("a").join("First.lrc").exists());
+        assert!(!dir.0.join("a").join("x.lrc").exists());
+        assert!(dir.0.join("b").join("Second.flac").exists());
+        assert!(dir.0.join("b").join("Second.lrc").exists());
+        assert!(
+            dir.0.join("a").join("Nested/x.lrc").exists(),
+            "a subfolder's file never travels"
+        );
+        assert!(
+            dir.0.join("a").join("x.cue").is_dir(),
+            "a directory is not carried"
+        );
+        #[cfg(unix)]
+        assert!(
+            std::fs::read_link(dir.0.join("a").join("First.txt")).unwrap()
+                == Path::new("../outside.txt"),
+            "the live symlink travelled as itself"
+        );
+
+        app.undo(batch.id).unwrap();
+        assert!(dir.0.join("a").join("x.flac").exists());
+        assert!(dir.0.join("a").join("x.lrc").exists());
+        assert!(dir.0.join("b").join("x.lrc").exists());
+        assert!(!dir.0.join("a").join("First.lrc").exists());
+    }
+
+    // #58: the listing is the preview's, not the session's — each new preview
+    // re-reads the disk, so a sidecar added, renamed or removed in between is
+    // exactly what the next preview carries.
+    #[test]
+    fn a_second_preview_sees_a_sidecar_added_renamed_or_removed() {
+        let dir = TempDir::new("sidecar-fresh-preview");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        let sidecars = |app: &App| {
+            app.preview_rename("Renamed", std::slice::from_ref(&track))
+                .unwrap()
+                .changes[0]
+                .sidecar_renames
+                .clone()
+        };
+        assert!(sidecars(&app).is_empty());
+
+        std::fs::write(dir.0.join("track.lrc"), b"lyrics").unwrap();
+        assert_eq!(sidecars(&app).len(), 1);
+
+        // Renamed away from the stem: no longer this track's sidecar.
+        std::fs::rename(dir.0.join("track.lrc"), dir.0.join("other.lrc")).unwrap();
+        assert!(sidecars(&app).is_empty());
+
+        std::fs::remove_file(dir.0.join("other.lrc")).unwrap();
+        std::fs::write(dir.0.join("track.lrc"), b"again").unwrap();
+        assert_eq!(sidecars(&app).len(), 1);
+    }
+
+    // #58: the settings gate every preview, not only the first one — and the
+    // set is matched case-insensitively while the destination keeps the
+    // spelling the file on disk has.
+    #[test]
+    fn every_preview_reads_the_sidecar_settings_again() {
+        let dir = TempDir::new("sidecar-settings-preview");
+        let track = dir.tagged_flac("track.flac", "Artist", "Title");
+        std::fs::write(dir.0.join("track.lrc"), b"lyrics").unwrap();
+        std::fs::write(dir.0.join("track.jpg"), b"art").unwrap();
+        let app = open_app(&dir);
+        let sidecars = |app: &App| {
+            app.preview_rename("Renamed", std::slice::from_ref(&track))
+                .unwrap()
+                .changes[0]
+                .sidecar_renames
+                .clone()
+        };
+        assert_eq!(sidecars(&app).len(), 2);
+
+        app.apply_settings(&SettingsDto {
+            carry_sidecars: false,
+            ..SettingsDto::default()
+        });
+        assert!(sidecars(&app).is_empty());
+
+        app.apply_settings(&SettingsDto {
+            sidecar_extensions: vec!["LRC".into()],
+            ..SettingsDto::default()
+        });
+        let pairs = sidecars(&app);
+        assert_eq!(pairs.len(), 1);
+        assert!(pairs[0].1.ends_with("Renamed.lrc"), "{}", pairs[0].1);
+
+        app.apply_settings(&SettingsDto {
+            sidecar_extensions: Vec::new(),
+            ..SettingsDto::default()
+        });
+        assert!(sidecars(&app).is_empty());
+    }
+
+    #[test]
+    fn staged_cleanup_respects_disabled_or_empty_sidecar_settings() {
+        let dir = TempDir::new("sidecar-disabled-staged");
+        let track = dir.tagged_flac("original.flac", "Artist", "Title");
+        std::fs::write(dir.0.join("original.lrc"), b"lyrics").unwrap();
+        for settings in [
+            SettingsDto {
+                carry_sidecars: false,
+                ..SettingsDto::default()
+            },
+            SettingsDto {
+                sidecar_extensions: Vec::new(),
+                ..SettingsDto::default()
+            },
+        ] {
+            let app = open_app(&dir);
+            let staged = app
+                .preview_rename("Renamed", std::slice::from_ref(&track))
+                .unwrap();
+            assert_eq!(staged.changes[0].sidecar_renames.len(), 1);
+            app.apply_settings(&settings);
+            let cleaned = app
+                .preview_transform_over_plan(
+                    &staged,
+                    &[ActionGroupDto {
+                        name: "lower".into(),
+                        scope: "filename".into(),
+                        rules: vec![case_rule("lower")],
+                        note: String::new(),
+                    }],
+                )
+                .unwrap();
+            assert!(cleaned
+                .changes
+                .iter()
+                .all(|change| change.sidecar_renames.is_empty()));
+        }
+    }
+
+    // #142/#58: a cleanup over a staged plan keeps one pair per sidecar — the
+    // staged rename's own pairs are recognised as stem sidecars from the same
+    // listing, not recomputed into duplicates — and a tag-only cleanup has no
+    // sidecar work at all.
+    #[test]
+    fn a_cleanup_over_a_move_keeps_each_folders_sidecars_once() {
+        let dir = TempDir::new("sidecar-over-plan");
+        let first = dir.tagged_flac_at("box/One.flac", "Artist", "One");
+        let second = dir.tagged_flac_at("box/Two.flac", "Artist", "Two");
+        std::fs::write(dir.0.join("box/One.lrc"), b"one").unwrap();
+        std::fs::write(dir.0.join("box/Two.lrc"), b"two").unwrap();
+        let mut app = open_app(&dir);
+
+        let staged = app
+            .preview_move(
+                "%artist%/%title%",
+                &[first.clone(), second.clone()],
+                None,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(staged.changes.len(), 2);
+        for change in &staged.changes {
+            assert_eq!(
+                change.sidecar_renames.len(),
+                1,
+                "each track carries its own .lrc only: {:?}",
+                change.sidecar_renames
+            );
+        }
+
+        let cleaned = app
+            .preview_transform_over_plan(
+                &staged,
+                &[ActionGroupDto {
+                    name: "lower".into(),
+                    scope: "filename".into(),
+                    rules: vec![case_rule("lower")],
+                    note: String::new(),
+                }],
+            )
+            .unwrap();
+        assert_eq!(cleaned.changes.len(), 2);
+        let mut targets: Vec<String> = cleaned
+            .changes
+            .iter()
+            .flat_map(|change| change.sidecar_renames.iter().map(|(_, to)| to.clone()))
+            .collect();
+        targets.sort();
+        assert_eq!(targets.len(), 2, "no duplicate pairs: {targets:?}");
+        assert!(targets[0].ends_with("one.lrc"), "{}", targets[0]);
+        assert!(targets[1].ends_with("two.lrc"), "{}", targets[1]);
+        assert!(cleaned
+            .changes
+            .iter()
+            .all(|change| change.folder_extras.is_empty()));
+
+        let batch = app.apply(&cleaned).unwrap();
+        assert!(dir.0.join("artist/one.flac").exists());
+        assert!(dir.0.join("artist/one.lrc").exists());
+        assert!(dir.0.join("artist/two.flac").exists());
+        assert!(dir.0.join("artist/two.lrc").exists());
+        app.undo(batch.id).unwrap();
+        assert!(dir.0.join("box/One.lrc").exists());
+        assert!(dir.0.join("box/Two.lrc").exists());
+
+        // A cleanup that only touches tags proposes no sidecar pairs, because
+        // nothing is being renamed — the same plan the per-file walk produced.
+        let edits = app
+            .preview_tag_edits(&[TagEditDto {
+                path: first.to_string_lossy().into_owned(),
+                field: "title".into(),
+                value: Some("Renamed".into()),
+            }])
+            .unwrap();
+        let cleaned = app.preview_transform_over_plan(&edits, &[]).unwrap();
+        assert_eq!(cleaned.changes.len(), 1);
+        assert!(cleaned.changes[0].rename_to.is_none());
+        assert!(cleaned.changes[0].sidecar_renames.is_empty());
+    }
+
+    // #58: a sidecar target that is already taken is refused by the executor's
+    // preflight, and nothing moves — the preview lists the pair, Apply says no.
+    #[test]
+    fn a_carried_sidecar_that_would_overwrite_a_file_stops_the_apply() {
+        let dir = TempDir::new("sidecar-collision-preview");
+        let track = dir.tagged_flac("one.flac", "Artist", "Title");
+        let lrc = dir.0.join("one.lrc");
+        std::fs::write(&lrc, b"mine").unwrap();
+        let occupied = dir.0.join("Renamed.lrc");
+        std::fs::write(&occupied, b"someone else").unwrap();
+        let mut app = open_app(&dir);
+
+        let plan = app
+            .preview_rename("Renamed", std::slice::from_ref(&track))
+            .unwrap();
+        assert_eq!(
+            plan.changes[0].sidecar_renames,
+            vec![(
+                lrc.to_string_lossy().into_owned(),
+                occupied.to_string_lossy().into_owned(),
+            )]
+        );
+        assert!(app.apply(&plan).is_err());
+        assert!(track.exists() && lrc.exists());
+        assert_eq!(std::fs::read(&occupied).unwrap(), b"someone else");
+        assert!(!dir.0.join("Renamed.flac").exists());
     }
 
     #[test]
@@ -11713,6 +12412,79 @@ mod tests {
         let a = dir.tagged_flac("a.flac", "Artist", "Title");
         let app = open_app(&dir);
         assert!(app.read_external_cover(&[a]).unwrap().is_none());
+    }
+
+    #[test]
+    fn provider_clients_are_retained_and_invalidated_by_connection_settings() {
+        let hub = ProviderHub::default();
+        hub.discogs_provider("first-token").unwrap();
+        hub.musicbrainz_provider().unwrap();
+        hub.beatport_provider("access-token").unwrap();
+        hub.bandcamp_provider().unwrap();
+        hub.soundeo_provider().unwrap();
+        assert!(hub.discogs.borrow().is_some());
+        assert!(hub.musicbrainz.borrow().is_some());
+        assert!(hub.beatport.borrow().is_some());
+        assert!(hub.bandcamp.borrow().is_some());
+        assert!(hub.soundeo.borrow().is_some());
+        hub.apply_settings(&SettingsDto {
+            rate_limit_per_min: 30,
+            ..Default::default()
+        });
+        assert!(
+            hub.musicbrainz.borrow().is_some(),
+            "rate changes keep the client"
+        );
+        hub.discogs_provider("replacement-token").unwrap();
+        assert_eq!(
+            hub.discogs.borrow().as_ref().unwrap().0,
+            "replacement-token"
+        );
+        hub.apply_settings(&SettingsDto {
+            proxy: "http://localhost:3128".into(),
+            ..Default::default()
+        });
+        assert!(hub.discogs.borrow().is_none());
+        assert!(hub.musicbrainz.borrow().is_none());
+        assert!(hub.beatport.borrow().is_none());
+        assert!(hub.bandcamp.borrow().is_none());
+        assert!(hub.soundeo.borrow().is_none());
+        hub.musicbrainz_provider().unwrap();
+        assert!(hub.musicbrainz.borrow().is_some());
+    }
+
+    #[test]
+    fn streaming_hash_groups_identical_files_across_buffer_boundaries() {
+        let dir = TempDir::new("streaming-hash");
+        let a = dir.tagged_flac("a.flac", "Artist", "Title");
+        let b = dir.0.join("b.flac");
+        let c = dir.0.join("c.flac");
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&a)
+            .unwrap()
+            .write_all(&vec![7; 192 * 1024 + 17])
+            .unwrap();
+        std::fs::copy(&a, &b).unwrap();
+        std::fs::copy(&a, &c).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&c)
+            .unwrap()
+            .write_all(&[8])
+            .unwrap();
+        let app = open_app(&dir);
+        let groups = app.find_duplicates("hash").unwrap();
+        assert_eq!(groups.len(), 1);
+        let paths: std::collections::HashSet<_> =
+            groups[0].files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [a.to_str().unwrap(), b.to_str().unwrap()]
+                .into_iter()
+                .collect()
+        );
     }
 
     #[test]
