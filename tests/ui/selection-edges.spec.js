@@ -45,8 +45,10 @@ test('every click in a rapid group-header burst reverses the state without chang
 test('interrupting group motion repeatedly does not rebuild exit snapshots or queue row animations',async({page})=>{
   await pack(page,2000);await page.emulateMedia({reducedMotion:'no-preference'});
   const result=await page.evaluate(()=>{
+    // Model a costly snapshot without sleeps or a machine-speed dependency.
+    const now=performance.now.bind(performance);let snapshotTime=0;performance.now=()=>now()+snapshotTime;
     let clones=0,players=0;const clone=Element.prototype.cloneNode,animate=Element.prototype.animate;
-    Element.prototype.cloneNode=function(...args){if(this.matches?.('#tracks-body tr[data-path]'))clones++;return clone.apply(this,args);};
+    Element.prototype.cloneNode=function(...args){if(this.matches?.('#tracks-body tr[data-path]')){clones++;snapshotTime+=10;}return clone.apply(this,args);};
     Element.prototype.animate=function(...args){players++;return animate.apply(this,args);};
     const clicks=[];
     for(let i=0;i<8;i++){
