@@ -66,7 +66,10 @@ jobs:
             rm -f "$image"
           }
           trap cleanup EXIT
-          hdiutil create -size 128m -fs "$OUTPUT_FILESYSTEM" -volname TagRexOutputs "$image"
+          # Explicit partition layout and a larger image avoid filesystem
+          # geometry/default-layout differences in macOS image creation.
+          hdiutil create -size 512m -layout GPTSPUD -format UDRW \
+            -fs "$OUTPUT_FILESYSTEM" -volname TagRexOutputs "$image"
           mkdir "$mount"
           hdiutil attach "$image" -mountpoint "$mount" -nobrowse
           export TAGREX_OUTPUT_TEST_ROOT="$mount"
