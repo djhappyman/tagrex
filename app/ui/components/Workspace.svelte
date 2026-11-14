@@ -7,6 +7,7 @@
   import type { WorkspaceLayout } from '$lib/workspace-layout';
   import FilterPanel from './FilterPanel.svelte';
   import InspectorHelp from './InspectorHelp.svelte';
+  import ImportFields from './ImportFields.svelte';
   import NativeCheckbox from './controls/NativeCheckbox.svelte';
   import NativeSlider from './controls/NativeSlider.svelte';
   import * as Popover from '$lib/components/ui/popover/index.js';
@@ -435,6 +436,7 @@
           <div class="mask-row">
 
             <div id="query-box" class="query field">
+              <ImportFields />
               <Input id="discogs-query" type="text" data-i18n-aria-label="online.queryPlaceholder" aria-label="Artist, album, or catalogue number" data-i18n-placeholder="online.queryPlaceholder" placeholder="artist / album / catalog no." spellcheck="false" />
               <div class="field-tools">
                 <Button variant="ghost" size="icon-sm" id="query-presets" class="icon" type="button" data-i18n-title="online.presets" title="Queries this selection can build" data-i18n-aria-label="online.presets" aria-label="Queries this selection can build" aria-expanded="false"><svg class="ico"><use href="#i-caret-down"/></svg></Button>

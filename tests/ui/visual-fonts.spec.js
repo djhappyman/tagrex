@@ -134,6 +134,7 @@ test('visible catalogue and counts honor the badge face independently from conde
   await page.locator('#settings-open').click();await page.locator('#settings-search').fill('Data font');await page.locator('#set-value-font [data-value-font="condensed"]').click();await page.locator('#settings-cancel').click();
   await page.locator('.subtab[data-subtab="online"]').click();await page.locator('#discogs-token').evaluate(n=>{n.value='fixture';});await page.locator('#discogs-query').fill('Helter Skelter');await page.locator('#discogs-search').click();
   await expect(page.locator('.release-card')).toHaveCount(5);const facts=page.locator('.release-card').first().locator('.rb-catno, .tk-count');
+  await page.locator('.release-card').first().locator('.release-head').click();
   await expect(page.locator('.release-card').first().locator('.tk-count')).toContainText('3 tracks');
   for(const [choice,family] of [['mono','TagRex Mono'],['sans','TagRex Inter']]){
     await page.locator('#settings-open').click();await page.locator('#settings-search').fill('Release badge font');await page.locator(`#set-badge-font [data-badge-font="${choice}"]`).click();await page.locator('#settings-cancel').click();

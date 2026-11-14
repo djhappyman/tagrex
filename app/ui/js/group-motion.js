@@ -4,7 +4,7 @@ export function createGroupMotion(wrap, body) {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const animations = new Set();
   let ghost = null;
-  let lastRun = -Infinity;
+  let lastFinished = -Infinity;
   const caretOf = group => [...body.querySelectorAll('tr.group-head')].find(row => row.dataset.group === group)?.querySelector('.group-caret > svg');
   function cancel() {
     for (const animation of animations) animation.cancel();
@@ -17,10 +17,14 @@ export function createGroupMotion(wrap, body) {
     return animation;
   }
   const key = row => row.dataset.path ? `file:${row.dataset.path}` : `group:${row.dataset.group}`;
-  function run(change, { group = null, collapsing = false } = {}) {
-    const now = performance.now();
-    const rapid = now - lastRun < 160;
-    lastRun = now;
+  function run(change, options = {}) {
+    const rapid = performance.now() - lastFinished < 160;
+    try { transition(change, options, rapid); }
+    // Rendering may itself exceed the burst window on a busy machine. Measure
+    // the user's gap between changes, rather than charging them for that work.
+    finally { lastFinished = performance.now(); }
+  }
+  function transition(change, { group = null, collapsing = false } = {}, rapid = false) {
     const oldCaret = rapid && !reduced.matches ? caretOf(group) : null;
     const rotation = oldCaret ? getComputedStyle(oldCaret).transform : null;
     cancel();

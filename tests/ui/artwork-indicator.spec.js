@@ -152,8 +152,8 @@ test('group labels and collapse carets remain visible when the file table scroll
   await expect.poll(() => group.evaluate(node => {
     const label = node.querySelector('.group-label')?.getBoundingClientRect();
     const caret = node.querySelector('.group-caret')?.getBoundingClientRect();
-    const bounds = node.closest('.table-wrap').getBoundingClientRect();
-    return !!label?.width && !!caret?.width && caret.x >= bounds.x &&
+    const bounds = node.closest('.table-wrap')?.getBoundingClientRect();
+    return !!bounds && !!label?.width && !!caret?.width && caret.x >= bounds.x &&
       label.x >= bounds.x && label.x < bounds.x + bounds.width - 50;
   })).toBe(true);
   await group.locator('.group-caret').click();

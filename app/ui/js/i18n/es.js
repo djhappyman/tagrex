@@ -11,6 +11,21 @@
 // Spanish selects between `one` and `other` for a count — 1 pista, 2 pistas.
 // (Its `many` form, for round millions, falls back to `other`.)
 export const es = {
+
+  "online.importFields": "Campos de importación",
+  "online.importAction": "Importar",
+  "online.importArtwork": "Carátula",
+  "online.importFieldsRemembered": "Guardado para futuras importaciones",
+  "online.importArtworkHint": "Reemplazar la carátula principal",
+  "online.importFieldsMore": "Más campos",
+  "online.importFieldsAll": "Seleccionar todo",
+  "online.importFieldsClear": "Desmarcar todo",
+  "online.importFieldsLoading": "Cargando campos…",
+  "online.importFieldsError": "No se pudo guardar o cargar la selección. Inténtalo de nuevo.",
+  "table.artwork.added": "Se añadirá la carátula",
+  "table.artwork.replaced": "Se reemplazará la carátula",
+  "table.artwork.removed": "Se eliminará la carátula",
+
   // ---- units that appear inside other messages ----
   "unit.track": { one: "{n} pista", other: "{n} pistas" },
   "unit.file": { one: "{n} archivo", other: "{n} archivos" },
@@ -167,6 +182,7 @@ export const es = {
   "online.matchByLength": "Emparejar por duración",
   "online.matchByLengthTitle": "Reordena los archivos seleccionados según las duraciones que indica este lanzamiento, ignorando los nombres",
   "online.embed": "Incrustar portada",
+  "online.embedSelected": "Incrustar en las pistas seleccionadas",
   "online.embedTitle": "Incrusta la portada de este lanzamiento en los archivos seleccionados",
   "online.importTitle": "Importar este lanzamiento en los archivos seleccionados",
   "online.openRelease": "Abrir la página del lanzamiento",

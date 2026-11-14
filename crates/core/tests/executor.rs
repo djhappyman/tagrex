@@ -1066,6 +1066,54 @@ fn set_artist_on(paths: &[&Path]) -> ChangePlan {
 }
 
 #[test]
+fn tag_writes_follow_plan_order_and_progress_precedes_each_write() {
+    let dir = TempDir::new("sequential-tagging");
+    // Deliberately non-lexical: the frontend's displayed order owns the batch.
+    let files = [dir.flac("c.flac"), dir.flac("a.flac"), dir.flac("b.flac")];
+    let plan = set_artist_on(&[&files[0], &files[1], &files[2]]);
+    let mut journal = VecJournal::new();
+    let mut write_order = Vec::new();
+    let batch = Executor::apply_with(
+        &plan,
+        &mut journal,
+        &roots(dir.path()),
+        &mut |progress| {
+            if progress.completed.is_some() || progress.done < files.len() {
+                return; // whole-plan validation writes nothing
+            }
+            let next = progress.done - files.len();
+            write_order.push(progress.path.clone());
+            for (index, path) in files.iter().enumerate() {
+                let current = TagEngine::read(path).unwrap();
+                assert_eq!(current.tags.contains_key(&TagField::Artist), index < next);
+            }
+        },
+        &AtomicBool::new(false),
+    )
+    .unwrap();
+    assert_eq!(write_order, files);
+    for path in &files {
+        assert_eq!(
+            TagEngine::read(path)
+                .unwrap()
+                .tags
+                .get(&TagField::Artist)
+                .map(String::as_str),
+            Some("Cancelled")
+        );
+        assert!(std::fs::read(path).unwrap().ends_with(&MINIMAL_FLAC[62..]));
+    }
+    Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+    for path in &files {
+        assert!(!TagEngine::read(path)
+            .unwrap()
+            .tags
+            .contains_key(&TagField::Artist));
+        assert!(std::fs::read(path).unwrap().ends_with(&MINIMAL_FLAC[62..]));
+    }
+}
+
+#[test]
 fn apply_reports_each_step_with_a_running_total() {
     let dir = TempDir::new("progress");
     let files = [dir.flac("a.flac"), dir.flac("b.flac"), dir.flac("c.flac")];
@@ -1082,7 +1130,92 @@ fn apply_reports_each_step_with_a_running_total() {
     )
     .unwrap();
 
-    assert_eq!(seen, vec![(0, 6), (1, 6), (2, 6), (3, 6), (4, 6), (5, 6)]);
+    assert_eq!(
+        seen,
+        vec![
+            (0, 6),
+            (1, 6),
+            (2, 6),
+            (3, 6),
+            (4, 6),
+            (4, 6),
+            (5, 6),
+            (5, 6),
+            (6, 6)
+        ]
+    );
+}
+
+#[test]
+fn completion_events_follow_successful_tags_and_transfers_in_plan_order() {
+    use tagrex_core::plan::ApplyStep;
+    for copy in [false, true] {
+        let dir = TempDir::new("write-completion");
+        let files = [dir.flac("c.flac"), dir.flac("a.flac"), dir.flac("b.flac")];
+        let targets: Vec<_> = (0..files.len())
+            .map(|index| dir.path().join(format!("saved-{index}.flac")))
+            .collect();
+        let mut plan = set_artist_on(&[&files[0], &files[1], &files[2]]);
+        for (index, change) in plan.changes.iter_mut().enumerate() {
+            change.rename_to = Some(targets[index].clone());
+            change.copy = copy;
+        }
+        let mut journal = VecJournal::new();
+        let mut seen = Vec::new();
+        let batch = Executor::apply_with(
+            &plan,
+            &mut journal,
+            &roots(dir.path()),
+            &mut |event| {
+                let Some(kind) = event.completed else {
+                    return;
+                };
+                let index = files.iter().position(|path| path == &event.path).unwrap();
+                seen.push((kind, event.path.clone()));
+                match kind {
+                    ApplyStep::Tags => {
+                        let current = if copy { &targets[index] } else { &files[index] };
+                        assert_eq!(
+                            TagEngine::read(current)
+                                .unwrap()
+                                .tags
+                                .get(&TagField::Artist)
+                                .map(String::as_str),
+                            Some("Cancelled")
+                        );
+                    }
+                    ApplyStep::Transfer => {
+                        assert!(targets[index].exists());
+                        assert_eq!(files[index].exists(), copy);
+                        assert!(std::fs::read(&targets[index])
+                            .unwrap()
+                            .ends_with(&MINIMAL_FLAC[62..]));
+                    }
+                }
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        let kinds = if copy {
+            [ApplyStep::Transfer, ApplyStep::Tags]
+        } else {
+            [ApplyStep::Tags, ApplyStep::Transfer]
+        };
+        let expected: Vec<_> = kinds
+            .into_iter()
+            .flat_map(|kind| files.iter().map(move |path| (kind, path.clone())))
+            .collect();
+        assert_eq!(seen, expected);
+        Executor::undo(&mut journal, batch.id, &roots(dir.path())).unwrap();
+        for (source, target) in files.iter().zip(&targets) {
+            assert!(source.exists());
+            assert!(!target.exists());
+            assert!(!TagEngine::read(source)
+                .unwrap()
+                .tags
+                .contains_key(&TagField::Artist));
+        }
+    }
 }
 
 #[test]
@@ -1101,6 +1234,9 @@ fn a_cancel_between_files_rolls_the_batch_back() {
         &mut journal,
         &roots(dir.path()),
         &mut |progress| {
+            if progress.completed.is_some() {
+                return;
+            }
             if progress.done == plan.changes.len() + 1 {
                 cancel.store(true, Ordering::SeqCst);
             }

@@ -13,6 +13,21 @@
 // `tn` asks `Intl.PluralRules`, so a form is never picked by hand, and a
 // missing key still falls back to English.
 export const it = {
+
+  "online.importFields": "Campi da importare",
+  "online.importAction": "Importa",
+  "online.importArtwork": "Copertina",
+  "online.importFieldsRemembered": "Salvato per le prossime importazioni",
+  "online.importArtworkHint": "Sostituisci la copertina principale",
+  "online.importFieldsMore": "Altri campi",
+  "online.importFieldsAll": "Seleziona tutto",
+  "online.importFieldsClear": "Deseleziona tutto",
+  "online.importFieldsLoading": "Caricamento dei campi…",
+  "online.importFieldsError": "Impossibile caricare o salvare le scelte. Riprova.",
+  "table.artwork.added": "La copertina verrà aggiunta",
+  "table.artwork.replaced": "La copertina verrà sostituita",
+  "table.artwork.removed": "La copertina verrà rimossa",
+
   // ---- units that appear inside other messages ----
   "unit.track": { one: "{n} traccia", other: "{n} tracce" },
   "unit.file": { one: "{n} file", other: "{n} file" },
@@ -169,6 +184,7 @@ export const it = {
   "online.matchByLength": "Abbina per durata",
   "online.matchByLengthTitle": "Riordina i file selezionati in base alle durate indicate da questa release, ignorando i nomi",
   "online.embed": "Incorpora copertina",
+  "online.embedSelected": "Incorpora nelle tracce selezionate",
   "online.embedTitle": "Incorpora la copertina di questa release nei file selezionati",
   "online.importTitle": "Importa questa release nei file selezionati",
   "online.openRelease": "Apri la pagina della release",

@@ -23,14 +23,19 @@ function paint(progress) {
   if (!el("diff-cancel-apply").disabled) el("ab-file").textContent = baseName(progress.path);
 }
 
-export async function beginApplyProgress() {
+export async function beginApplyProgress(onProgress = () => {}) {
   const bar = el("diff-actionbar");
   el("ab-bar-fill").style.width = "0%";
   el("ab-file").textContent = t("apply.checking");
   el("diff-cancel-apply").disabled = false;
   showTimer = setTimeout(() => bar.classList.add("applying"), SHOW_AFTER_MS);
   const events = window.__TAURI__ && window.__TAURI__.event;
-  if (events) unlisten = await events.listen(EVENT, (e) => paint(e.payload));
+  if (events) unlisten = await events.listen(EVENT, (e) => { paint(e.payload); onProgress(e.payload); });
+  else {
+    const listener = event => { paint(event.detail); onProgress(event.detail); };
+    document.addEventListener(EVENT, listener);
+    unlisten = () => document.removeEventListener(EVENT, listener);
+  }
 }
 
 // The same events while an undo runs (#448), painted in the status bar since there

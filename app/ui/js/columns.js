@@ -1,3 +1,4 @@
+import { reviewColumns } from './review-columns.js';
 import { createComponentElement } from "../lib/component-elements.js";
 // The table's columns and its grouping menu (#43, #143 split them out of
 // app.js).
@@ -9,7 +10,7 @@ import { createComponentElement } from "../lib/component-elements.js";
 import { el, escapeHtml, ico, toast } from "./dom.js";
 import { invoke } from "./invoke.js";
 import { hooks } from "./hooks.js";
-import { EXTENDED_FIELDS, VIRTUAL_COLUMNS, fieldLabel } from "./fields.js";
+import { EXTENDED_FIELDS, KNOWN_CUSTOM_LABELS, VIRTUAL_COLUMNS, fieldLabel } from "./fields.js";
 import { currentLang, t } from "./i18n.js";
 import { isFieldLocked } from "./locks.js";
 import { placeholderToken } from "./placeholders.js";
@@ -49,9 +50,33 @@ function allColumnKeys() {
   return [
     "file",
     ...EXTENDED_FIELDS.map(([key]) => key),
+    ...Object.keys(KNOWN_CUSTOM_LABELS).map(key => 'custom:' + key),
     ...VIRTUAL_COLUMNS.map(([key]) => key),
     ...customColumns.map((c) => customColumnKey(c.id)),
   ];
+}
+
+let stagedColumns = null;
+let stagedColumnOrder = null;
+let renderedColumns = '';
+function tableColumnKeys() { return stagedColumns || visibleColumns; }
+function setReviewColumns(on) {
+  if (!on) { stagedColumns = null; stagedColumnOrder = null; }
+  else {
+    stagedColumnOrder ??= [...new Set([...visibleColumns, ...allColumnKeys()])];
+    const next = reviewColumns(stagedColumnOrder, allColumnKeys(), [...(diffByPath?.values() || [])]);
+    // Reconcile on blur: removing a column while typing would detach the editor.
+    if (stagedColumns && el('tracks-body')?.querySelector('[contenteditable="true"]') &&
+        stagedColumns.join('\0') !== next.join('\0')) return true;
+    stagedColumns = next;
+  }
+  return false;
+}
+function syncTableColumns() {
+  const signature = tableColumnKeys().join('\0');
+  if (renderedColumns === signature) return false;
+  renderTableHead();
+  return true;
 }
 
 function columnLabel(key) {
@@ -207,7 +232,7 @@ function customColumnValue(key, path) {
 // only its own values instead of rejecting the other requested columns.
 async function refreshCustomColumns(paths) {
   ensureCustomSubject();
-  const shown = visibleColumns.map(customColumnOf).filter(Boolean);
+  const shown = tableColumnKeys().map(customColumnOf).filter(Boolean);
   const needed = shown.filter((column) => {
     const cached = customValues.get(column.id);
     return !cached || paths.some((path) => !cached.has(path));
@@ -454,7 +479,7 @@ function fitColumn(key) {
 }
 
 function fitAllColumns() {
-  fitColumns(visibleColumns.slice());
+  fitColumns(tableColumnKeys().slice());
 }
 
 // Sticky mode: re-fit whenever what the table shows changes.
@@ -477,7 +502,7 @@ let lastAutofitSignature = null;
 function autofitSignature() {
   return [
     tracks.length,
-    visibleColumns.join(","),
+    tableColumnKeys().join(","),
     diffByPath ? diffByPath.size : 0,
     document.body.className,
     getComputedStyle(document.body).getPropertyValue("--table-font-size"),
@@ -513,6 +538,7 @@ setGroupByValue(groupByPref());
 // (#129), matching what a reference tagger shows.
 
 function renderTableHead() {
+  renderedColumns = tableColumnKeys().join("\0");
   const table = el("tracks");
   const row = table.querySelector("thead tr");
   row.querySelectorAll("th.sortable").forEach((th) => th.remove());
@@ -540,7 +566,7 @@ function renderTableHead() {
   artworkIndicator.className = 'sort-ind';
   artwork.append(artworkIndicator);
   row.append(artwork);
-  for (const [index, key] of visibleColumns.entries()) {
+  for (const [index, key] of tableColumnKeys().entries()) {
     const th = document.createElement("th");
     th.dataset.sort = key;
     th.className = "sortable";
@@ -566,7 +592,7 @@ function renderTableHead() {
       // placeholders use (#147) — so the header still answers "what do I write
       // for this?" (#172).
       const token = placeholderToken(key === "length" ? "_length" : key);
-      th.title = token ? `${columnLabel(key)} · ${token}` : columnLabel(key);
+      th.title = key.startsWith("custom:") ? `${columnLabel(key)} · ${key}` : token ? `${columnLabel(key)} · ${token}` : columnLabel(key);
     }
     // A locked column says so in its header (#48): its cells refuse to be
     // edited and no operation will change them, and a column that quietly did
@@ -666,6 +692,14 @@ function loadColumns() {
 // dropped onto, and the order worked on here leaves it out entirely;
 // `applyColumns` puts it back in front.
 function moveColumn(dragged, target, past) {
+  if (stagedColumns) {
+    if (target === 'file' || dragged === 'file' || !stagedColumns.includes(target)) return;
+    const order = stagedColumns.filter(key => key !== dragged);
+    order.splice(order.indexOf(target) + Number(past), 0, dragged);
+    stagedColumnOrder = stagedColumnOrder.filter(key => key !== dragged);
+    stagedColumnOrder.splice(stagedColumnOrder.indexOf(target) + Number(past), 0, dragged);
+    stagedColumns = order; renderTableHead(); hooks.renderTracks(); renderColumnsMenu(); return;
+  }
   if (target === "file" || !visibleColumns.includes(target)) return;
   const order = visibleColumns.filter((k) => k !== "file");
   order.splice(order.indexOf(dragged), 1);
@@ -706,7 +740,7 @@ let columnsMenuFocusFrame = 0;
 function renderColumnsMenu() {
   const menu = el("columns-menu");
   const signature = JSON.stringify([
-    currentLang(), visibleColumns, customColumns, autofitEnabled(),
+    currentLang(), tableColumnKeys(), customColumns, autofitEnabled(),
     allColumnKeys().map(columnLabel),
     ['columns.add', 'columns.addTitle', 'columns.fit', 'columns.fitTitle', 'columns.autofit', 'columns.autofitTitle', 'columns.reset', 'columns.alwaysShown', 'columns.hidden'].map((key) => t(key)),
   ]);
@@ -724,8 +758,8 @@ function renderColumnsMenu() {
     clearTimeout(scrollIdle);
     scrollIdle = setTimeout(() => options.classList.remove('is-scrolling'), 650);
   }, {passive:true});
-  for (const key of visibleColumns) options.appendChild(colMenuRow(key, true));
-  const hidden = allColumnKeys().filter((k) => !visibleColumns.includes(k));
+  for (const key of tableColumnKeys()) options.appendChild(colMenuRow(key, true));
+  const hidden = allColumnKeys().filter((k) => !tableColumnKeys().includes(k));
   if (hidden.length) {
     const sep = document.createElement("div");
     sep.className = "col-menu-sep";
@@ -817,7 +851,7 @@ function colMenuRow(key, visible) {
   const box = document.createElement("input");
   box.type = "checkbox";
   box.checked = visible;
-  box.disabled = isFile; // file is structural — always shown, first
+  box.disabled = isFile || !!stagedColumns; // Staged derives visibility from pending changes
   box.addEventListener("change", () => {
     applyColumns(box.checked ? [...visibleColumns, key] : visibleColumns.filter((k) => k !== key));
     renderColumnsMenu();
@@ -870,6 +904,7 @@ function colMenuRow(key, visible) {
 export {
   COLUMN_MIN_WIDTH,
   allColumnKeys,
+  tableColumnKeys, setReviewColumns, syncTableColumns,
   applyColumns,
   customColumnOf,
   customColumnValue,

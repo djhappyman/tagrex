@@ -42,3 +42,42 @@ test('selection handler baseline records synchronous click work with Editor visi
   const result=await page.evaluate(()=>{const times=[];for(let i=0;i<30;i++){const row=document.querySelectorAll('#tracks-body tr[data-path]')[i%3];const start=performance.now();row.querySelector('td.file').dispatchEvent(new MouseEvent('click',{bubbles:true}));times.push(performance.now()-start);}times.sort((a,b)=>a-b);return{median:times[15],p95:times[28],max:times[29]};});
   console.log('SELECTION_HANDLER_MS',JSON.stringify(result));
 });
+
+test('column sorting keeps folder positions and sorts numeric filenames only inside each folder',async({page})=>{
+  await page.evaluate(async()=>{
+    await window.tagrex.invoke('open_drop',{paths:[
+      'Z Folder/take10.mp3','Z Folder/take2.mp3','Z Folder/take9.mp3',
+      'A Folder/take10.mp3','A Folder/take2.mp3','A Folder/take9.mp3',
+    ]});
+    document.getElementById('root').value='/dropped';await window.tagrex.openLibrary();
+  });
+  const headers=page.locator('#tracks-body tr.group-head');
+  const original=await headers.evaluateAll(nodes=>nodes.map(node=>node.dataset.group));
+  expect(original).toHaveLength(2);
+  for(const key of ['file','title','artist','file']){
+    for(let direction=0;direction<2;direction++){
+      await page.locator(`#tracks th[data-sort="${key}"]`).click();
+      expect(await headers.evaluateAll(nodes=>nodes.map(node=>node.dataset.group))).toEqual(original);
+      const groups=await rows(page).evaluateAll(nodes=>nodes.map(node=>node.dataset.group));
+      expect(groups).toEqual(original.flatMap(group=>Array(3).fill(group)));
+      if(key==='file'){
+        const order=await rows(page).evaluateAll(nodes=>nodes.map(node=>node.dataset.path.split('/').pop()));
+        const expected=direction===0?['take2.mp3','take9.mp3','take10.mp3']:['take10.mp3','take9.mp3','take2.mp3'];
+        expect(order).toEqual([...expected,...expected]);
+      }
+    }
+  }
+  await headers.first().locator('.group-caret').click();
+  await expect(rows(page)).toHaveCount(3);
+  await page.locator('#tracks th[data-sort="title"]').click();
+  await expect(rows(page)).toHaveCount(3);
+  expect(await headers.evaluateAll(nodes=>nodes.map(node=>node.dataset.group))).toEqual(original);
+  if(!await page.locator('#filter').isVisible())await page.locator('#filter-panel-toggle').click();
+  await page.locator('#filter').fill('title:A Folder');
+  await expect(headers).toHaveCount(1);
+  await page.locator('#tracks th[data-sort="file"]').click();
+  await page.locator('#filter').fill('');
+  await expect(headers).toHaveCount(2);
+  expect(await headers.evaluateAll(nodes=>nodes.map(node=>node.dataset.group))).toEqual(original);
+  await expect(rows(page)).toHaveCount(3); // collapse state survived filtering and sorting
+});
