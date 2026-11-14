@@ -138,30 +138,46 @@ are recognising a release by its sleeve.
 
 ### The release card
 
-Click a card's head to expand it and load its tracklist. From there:
+Click a card's head to expand its tracklist. The labelled **Import** action
+at the bottom-right of its compact header stages the selected files in displayed order, paired
+with checked source tracks from top to bottom. Unchecked source tracks consume
+no file slot. Folder positions remain fixed when sorting tracks within folders.
+The title leads, the artist sits below it, and one muted line identifies the
+year, country and medium. Track counts appear with the expanded tracklist.
 
-- **Auto-match** reorders the selected files to line up with the tracklist,
-  matching on content, with ISRC treated as an exact match and called out
-  separately in the result ("3 exact by ISRC"). Files that don't match confidently
-  keep their place rather than shifting the matched ones — packing matches
-  densely would turn one unmatched file into an off-by-one that mis-tags
-  everything after it.
-- **Embed cover** stages this release's cover onto the selected files.
-- **The artwork button** saves the release's images to disk: as `folder.jpg` next
-  to the tracks, or all images at once when the release has several.
-- **Import** maps the tracklist onto the selected files and stages the result.
+Click the artwork to browse the release images. Its badge shows the image count.
+Right-click it to **Embed in selected tracks**, save the cover as `folder.jpg`,
+or save every release image. This works while the card is collapsed and leaves it
+collapsed. Embedding alone also stages a preview.
 
-Individual tracks in the tracklist can be ticked and unticked, so importing a
-compilation where you only want half the tracks doesn't require deselecting
-files.
+### Import fields
+
+The sliders icon inside the left edge of the search field opens a compact
+checklist. **Artwork** comes first, followed by common tags; **More fields**
+reveals the rest. **Select all** and **Clear all** include artwork. Choices stay
+saved across searches, source changes and application restarts.
+
+A checked Artwork choice replaces the main cover with the selected release image,
+preserving other embedded pictures. Uncheck it for tags-only imports. Unchecked
+tag fields keep their existing values. Preferences apply to subsequent imports;
+they do not rewrite an already staged preview.
+
+Staged lists only files and tag columns with actual changes, in their normal column
+order. Reverting the last change in a column hides it; reverting every change in a
+file removes its row. File and Artwork remain available to identify rows. Headings
+use readable Title Case, retaining abbreviations such as ID, CD and URL. Files keeps
+its own column choices. Artwork-only rows remain visible,
+with an accent marker on the image icon and a tooltip identifying an addition,
+replacement or removal. Importing identical saved tags and artwork stages nothing.
+Apply remains the write boundary, and tags plus artwork share one Undo batch.
 
 ### Label · cat#
 
 A release can list several label and catalogue-number pairs — reissues,
 co-releases, sometimes several from one label. Only one pair can be written, so
-when there is more than one the card shows a **Label · cat#** selector and you
-choose. With a single pair (or none) there is nothing to choose and no selector
-appears; import takes the first.
+when there is more than one the header footer shows a compact selector beside
+Import. A single label and catalogue number appear as quiet text in the same
+place; import takes that pair. The choice survives opening or closing the tracklist.
 
 ### Vinyl side → disc
 
@@ -194,20 +210,10 @@ holds a single disc — plain 1, so an ordinary album reads 1/1 rather than blan
 A release stating two or more discs leaves a track whose position names no disc
 alone, because there 1 would be a guess.
 
-For a disagreement you have every time rather than once, **Settings › Online
-import** lists every tag an import can write, each with a checkbox. Switch off
-the ones you curate yourself — genre is the usual one — and an import leaves
-them exactly as the file has them, instead of writing them and making you undo
-it. Everything is on by default, and a field added to the import in a later
-version arrives switched on too.
-
-Cover art is not in that list; it has its own setting on the same page,
-**Cover art**. With **If missing** (the default) an import embeds the release's
-cover only in files that carry no artwork at all, **Always** replaces the cover a
-file already has, and **Never** leaves the artwork alone. The tags and the cover
-are one change, so a single undo takes back both, and the toast after an import
-says how many files are getting the cover. To put a release's cover on files
-without importing anything, use **Embed cover** on the release card.
+The same tag permissions remain available under **Settings › Online import**.
+The inline import checklist uses those saved settings, so there is one choice per
+field. Its Artwork checkbox corresponds to **Never** or **Always**; older enabled
+“If missing” profiles migrate to the explicit main-cover replacement choice.
 
 ## FROM TEXT — a tracklist that exists only as text
 

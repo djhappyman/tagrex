@@ -1,3 +1,4 @@
+import { titleCaseTagLabel, readableTagName } from './tag-labels.js';
 import { t } from "./i18n.js";
 
 // The field catalogue (#143 split it out of app.js).
@@ -14,6 +15,7 @@ const EXTENDED_FIELDS = [
   ["track", "Track"],
   ["tracktotal", "Track Total"],
   ["disc", "Disc"],
+  ["disctotal", "Disc total"],
   ["year", "Year"],
   ["genre", "Genre"],
   ["comment", "Comment"],
@@ -35,6 +37,14 @@ const KNOWN_CUSTOM_LABELS = {
   DISCOGS_RELEASE_ID: "Discogs Release ID",
   MUSICBRAINZ_ALBUMID: "MusicBrainz Album ID",
   MUSICBRAINZ_TRACKID: "MusicBrainz Track ID",
+  BEATPORT_RELEASE_ID: "Beatport release ID",
+  BANDCAMP_ALBUM_URL: "Bandcamp album URL",
+  SOUNDEO_RELEASE_URL: "Soundeo release URL",
+  POSITION: "Track position",
+  RELEASECOUNTRY: "Release country",
+  LYRICS: "Lyrics",
+  COMPILATION: "Compilation",
+  TCMP: "Compilation",
   REPLAYGAIN_TRACK_GAIN: "ReplayGain (track)",
   REPLAYGAIN_TRACK_PEAK: "ReplayGain peak (track)",
   REPLAYGAIN_ALBUM_GAIN: "ReplayGain (album)",
@@ -75,12 +85,13 @@ const VIRTUAL_COLUMNS = [
 // editor all rename together with the interface. An unknown key answers itself,
 // which is what a raw custom frame should show.
 function fieldLabel(key) {
+  if (key.startsWith('custom:')) return titleCaseTagLabel(customLabel(key.slice(7).toUpperCase()) || readableTagName(key));
   const catalogued = t(`field.${key}`);
-  if (catalogued !== `field.${key}`) return catalogued;
+  if (catalogued !== `field.${key}`) return titleCaseTagLabel(catalogued);
   const known =
     EXTENDED_FIELDS.find(([field]) => field === key) ||
     VIRTUAL_COLUMNS.find(([field]) => field === key);
-  return known ? known[1] : key;
+  return known ? titleCaseTagLabel(known[1]) : readableTagName(key);
 }
 
 // The display name of a well-known custom frame (#474, #475), or null when the
@@ -96,4 +107,4 @@ function customLabel(name) {
 // file, #127). Not a valid absolute path, so it can't collide with a folder key.
 const DROP_LOOSE_KEY = "::loose::";
 
-export { EXTENDED_FIELDS, KNOWN_CUSTOM_LABELS, VIRTUAL_COLUMNS, DROP_LOOSE_KEY, fieldLabel, customLabel };
+export { EXTENDED_FIELDS, KNOWN_CUSTOM_LABELS, VIRTUAL_COLUMNS, DROP_LOOSE_KEY, fieldLabel, customLabel, readableTagName, titleCaseTagLabel };

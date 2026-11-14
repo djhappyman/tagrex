@@ -66,8 +66,9 @@ body #tracks td.group-cell { background:color-mix(in srgb,var(--panel) 74%,var(-
 body #tracks .group-label { font-weight:var(--fw-medium); }
 body #tracks .group-caret { color:var(--muted); }
 body #tracks .track-artwork { color:var(--muted); }
+body #tracks .track-artwork[data-cover-state='embedded'] { color:var(--accent-ink); }
 body #tracks .track-artwork, body #tracks .track-artwork .ico { width:14px; height:14px; }
-body #tracks .track-artwork[data-cover-state='missing'] { color:var(--accent-ink); opacity:.85; }
+body #tracks .track-artwork[data-cover-state='missing'] { color:var(--muted); opacity:.25; }
 body #tracks .track-artwork[data-cover-state='unknown'] { color:var(--muted); opacity:.45; }
 body #tracks :is(th,td).artwork-col { border:0; }
 /* Inspector and filter geometry live in their component owners. */
@@ -143,3 +144,18 @@ body .statusbar .diff-actionbar .ab-file { max-width:none; flex:1; }
   body .library-header #root-field { height:36px; }
   body .library-header .path-open { height:34px; }
 }
+
+/* Value-only Apply feedback keeps the table geometry and scroll position fixed. */
+body #tracks tr[data-apply-state] { outline:2px solid transparent; outline-offset:-2px; transition:outline-color 80ms ease-out; }
+body #tracks tr[data-apply-state] td { transition:background-color 90ms ease-out, color 80ms ease-out; }
+body #tracks tr[data-apply-state].applying-current { outline-color:var(--accent); }
+body #tracks tr[data-apply-state] .track-artwork { transition:color 80ms ease-out, opacity 80ms ease-out; }
+@media (prefers-reduced-motion:reduce) {
+  body #tracks tr[data-apply-state], body #tracks tr[data-apply-state] td, body #tracks tr[data-apply-state] .track-artwork { transition:none; }
+}
+
+/* Artwork changes use the existing image glyph plus an explicit change marker. */
+body #tracks .track-artwork.artwork-changing { position: relative; color: var(--accent-ink); opacity: 1; }
+body #tracks .track-artwork.artwork-changing::after { content: ''; position: absolute; top: -2px; right: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 1px var(--bg); }
+body.staged-view #tracks tbody tr.selected td:not(.dirty):not(.error):not(.sheet-range) { background: var(--bg); }
+body.staged-view #tracks tbody tr.selected:hover td:not(.dirty):not(.error):not(.sheet-range) { background: var(--row-hover); }

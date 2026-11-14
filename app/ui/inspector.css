@@ -613,8 +613,13 @@ body .mode-col .release-card:not(:last-child)::after {
   background: color-mix(in srgb, var(--text) 12%, transparent);
 }
 body .mode-col .release-header-row {
-  gap: var(--sp-2);
-  padding: var(--sp-1) 0;
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr) auto;
+  grid-template-rows: auto 28px;
+  column-gap: var(--sp-3);
+  row-gap: var(--sp-1);
+  align-items: start;
+  padding: var(--sp-2) 0;
   border-radius: var(--r-control);
   background: transparent;
 }
@@ -622,16 +627,22 @@ body .mode-col .release-header-row:hover {
   background: color-mix(in srgb, var(--text) 2.5%, transparent);
 }
 body .mode-col button.release-cover {
-  width: 72px;
-  min-width: 72px;
-  height: 72px;
-  min-height: 72px;
+  grid-column: 1;
+  grid-row: 1 / 3;
+  width: 80px;
+  min-width: 80px;
+  height: 80px;
+  min-height: 80px;
+  align-self: flex-start;
   padding: 0;
   border-radius: var(--r-media);
 }
 body .mode-col button[data-slot='button'].release-head {
+  grid-column: 2 / 4;
+  grid-row: 1;
+  align-items: start;
   height: auto;
-  min-height: 72px;
+  min-height: 0;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -641,10 +652,14 @@ body .mode-col button[data-slot='button'].release-head {
   white-space: normal;
 }
 body .mode-col .release-info {
-  gap: 2px; /* optical: three text lines share one 72px cover */
-  justify-content: center;
+  gap: 2px;
+  justify-content: start;
 }
 body .mode-col .release-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
   order: 0;
   font-size: var(--type-body-size);
   line-height: var(--lh-tight);
@@ -657,67 +672,57 @@ body .mode-col .release-artist {
   font-weight: var(--fw-regular);
   color: var(--text);
 }
-body .mode-col .release-facts {
-  order: 2;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--sp-1);
-  line-height: var(--lh-tight);
-}
 body .mode-col .release-meta {
-  order: 3;
+  order: 2;
   font-size: var(--type-meta-size);
   line-height: var(--lh-tight);
+  font-weight: var(--fw-regular);
   color: var(--muted);
 }
-body .mode-col :is(.release-facts, .rel-badge, .rb-catno, .rb-count, .tk-count) {
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-  font-family: inherit;
+body .mode-col .release-label {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  align-self: center;
   font-size: var(--type-meta-size);
   font-weight: var(--fw-regular);
+  color: var(--muted);
 }
-/* Catalogue identifiers and counts retain their independent saved face/size. */
-body .mode-col :is(.release-facts, .rel-badge) {
+body .mode-col .release-label .app-select { width: 100%; min-width: 0; max-width: 100%; }
+body .mode-col .release-label .app-select-trigger {
+  min-height: 28px; height: 28px;
+  font-size: var(--type-meta-size); font-weight: var(--fw-regular);
+}
+body .mode-col button[data-slot='button'].release-label-link {
+  display: block; width: 100%; min-width: 0; height: 28px;
+  padding: 0; border: 0; border-radius: var(--r-compact);
+  background: transparent; color: var(--muted);
+  text-align: left; font-size: var(--type-meta-size); font-weight: var(--fw-regular);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+body .mode-col .release-label-link:hover { color: var(--accent-ink); }
+body .mode-col .release-label .rb-catno { background: transparent; color: inherit; }
+body .mode-col .release-label .rb-catno, body .mode-col .release-tracklist .tk-count {
   font-family: var(--badge-font, var(--font-literal));
   font-size: var(--badge-font-size, var(--type-meta-size));
+  font-weight: var(--fw-regular);
 }
-body .mode-col :is(.release-facts, .rel-badge) :is(.rb-catno, .rb-count, .tk-count) {
-  font-family: inherit;
-  font-size: inherit;
-}
-body .mode-col .release-facts .rb-catno {
-  min-width: 0;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  cursor: pointer;
-  text-decoration: none;
-}
-body .mode-col .release-facts .rb-catno:hover {
-  color: var(--accent-ink);
-  text-decoration: underline;
-}
+body .mode-col .release-tracklist .tk-readout { display: inline-flex; gap: var(--sp-3); align-items: center; }
 body .mode-col .release-card.tracklist-loaded[aria-expanded='true'] .release-artist {
   padding-right: 0;
 }
 body .mode-col .release-card.tracklist-loaded[aria-expanded='true'] .release-title {
-  padding-right: var(--sp-5);
+  padding-right: 0;
 }
 body .mode-col button[data-slot='button'].release-import {
-  top: var(--sp-1);
-  right: 0;
-  width: var(--ctl-hit);
-  min-width: var(--ctl-hit);
-  height: var(--ctl-hit);
-  min-height: var(--ctl-hit);
-  padding: 4px;
-  border-radius: var(--r-compact);
+  grid-column: 3; grid-row: 2; justify-self: end;
+  font-size: var(--type-help-size); font-weight: var(--fw-medium);
+  position: static; z-index: auto; display: inline-flex; width: auto; min-width: 0;
+  height: 28px; min-height: 28px; padding: 4px 10px; gap: var(--sp-1);
+  border: 0; border-radius: var(--r-compact); background: var(--sel-tint); color: var(--accent-ink);
 }
+body .mode-col .release-card .release-caret { align-self: start; }
+
 body .mode-col .media-badge {
   padding: 0;
   border: 0;
@@ -1151,3 +1156,31 @@ body .mode-col .staged-edits {
 .staged-count { font-size:var(--type-help-size); color:var(--muted); }
 body button.staged-remove { flex:none; width:24px; height:24px; min-width:24px; min-height:24px; padding:5px; border:0; background:transparent; color:var(--muted); border-radius:var(--r-compact); }
 body button.staged-remove:hover { background:var(--row-hover); color:var(--text); }
+
+/* Search owns its import checklist; the popup shares the existing menu surface. */
+body .mode-col #query-box .import-fields-trigger {
+  flex: none; width: 28px; min-width: 28px; height: 28px; padding: 5px;
+  margin-left: 2px; color: var(--muted); border: 0; background: transparent;
+}
+body .mode-col #query-box .import-fields-trigger:hover,
+body .mode-col #query-box .import-fields-trigger[aria-expanded='true'] { color: var(--accent-ink); background: var(--row-hover); }
+body .import-fields-popover {
+  width: 256px; max-width: calc(100vw - 16px); max-height: min(540px, var(--bits-popover-content-available-height, calc(100dvh - 16px)));
+  display: flex; flex-direction: column; gap: 0; padding: 7px; border: 1px solid var(--border);
+  border-radius: var(--r-menu); background: var(--bg); color: var(--text); box-shadow: 0 12px 32px rgb(0 0 0 / .22);
+  animation: controller-enter 150ms cubic-bezier(.16,1,.3,1) both;
+}
+body .import-fields-heading { display: flex; flex-direction: column; gap: var(--sp-1); padding: var(--sp-2); }
+body .import-fields-heading strong { font-size: var(--type-body-size); font-weight: var(--fw-strong); }
+body .import-fields-heading span, body .import-field-choice small { font-size: var(--type-meta-size); color: var(--muted); }
+body .import-fields-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+body .import-field-choice { display: flex; align-items: center; gap: var(--sp-2); min-height: 32px; padding: 0 var(--sp-2); border-radius: var(--r-menu-item); }
+body .import-field-choice:hover { background: var(--row-hover); }
+body .import-field-choice label { display: flex; flex: 1; flex-direction: column; justify-content: center; min-height: 32px; font-size: var(--type-body-size); cursor: pointer; }
+body .import-field-choice.artwork-choice { padding-block: var(--sp-1); margin-bottom: var(--sp-1); background: var(--panel); }
+body .import-field-choice [data-slot='checkbox'] { flex: none; width: 16px; height: 16px; padding: 0; }
+body .import-fields-more { width: 100%; justify-content: space-between; font-size: var(--type-help-size); color: var(--muted); }
+body .import-fields-footer { display: flex; justify-content: space-between; padding-top: var(--sp-1); }
+body .import-fields-footer button { font-size: var(--type-help-size); color: var(--muted); }
+body .import-fields-error { font-size: var(--type-help-size); color: var(--danger); padding: var(--sp-2); }
+@media(prefers-reduced-motion:reduce) { body .import-fields-popover { animation: none; } }

@@ -162,15 +162,35 @@ test('reference popups follow a scrolling owner, keep their own list open, and c
   await page.locator('#scrolling-popup-owner').evaluate(node=>{node.scrollTop=450;});await expect(menu).toBeHidden();
 });
 
-test('release artwork actions anchor to their button and support keyboard return without saving',async({page})=>{
+test('release artwork actions anchor to their artwork and support keyboard return without saving',async({page})=>{
   await page.emulateMedia({reducedMotion:'reduce'});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.locator('#discogs-token').evaluate(n=>{n.value='fixture';});await page.locator('#discogs-query').fill('Helter Skelter');await page.locator('#discogs-search').click();
   const card=page.locator('.release-card').first();await expect(card).toBeVisible();await card.locator('.release-head').click();
-  const trigger=card.locator('[data-act="save-menu"]');await expect(trigger).toBeVisible();await trigger.click();const menu=card.locator('.tk-save-menu');await expect(menu).toBeVisible();
+  const trigger=card.locator('.release-cover');await expect(trigger).toBeVisible();await trigger.focus();await page.keyboard.press('Shift+F10');const menu=card.locator('.tk-save-menu');await expect(menu).toBeVisible();
   const owner=await trigger.boundingBox(),box=await menu.boundingBox();const viewport=page.viewportSize();expect(Math.abs(box.x-Math.max(8,Math.min(owner.x,viewport.width-box.width-8)))).toBeLessThan(2);expect(Math.min(Math.abs(box.y-owner.y-owner.height-4),Math.abs(box.y+box.height-owner.y+4))).toBeLessThan(2);
   const items=menu.locator('button');await expect(items.first()).toHaveCSS('justify-content','flex-start');await expect(items.first()).toHaveCSS('text-align','start');await expect(items.first()).toHaveCSS('min-height','32px');await expect(items.first()).toBeFocused();await page.keyboard.press('ArrowDown');await expect(items.nth(1)).toBeFocused();await page.keyboard.press('Home');await expect(items.first()).toBeFocused();
-  await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(trigger).toBeFocused();await expect(trigger).toHaveAttribute('aria-expanded','false');expect(errors).toEqual([]);
+  await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(trigger).toBeFocused();expect(errors).toEqual([]);
+});
+
+test('artwork popups draw above Import and animated card stacking contexts',async({page},testInfo)=>{
+  await page.locator('#discogs-token').evaluate(node=>node.value='fixture');
+  await page.locator('#discogs-query').fill('Helter Skelter');await page.locator('#discogs-search').click();
+  const card=page.locator('.release-card').first();await card.locator('.release-head').click();
+  await expect(card.locator('.tk-head')).toBeVisible();
+  const button=await card.locator('.release-import').boundingBox();
+  await card.locator('.release-cover').dispatchEvent('contextmenu',{bubbles:true,clientX:button.x-12,clientY:button.y-16});
+  const menu=card.locator('.tk-save-menu');await expect(menu).toBeVisible();
+  await expect(menu).toHaveAttribute('popover','manual');
+  const box=await menu.boundingBox();
+  const x=box.x+box.width/2,y=box.y+box.height/2;
+  // Put an ordinary control directly beneath the popup, regardless of the
+  // release card's current layout, and give it an exaggerated stacking level.
+  await card.locator('.release-import').evaluate((node,{x,y})=>{Object.assign(node.style,{position:'fixed',left:(x-15)+'px',top:(y-15)+'px',width:'30px',height:'30px',zIndex:'999999'});},{x,y});
+  expect(await menu.evaluate((node,{x,y})=>node.matches(':popover-open')&&node.contains(document.elementFromPoint(x,y)),{x,y})).toBe(true);
+  await page.screenshot({path:testInfo.outputPath('artwork-popup-layer.png'),animations:'disabled'});
+  await page.keyboard.press('Escape');await expect(menu).toBeHidden();
+  expect(await menu.evaluate(node=>node.matches(':popover-open'))).toBe(false);
 });
 
 test('Escape from an input right-click menu restores its field and keeps the draft',async({page})=>{

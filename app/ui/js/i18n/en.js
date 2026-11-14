@@ -13,6 +13,20 @@
 // `{name}` in a value is filled from the vars passed to `t`/`tn`; `{n}` is the
 // count `tn` was given.
 export const en = {
+
+  "online.importFields": "Import fields",
+  "online.importAction": "Import",
+  "online.importArtwork": "Artwork",
+  "online.importFieldsRemembered": "Saved for future imports",
+  "online.importArtworkHint": "Replace the main cover",
+  "online.importFieldsMore": "More fields",
+  "online.importFieldsAll": "Select all",
+  "online.importFieldsClear": "Clear all",
+  "online.importFieldsLoading": "Loading fields…",
+  "online.importFieldsError": "Could not save or load import choices. Try again.",
+  "table.artwork.added": "Artwork will be added",
+  "table.artwork.replaced": "Artwork will be replaced",
+  "table.artwork.removed": "Artwork will be removed",
   "table.artwork.embedded": "Embedded artwork",
   "table.artwork.missing": "No embedded artwork",
   "table.artwork.unknown": "Artwork status unavailable",
@@ -195,6 +209,7 @@ export const en = {
   "artwork.use": "Use",
   "artwork.chosen": "Artwork {number} selected",
   "online.embed": "Embed",
+  "online.embedSelected": "Embed in selected tracks",
   "online.embedTitle": "Embeds this release's cover in the selected files.",
   "online.importTitle": "Imports this release into the selected files.",
   "online.openRelease": "Open the release page",

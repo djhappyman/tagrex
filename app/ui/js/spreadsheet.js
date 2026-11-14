@@ -263,7 +263,7 @@ export function initSpreadsheet(options) {
         };
         for (const [state, on] of Object.entries(states)) {
           if (painted[state] !== on) {
-            classState(cell, state === 'active' ? 'sheet-active' : `sheet-range-${state}`);
+            classState(cell, state === 'active' ? 'sheet-active' : `sheet-range-${state}`, on);
             painted[state] = on;
           }
         }

@@ -1023,13 +1023,19 @@ async fn media_session_update(app: tauri::AppHandle, now: media_session::NowPlay
 }
 
 /// The callback that turns the executor's progress into events (#437, #448),
-/// throttled so a fast run does not flood the window.
+/// Step-start/preflight events are throttled. Every successful write must reach
+/// the window so value-only row updates cannot skip files in a fast batch.
 fn progress_reporter(
     app_handle: tauri::AppHandle,
+    write_after: usize,
 ) -> impl FnMut(&tagrex_core::plan::ApplyProgress) {
     let mut last = std::time::Instant::now() - APPLY_PROGRESS_INTERVAL;
     move |progress| {
-        if progress.done != progress.total && last.elapsed() < APPLY_PROGRESS_INTERVAL {
+        if progress.completed.is_none()
+            && progress.done < write_after
+            && progress.done != progress.total
+            && last.elapsed() < APPLY_PROGRESS_INTERVAL
+        {
             return;
         }
         last = std::time::Instant::now();
@@ -1040,6 +1046,10 @@ fn progress_reporter(
                 done: progress.done,
                 total: progress.total,
                 path: progress.path.to_string_lossy().into_owned(),
+                completed: progress.completed.map(|kind| match kind {
+                    tagrex_core::plan::ApplyStep::Tags => "tags",
+                    tagrex_core::plan::ApplyStep::Transfer => "transfer",
+                }),
             },
         );
     }
@@ -1056,6 +1066,7 @@ struct ApplyProgressDto {
     done: usize,
     total: usize,
     path: String,
+    completed: Option<&'static str>,
 }
 
 // Both session lock waiting and Apply work stay off the event/runtime threads.
@@ -1072,7 +1083,7 @@ async fn apply_plan(
     control.store(false, Ordering::SeqCst);
     SESSION_QUEUE
         .run(move || {
-            let mut report = progress_reporter(app_handle);
+            let mut report = progress_reporter(app_handle, plan.changes.len());
             with_app_mut(&state, |app| {
                 app.apply_with(&plan, &mut report, &control)
                     .map_err(ErrorDto::from)
@@ -1161,6 +1172,7 @@ async fn detect_bpm(
                     done,
                     total,
                     path: path.to_string(),
+                    completed: None,
                 },
             );
         };
@@ -1228,7 +1240,7 @@ async fn undo(
                 Some("overwrite") => UndoMode::Overwrite,
                 _ => UndoMode::Strict,
             };
-            let mut report = progress_reporter(app_handle);
+            let mut report = progress_reporter(app_handle, usize::MAX);
             with_app_mut(&state, |app| {
                 app.undo_with_mode(batch_id, mode, &mut report)
                     .map_err(ErrorDto::from)

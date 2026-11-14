@@ -13,6 +13,21 @@
 // French selects between `one` (0 and 1) and `other` for a count — 1 piste,
 // 2 pistes. (Its `many` form, for round millions, falls back to `other`.)
 export const fr = {
+
+  "online.importFields": "Champs à importer",
+  "online.importAction": "Importer",
+  "online.importArtwork": "Pochette",
+  "online.importFieldsRemembered": "Mémorisé pour les prochains imports",
+  "online.importArtworkHint": "Remplacer la pochette principale",
+  "online.importFieldsMore": "Autres champs",
+  "online.importFieldsAll": "Tout sélectionner",
+  "online.importFieldsClear": "Tout désélectionner",
+  "online.importFieldsLoading": "Chargement des champs…",
+  "online.importFieldsError": "Impossible de charger ou enregistrer les choix. Réessayez.",
+  "table.artwork.added": "La pochette sera ajoutée",
+  "table.artwork.replaced": "La pochette sera remplacée",
+  "table.artwork.removed": "La pochette sera supprimée",
+
   // ---- units that appear inside other messages ----
   "unit.track": { one: "{n} piste", other: "{n} pistes" },
   "unit.file": { one: "{n} fichier", other: "{n} fichiers" },
@@ -169,6 +184,7 @@ export const fr = {
   "online.matchByLength": "Apparier par durée",
   "online.matchByLengthTitle": "Réordonne les fichiers sélectionnés d'après les durées de cette parution, sans tenir compte des noms",
   "online.embed": "Intégrer la pochette",
+  "online.embedSelected": "Intégrer aux pistes sélectionnées",
   "online.embedTitle": "Intègre la pochette de cette parution dans les fichiers sélectionnés",
   "online.importTitle": "Importer cette parution dans les fichiers sélectionnés",
   "online.openRelease": "Ouvrir la page de la parution",

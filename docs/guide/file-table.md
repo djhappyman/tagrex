@@ -4,6 +4,12 @@ Every mode acts on the table, so how well you can carve a selection out of it
 decides how quickly anything else goes. This page is about shaping the view and
 picking rows; what the modes then *do* with them is on their own pages.
 
+**Staged** shows only files with pending changes and only tag columns changed in
+at least one of those files. Columns retain their normal order, with File and
+Artwork available for identification. A column disappears when its last change
+is reverted; an active cell stays attached until editing finishes. **Files** keeps
+its own column layout.
+
 ## Selecting rows
 
 | Gesture | Result |
@@ -50,6 +56,10 @@ the whole group.
 
 Click a column header to sort by it; click again to reverse. Sorting is a view,
 not an operation — it changes the order rows are listed in, never the files.
+With Folder grouping or dropped-folder grouping, folders keep their positions:
+only tracks inside each folder sort or reverse. New folders append to the current
+session's folder sequence. Numeric filenames sort naturally (`2, 9, 10`).
+Filtering or collapsing a folder does not change that sequence.
 
 That order does matter for one thing: operations that walk the selection "in
 table order", such as track numbering in [GENERATOR](generator.md), take the

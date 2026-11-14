@@ -9,6 +9,21 @@
 //
 // German selects between `one` and `other` for a count — 1 Track, 2 Tracks.
 export const de = {
+
+  "online.importFields": "Importfelder",
+  "online.importAction": "Importieren",
+  "online.importArtwork": "Cover",
+  "online.importFieldsRemembered": "Für künftige Importe gespeichert",
+  "online.importArtworkHint": "Hauptcover ersetzen",
+  "online.importFieldsMore": "Weitere Felder",
+  "online.importFieldsAll": "Alle auswählen",
+  "online.importFieldsClear": "Alle abwählen",
+  "online.importFieldsLoading": "Felder werden geladen…",
+  "online.importFieldsError": "Importauswahl konnte nicht geladen oder gespeichert werden. Bitte erneut versuchen.",
+  "table.artwork.added": "Cover wird hinzugefügt",
+  "table.artwork.replaced": "Cover wird ersetzt",
+  "table.artwork.removed": "Cover wird entfernt",
+
   // ---- units that appear inside other messages ----
   "unit.track": { one: "{n} Track", other: "{n} Tracks" },
   "unit.file": { one: "{n} Datei", other: "{n} Dateien" },
@@ -165,6 +180,7 @@ export const de = {
   "online.matchByLength": "Nach Länge zuordnen",
   "online.matchByLengthTitle": "Sortiert die gewählten Dateien nach den Längen dieses Releases, ohne die Namen zu beachten",
   "online.embed": "Cover einbetten",
+  "online.embedSelected": "In ausgewählte Tracks einbetten",
   "online.embedTitle": "Bettet das Cover dieses Releases in die gewählten Dateien ein",
   "online.importTitle": "Dieses Release in die gewählten Dateien importieren",
   "online.openRelease": "Seite des Releases öffnen",
