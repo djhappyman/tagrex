@@ -4959,6 +4959,7 @@ dependencies = [
  "rustix",
  "serde",
  "serde_json",
+ "sha2",
  "tagrex-core",
  "tagrex-providers-bandcamp",
  "tagrex-providers-beatport",

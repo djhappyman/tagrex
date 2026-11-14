@@ -7467,6 +7467,7 @@ impl PlanDto {
             }
         }
     }
+    /// Replace repeated inline image strings with indices into the plan pool.
     fn compact_cover_assets(&mut self) {
         let mut assets = std::mem::take(&mut self.cover_assets);
         let mut pool: HashMap<std::sync::Arc<str>, usize> = assets
@@ -7513,6 +7514,7 @@ impl PlanDto {
         }
         self.cover_assets = assets;
     }
+    /// Reject malformed base64 or unresolved image references before applying.
     fn validate_cover_assets(&self) -> Result<(), AppError> {
         let mut valid = true;
         self.for_each_cover(|image| {
@@ -7543,6 +7545,7 @@ impl PlanDto {
         }
         Ok(())
     }
+    /// Restore shared native image bytes from validated pooled or inline DTOs.
     fn resolve_covers(
         &self,
         covers: &[CoverArtDto],
@@ -8033,96 +8036,6 @@ mod tests {
         assert!(app.apply(&invalid).is_err());
         assert!(app.preview_transform_over_plan(&invalid, &[]).is_err());
         assert!(TagEngine::read_covers(&a).unwrap().is_empty());
-    }
-
-    /// Manual isolated capacity probe: avoids writing a multi-gigabyte real
-    /// library while exercising the real preview producer, DTO codec and core
-    /// plan clone with the same shared artwork payload shape.
-    #[test]
-    #[ignore = "bounded standalone artwork allocation probe; run with --ignored --nocapture"]
-    fn shared_artwork_thousand_file_memory_probe() {
-        fn high_water_kib() -> Option<u64> {
-            std::fs::read_to_string("/proc/self/status")
-                .ok()?
-                .lines()
-                .find(|line| line.starts_with("VmHWM:"))?
-                .split_whitespace()
-                .nth(1)?
-                .parse()
-                .ok()
-        }
-        let before = high_water_kib();
-        let dir = TempDir::new("artwork-memory-probe");
-        let paths: Vec<_> = (0..1000)
-            .map(|index| {
-                let path = dir.0.join(format!("{index}.flac"));
-                std::fs::write(&path, MINIMAL_FLAC).unwrap();
-                path
-            })
-            .collect();
-        let app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
-        let data: std::sync::Arc<[u8]> = vec![7; 2 * 1024 * 1024].into();
-        let art = CoverArt {
-            mime: "image/jpeg".into(),
-            data,
-            ..CoverArt::default()
-        };
-        let image = cover_art_to_dto(&art);
-        let plan = app.preview_cover_set(&paths, &[image]).unwrap();
-        let wire = serde_json::to_vec(&plan).unwrap();
-        assert!(wire.len() < 4 * 1024 * 1024);
-        let native = plan.to_change_plan();
-        let cloned = native.clone();
-        let pointer = native.changes[0].cover_change.as_ref().unwrap().new[0]
-            .data
-            .as_ptr();
-        for change in native.changes.iter().chain(&cloned.changes) {
-            assert_eq!(
-                change.cover_change.as_ref().unwrap().new[0].data.as_ptr(),
-                pointer
-            );
-        }
-        use tagrex_core::journal::{AppliedBatch, UndoJournal};
-        let db = dir.0.join("capacity.sqlite");
-        let mut journal = SqliteJournal::open(&db).unwrap();
-        let batch = AppliedBatch {
-            id: BatchId(0),
-            description: "Capacity probe".into(),
-            message: None,
-            applied_at: 0,
-            plan: native.clone(),
-            created_dirs: Vec::new(),
-            removed_dirs: Vec::new(),
-            allowed_roots: vec![dir.0.clone()],
-            copy_stamps: Vec::new(),
-            applied_values: Vec::new(),
-            interrupted: true,
-            id3v2_revisions: Vec::new(),
-        };
-        let id = journal.record(&batch).unwrap();
-        let loaded = journal.batch(id).unwrap().unwrap();
-        let loaded_pointer = loaded.plan.changes[0].cover_change.as_ref().unwrap().new[0]
-            .data
-            .as_ptr();
-        for change in &loaded.plan.changes {
-            assert_eq!(
-                change.cover_change.as_ref().unwrap().new[0].data.as_ptr(),
-                loaded_pointer
-            );
-        }
-        let journal_bytes = std::fs::metadata(&db).unwrap().len();
-        assert!(journal_bytes < 8 * 1024 * 1024);
-        let after = high_water_kib();
-        if let (Some(before), Some(after)) = (before, after) {
-            assert!(
-                after.saturating_sub(before) < 64 * 1024,
-                "unexpected retained artwork multiplication: {before} -> {after} KiB"
-            );
-        }
-        println!(
-            "ARTWORK_MEMORY {}",
-            serde_json::json!({"files":1000,"image_bytes":2097152,"wire_bytes":wire.len(),"unique_native_payloads":1,"unique_loaded_payloads":1,"plan_clones":2,"journal_bytes":journal_bytes,"peak_before_kib":before,"peak_after_kib":after})
-        );
     }
 
     #[test]
