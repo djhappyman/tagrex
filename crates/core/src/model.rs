@@ -1038,13 +1038,17 @@ impl TrackRead {
     /// The existing native field for the compilation flag. The UI edits this
     /// through the ordinary preview/Apply path, without guessing tag names.
     pub fn compilation_field(&self) -> Option<TagField> {
+        let primary = self.file.format.primary_tag_type();
+        // Writes can add the primary block when the read block cannot hold the
+        // flag (for example ID3v1-only MP3, RIFF INFO WAV or text-only AIFF).
+        // A capable read block still wins, including Vorbis tags in an MP3.
         let kind = self
             .blocks
             .iter()
             .find(|block| block.read_from)
-            .map_or(self.file.format.primary_tag_type(), |block| {
-                block.kind.to_tag_type()
-            });
+            .map(|block| block.kind.to_tag_type())
+            .filter(|kind| ItemKey::FlagCompilation.map_key(*kind).is_some())
+            .unwrap_or(primary);
         ItemKey::FlagCompilation.map_key(kind)?;
         Some(item_key_to_tag_field(ItemKey::FlagCompilation, kind))
     }
