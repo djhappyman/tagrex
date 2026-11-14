@@ -4729,6 +4729,8 @@ impl App {
         Ok(self.library_root.join(name))
     }
 
+    /// Stage and replace one export beneath the library root through the
+    /// confined output publisher. Separate calls are separate transactions.
     fn write_output(&self, target: &Path, bytes: &[u8]) -> Result<(), AppError> {
         output::write_batch(
             &self.library_root,
