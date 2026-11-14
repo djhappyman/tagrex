@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dependency update proposals no longer offer a new major version of `zbus` on its own: it stays on the major version the single-instance plugin builds, so the Linux build carries one copy of it ([#759](https://github.com/tagrex/tagrex/issues/759)).
 - On a FAT or exFAT volume such as a USB stick, the hidden `._` companion files macOS writes next to every file are no longer listed as extra, unreadable tracks ([#755](https://github.com/tagrex/tagrex/issues/755)).
 - The Linux build keeps moving files to the Trash with the 5.3 release of the trash library, which made its Linux backend a feature of its own; without it the build failed ([#760](https://github.com/tagrex/tagrex/issues/760)).
+- An Ogg file holding FLAC instead of Vorbis is listed as an unsupported format and never written. It used to be taken for AAC: its tags did not show, and a tag edit put an ID3v2 tag in front of the Ogg stream. A file already damaged that way is refused too ([#762](https://github.com/tagrex/tagrex/issues/762)).
 
 ## [1.5.0] - 2026-11-13
 
