@@ -5170,6 +5170,8 @@ impl App {
         Ok(self.library_root.join(name))
     }
 
+    /// Stage and replace one export beneath the library root through the
+    /// confined output publisher. Separate calls are separate transactions.
     fn write_output(&self, target: &Path, bytes: &[u8]) -> Result<(), AppError> {
         output::write_batch(
             &self.library_root,
@@ -14103,6 +14105,44 @@ mod tests {
 
         let plan = app.preview_rename("%album% - %title%", &[track]).unwrap();
         assert!(plan.changes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confined_exports_never_follow_existing_or_dangling_links() {
+        let dir = TempDir::new("confined-exports");
+        let library = dir.0.join("library");
+        std::fs::create_dir(&library).unwrap();
+        let outside = dir.0.join("outside.txt");
+        std::fs::write(&outside, b"original").unwrap();
+        let app = App::open(&library, &dir.0.join("journal.sqlite")).unwrap();
+        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
+        assert!(app.export_playlist(&[], "list.m3u").is_err());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"original");
+        std::fs::remove_file(library.join("list.m3u")).unwrap();
+        std::fs::remove_file(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
+        assert!(app.export_playlist(&[], "list.m3u").is_err());
+        assert!(!outside.exists());
+    }
+
+    #[test]
+    fn fetched_image_batch_refuses_special_targets_without_partial_outputs() {
+        let dir = TempDir::new("images-atomic");
+        let app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
+        std::fs::write(dir.0.join("folder.jpg"), b"original").unwrap();
+        std::fs::create_dir(dir.0.join("cover.jpg")).unwrap();
+        let image = || FetchedImage {
+            mime: "image/jpeg".into(),
+            data: vec![1, 2, 3],
+        };
+        assert!(app
+            .save_fetched_release_images(&dir.0.join("track.flac"), &[image(), image()], true)
+            .is_err());
+        assert_eq!(
+            std::fs::read(dir.0.join("folder.jpg")).unwrap(),
+            b"original"
+        );
     }
 
     #[test]
