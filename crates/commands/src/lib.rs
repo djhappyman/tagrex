@@ -72,6 +72,9 @@ pub struct TrackDto {
     /// that genuinely has no tags at all — which is itself worth seeing.
     #[serde(default)]
     pub tag_blocks: Vec<TagBlockDto>,
+    /// Native compilation-flag storage key, when supported by the read tag block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compilation_field: Option<String>,
     /// Whether any tag block carries a picture (#447), from the same probe. Only
     /// a file that was read says `false`; one whose cover is not known (an
     /// unreadable file, a conversion from tags alone) says `true`, so it is never
@@ -125,6 +128,7 @@ impl TrackDto {
             unreadable: true,
             duration_secs: None,
             tag_blocks: Vec::new(),
+            compilation_field: None,
             has_cover: true,
         }
     }
@@ -2350,6 +2354,7 @@ impl App {
             Ok(read) => TrackDto {
                 duration_secs: Some(read.props.duration_secs),
                 tag_blocks: read.blocks.iter().map(TagBlockDto::from).collect(),
+                compilation_field: read.compilation_field().map(|field| field.to_storage_key()),
                 has_cover: read.has_cover,
                 ..TrackDto::from(read.file)
             },
@@ -6920,6 +6925,7 @@ impl From<tagrex_core::model::TrackFile> for TrackDto {
             // nor which blocks the file carries.
             duration_secs: None,
             tag_blocks: Vec::new(),
+            compilation_field: None,
             has_cover: true,
         }
     }
@@ -8456,6 +8462,22 @@ mod tests {
         );
         // And the collapsed pair really is one chain: upper then title = title.
         assert_eq!(runs[0].1.apply("as 5606"), "As 5606");
+    }
+
+    #[test]
+    fn cached_rows_keep_the_native_compilation_field() {
+        let dir = TempDir::new("compilation-metadata-cache");
+        dir.tagged_flac("track.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        for _ in 0..2 {
+            let rows = app.list_tracks();
+            assert_eq!(rows.len(), 1);
+            assert!(!rows[0].unreadable);
+            assert_eq!(
+                rows[0].compilation_field.as_deref(),
+                Some("custom:COMPILATION")
+            );
+        }
     }
 
     #[test]
