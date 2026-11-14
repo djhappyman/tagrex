@@ -34,19 +34,19 @@
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: 0 12px 32px color-mix(in srgb, var(--text) 15%, transparent);
+  border-radius: var(--r-menu);
+  box-shadow: 0 12px 32px rgb(0 0 0 / .22);
   width: 100%;
   max-width: calc(100vw - 16px);
   max-height: inherit;
-  padding: 6px;
+  padding: 7px; /* border1 + padding7 = menu contour inset8 */
   gap: 0;
   transform-origin: top center;
   --tw-ring-shadow: 0 0 transparent;
 }
 .controller-popover-body { display: contents; }
 .controller-context-content { min-width: 180px; }
-.controller-context-content .ctx-item { border-radius: 10px; min-height: 32px; }
+.controller-context-content .ctx-item { border-radius: var(--r-menu-item); min-height: 32px; }
 .controller-context-content [data-highlighted] { background: var(--panel-hover, var(--panel)); }
 .controller-context-content [role='separator'].ctx-sep { border: 0; height: 6px; margin: 0; background: none; }
 .controller-dialog-content[data-state='open'],
@@ -73,11 +73,11 @@
 .controller-tooltip-content {
   background: var(--text);
   color: var(--bg);
-  border-radius: 10px;
-  padding: 6px 10px;
+  border-radius: var(--r-control);
+  padding: var(--sp-2) var(--sp-3);
   max-width: min(320px, calc(100vw - 16px));
   font: inherit;
-  font-size: var(--text-xs);
+  font-size: var(--type-help-size);
 }
 .controller-tooltip-content .tip-kbd { color: inherit; opacity: .65; }
 .controller-toast-home { display: none; }
@@ -88,15 +88,58 @@
   z-index: 150;
 }
 .controller-toast-host .toast {
+  font-family: var(--font-ui);
+  font-size: var(--type-body-size);
   position: relative;
   inset: auto;
   transform: none;
   width: 100%;
   max-width: none;
-  border-radius: 16px;
+  border-radius: var(--r-menu);
   box-sizing: border-box;
 }
 .controller-toast-host .toast[data-surface-state='closed'] { display: flex !important; }
 /* Presence belongs to the shell; avoid animating the old root a second time. */
 [data-controller-surface].controller-popup-root,
 .settings-overlay[data-controller-surface] .settings-sheet { animation: none; }
+
+/* Bounded reference/preset popovers: every real wrapper carries the same
+   explicit placement budget. Only the list scrolls; focus and the footer remain
+   outside its scrollport. Do not clip the entire menu to hide overflow. */
+.ph-menu.controller-popup-root {
+  --controller-available-height: calc(100dvh - 16px);
+  padding: 0; border: 0; background: transparent; box-shadow: none;
+}
+.ph-menu.controller-popup-root [data-bits-floating-content-wrapper] {
+  max-height: var(--controller-available-height);
+  min-height: 0;
+}
+.ph-menu .controller-popover-content {
+  display: flex; flex-direction: column; box-sizing: border-box;
+  min-height: 0; max-height: var(--controller-available-height);
+}
+.ph-menu .controller-popover-body {
+  display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0;
+}
+.ph-menu .ph-head, .ph-menu .ph-foot { flex: 0 0 auto; }
+.ph-menu .ph-head { padding-bottom: var(--sp-2); }
+.ph-menu .ph-body {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto;
+  overscroll-behavior: contain; scroll-padding-block: var(--sp-1);
+  padding: var(--sp-1); margin-inline: calc(-1 * var(--sp-1));
+}
+.ph-menu .ph-foot {
+  flex-wrap: wrap; gap: var(--sp-1) var(--sp-2);
+  padding: var(--sp-2) var(--sp-2) 0; font-size: var(--type-help-size); line-height: 1.5;
+}
+.ph-menu .ph-foot > span { flex: 1 1 16ch; }
+/* Menu rows are selection/insertion targets, independently of action pills. */
+body button:is(.ph-row, .preset-row, .sg-item),
+body .col-menu button.col-menu-row,
+body button[data-slot='button'].ctx-item, .ph-row-static, .preset-row {
+  border-radius: var(--r-menu-item); font-size: var(--type-body-size);
+}
+body button.ph-row { height: auto; min-height: var(--ctl-h-sm); white-space: normal; text-align: left; }
+.controller-popover-content, .controller-context-content { font-size: var(--type-body-size); line-height: 1.5; }
+
+.ph-desc { overflow-wrap: anywhere; }

@@ -14,6 +14,9 @@
 
     <div id="toast" class="toast" hidden role="status"><div class="toast-body"><p id="toast-title" class="toast-title"></p><ul id="toast-parts" class="toast-parts" hidden></ul></div><Button variant="ghost" size="icon-sm" id="toast-close" class="icon toast-close" type="button" hidden data-i18n-title="action.close" title="Close" data-i18n-aria-label="action.close" aria-label="Close"><svg class="ico"><use href="#i-close"/></svg></Button></div>
 
+    <!-- Viewport-positioned query choices stay outside inspector containment. -->
+    <div id="query-preset-menu" class="col-menu" hidden></div>
+
     <ControllerTooltip />
     <Toaster position="bottom-center" visibleToasts={1} offset="var(--controller-toast-bottom, 20px)" mobileOffset="16px" class="controller-toaster" />
 

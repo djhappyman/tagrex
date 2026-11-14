@@ -385,22 +385,22 @@
       <Tabs.List class="subtabs" data-i18n-aria-label="tagger.mode" aria-label="Tagging mode">
         <Tabs.Trigger value="online">
 {#snippet child({ props })}
-<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab active" data-subtab="online" type="button" data-i18n="tagger.online">ONLINE</Button>
+<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab active" data-subtab="online" type="button" data-i18n="tagger.online">Online</Button>
 {/snippet}
 </Tabs.Trigger>
         <Tabs.Trigger value="editor">
 {#snippet child({ props })}
-<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab" data-subtab="editor" type="button" data-i18n="tagger.editor">EDITOR</Button>
+<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab" data-subtab="editor" type="button" data-i18n="tagger.editor">Editor</Button>
 {/snippet}
 </Tabs.Trigger>
         <Tabs.Trigger value="filename">
 {#snippet child({ props })}
-<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab" data-subtab="filename" type="button" data-i18n="tagger.fromName">FROM NAME</Button>
+<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab" data-subtab="filename" type="button" data-i18n="tagger.fromName">From name</Button>
 {/snippet}
 </Tabs.Trigger>
         <Tabs.Trigger value="fromtext">
 {#snippet child({ props })}
-<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab" data-subtab="fromtext" type="button" data-i18n="tagger.fromText">FROM TEXT</Button>
+<Button {...props} data-slot="button" variant="ghost" size="sm" class="subtab" data-subtab="fromtext" type="button" data-i18n="tagger.fromText">From text</Button>
 {/snippet}
 </Tabs.Trigger>
       </Tabs.List>
@@ -439,7 +439,6 @@
                   <svg class="glyph glyph-stop" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor"/></svg>
                 </Button>
               </div>
-              <div id="query-preset-menu" class="col-menu" hidden></div>
             </div>
           </div>
           <div class="release-toolbar" id="release-toolbar" hidden>
@@ -537,14 +536,16 @@
               </div>
             </div>
           </div>
-          <div class="from-text-head">
-            <label for="from-text-lines" data-i18n="inspector.trackList">Track list</label>
-            <Button variant="ghost" size="sm" id="from-text-load" type="button" data-i18n="fromText.load">Open file</Button>
-          </div>
-          <Textarea id="from-text-lines" class="from-text-lines" spellcheck="false" wrap="off" data-i18n-placeholder="fromText.placeholder" placeholder="Paste a tracklist, one line per track" />
-          <div class="from-text-meta">
-            <span id="from-text-count" class="muted" role="status"></span>
-            <Button variant="ghost" size="sm" id="from-text-suggest" type="button" data-i18n="fromText.suggest" data-i18n-title="fromText.suggestTitle" title="Builds a pattern from the list layout.">Detect pattern</Button>
+          <div class="from-text-input">
+            <div class="from-text-head">
+              <label for="from-text-lines" data-i18n="inspector.trackList">Track list</label>
+              <Button variant="ghost" size="sm" id="from-text-load" type="button" data-i18n="fromText.load">Open file</Button>
+            </div>
+            <Textarea id="from-text-lines" class="from-text-lines" spellcheck="false" wrap="off" data-i18n-placeholder="fromText.placeholder" placeholder="Paste a tracklist, one line per track" />
+            <div class="from-text-meta">
+              <span id="from-text-count" class="muted" role="status"></span>
+              <Button variant="ghost" size="sm" id="from-text-suggest" type="button" data-i18n="fromText.suggest" data-i18n-title="fromText.suggestTitle" title="Builds a pattern from the list layout.">Detect pattern</Button>
+            </div>
           </div>
           <div id="from-text-probe" class="probe"></div>
 

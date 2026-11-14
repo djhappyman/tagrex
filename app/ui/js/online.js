@@ -2079,6 +2079,12 @@ document.addEventListener("click", (e) => {
   });
 });
 
+// A family can change width without changing row height. Re-measure only the
+// expanded release cards after the interface face changes/finishes loading.
+document.addEventListener("tagrex:interfacefont", () => {
+  for (const card of releaseList().querySelectorAll('.release-card[aria-expanded="true"]')) fixTrackColumnWidth(card);
+});
+
 // A language switch: the cards and their open tracklists are built at run time, so
 // they are drawn again from the cache (#476).
 function retranslateOnline() {
