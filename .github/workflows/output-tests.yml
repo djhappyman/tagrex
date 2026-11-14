@@ -70,4 +70,8 @@ jobs:
           mkdir "$mount"
           hdiutil attach "$image" -mountpoint "$mount" -nobrowse
           export TAGREX_OUTPUT_TEST_ROOT="$mount"
-          cargo test -p tagrex-commands output::tests -- --nocapture
+          # FAT-family volumes cannot create symlinks. Those two protections
+          # run on APFS in ordinary CI; exercise all publication paths here.
+          cargo test -p tagrex-commands output::tests -- --nocapture \
+            --skip pinned_parent_cannot_be_redirected_by_a_directory_symlink \
+            --skip checked_rename_refuses_existing_and_dangling_links

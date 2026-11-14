@@ -531,15 +531,31 @@ mod tests {
             io::ErrorKind::AlreadyExists
         );
         assert_eq!(std::fs::read(root.join(name)).unwrap(), b"fallback");
-        std::os::unix::fs::symlink("missing", root.join("link")).unwrap();
-        assert!(dir
-            .publish_by_checked_rename(&second, std::ffi::OsStr::new("link"))
-            .is_err());
-        assert!(std::fs::symlink_metadata(root.join("link"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
         dir.remove(&second);
+        drop(dir);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_rename_refuses_existing_and_dangling_links() {
+        let root = root("fallback-links");
+        let dir = Directory::open(&root, &root).unwrap();
+        let (temporary, file) = dir.temporary().unwrap();
+        drop(file);
+        std::fs::write(root.join("original"), b"untouched").unwrap();
+        for (name, target) in [("live", "original"), ("dangling", "missing")] {
+            std::os::unix::fs::symlink(target, root.join(name)).unwrap();
+            assert!(dir
+                .publish_by_checked_rename(&temporary, std::ffi::OsStr::new(name))
+                .is_err());
+            assert!(std::fs::symlink_metadata(root.join(name))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+        }
+        assert_eq!(std::fs::read(root.join("original")).unwrap(), b"untouched");
+        dir.remove(&temporary);
         drop(dir);
         std::fs::remove_dir_all(root).unwrap();
     }
