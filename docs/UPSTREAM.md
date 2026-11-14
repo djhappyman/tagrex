@@ -41,8 +41,8 @@ The bundled native snapshot is now concretely reconciled with accepted upstream 
 | Accepted main, AppleDouble scanner, dependency safeguards and ordered lock IPC | `0b8029a8a2617bd5fdc93aee5f6f17ac9b7aa279` | `cbf2ebc` |
 | Accepted #741 main history | `1d7fc3d81a6f935a1e8f7bfacc5206f74f12c68a` | `a70d346` |
 | #741 display cache documentation/current-main refresh | `f8601c2ac55b9e9662378e4e0bf69a1e3058b70f` | `a2c92ac` |
-| #742 simpler request-local artwork map | `526108c3ebde8c158c0c6cd5d02bcc1dbc1680af` | `533ac9c` |
-| #743 guarded outputs, FAT fallback and filesystem CI | `26c2d7d1e82fd01b354bce53f64aea9c875948cb`, workflow correction `499c3988465c3234ba55d6fa522c13faad65437c` | `0234485`, `e592a49` |
+| #742 simpler request-local artwork map | `526108c3ebde8c158c0c6cd5d02bcc1dbc1680af`, accepted-cache ancestry `1530d6ea57d5cfd2220a9204b3f9b21e5dfe4f02` | `533ac9c`, `afa34fd` |
+| #743 guarded outputs, FAT fallback and filesystem CI | `26c2d7d1e82fd01b354bce53f64aea9c875948cb`, workflow corrections `499c3988465c3234ba55d6fa522c13faad65437c`, `f70891db05e860b3d4716421a8f8ff5912e2c995` | `0234485`, `e592a49`, `c763ae4` |
 
 The cache, encoder and output modules match those source heads exactly. The interface's `read_track`, `read_track_rows`, `preview_live_edits_with_base`, `render_columns`, plan/base-plan pooling, preview validity, cache invalidation and BPM session-generation guards remain. Main's waveform shell command/state/registration is restored alongside the unchanged stable player API. Ordered field-lock IPC is adapted to retain mounted component controls and `reflectLockButton`.
 
@@ -61,3 +61,5 @@ Exact-head hosted Linux, Windows, macOS and advisory gates remain required after
 ## Reconciled local verification
 
 The combined native/frontend source passes 731 workspace Rust tests (12 ignored), 87 JavaScript unit tests and 403 Chromium browser tests (6 optional scale skips), production frontend and native workspace builds, Rust formatting, workspace all-target Clippy with warnings denied and two private D-Bus MPRIS tests. These are local Linux checks. Hosted Windows/macOS/FAT/exFAT checks must run on the exact pushed head. Duplicate test declarations from overlapping histories were removed only after their bodies were verified equivalent; every regression remains active once.
+
+The first reconciled-head macOS ExFAT job failed before Rust because direct image formatting was refused by hdiutil. The later reviewed workflow creates an unformatted disposable image, selects only its attached whole device from the returned plist, formats/mounts it and verifies the filesystem. Bash syntax passes. This workflow-only correction leaves the fully tested native/frontend source unchanged; actual filesystem jobs remain hosted gates.
