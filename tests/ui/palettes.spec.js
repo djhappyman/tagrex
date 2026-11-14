@@ -22,62 +22,50 @@ async function settings(page) {
   await page.locator('#settings-open').click();
   await page.locator('#settings-nav-list button').first().click();
 }
-const choice = (page, id) => page.locator(`#set-palette [data-palette-choice="${id}"]`);
 
-test('palettes persist live through Cancel, Save and reload without replacing a chosen accent', async ({ page }) => {
-  await open(page);
-  await settings(page);
-  await page.locator('.accent-swatch[data-accent="#2563eb"]').click();
-  await choice(page, 'forest').click();
-  await expect(page.locator('html')).toHaveAttribute('data-palette', 'forest');
-  await expect(choice(page, 'forest')).toHaveAttribute('aria-pressed', 'true');
-  expect(await page.evaluate(() => localStorage.getItem('tagrex.accent'))).toBe('#2563eb');
-  await page.locator('#settings-cancel').click();
-  await settings(page);
-  await expect(choice(page, 'forest')).toHaveAttribute('aria-pressed', 'true');
-  await choice(page, 'plum').click();
-  await page.locator('#settings-save').click();
-  await page.reload();
-  await expect(page.locator('html')).toHaveAttribute('data-palette', 'plum');
-  expect(await page.evaluate(() => localStorage.getItem('tagrex.accent'))).toBe('#2563eb');
-  await settings(page);
-  await expect(choice(page, 'plum')).toHaveAttribute('aria-pressed', 'true');
+const themes = [ ['navy','Navy'],['graphite','Graphite'],['cupertino','Cupertino'],['catppuccin','Catppuccin'],['nord','Nord'],['tokyonight','Tokyo Night'],['plum','Rosé Pine'],['gruvbox','Gruvbox'],['solarized','Solarized'],['forest','Everforest'] ];
+async function choose(page,id,name) {
+  await page.locator('#set-palette-control').click();
+  await page.getByRole('option',{name,exact:true}).click();
+  await expect(page.locator('html')).toHaveAttribute('data-palette',id);
+}
+test('one complete theme choice applies its accent and persists through Cancel, Save and reload',async({page})=>{
+  await open(page);await settings(page);
+  await expect(page.locator('#set-accent')).toHaveCount(0);await expect(page.locator('#set-palette-accent')).toHaveCount(0);
+  await choose(page,'nord','Nord');
+  expect(await page.evaluate(()=>localStorage.getItem('tagrex.themeAccent'))).toBe('preset');
+  const accent=await page.evaluate(()=>document.documentElement.style.getPropertyValue('--accent'));
+  await page.locator('#settings-cancel').click();await page.reload();await expect.poll(()=>page.evaluate(()=>!!window.tagrex)).toBe(true);
+  await expect(page.locator('html')).toHaveAttribute('data-palette','nord');
+  expect(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--accent'))).toBe(accent);
+  await settings(page);await choose(page,'catppuccin','Catppuccin');
+  expect(await page.evaluate(()=>document.documentElement.style.getPropertyValue('--accent'))).not.toBe(accent);
+  await page.locator('#settings-save').click();await page.reload();await expect(page.locator('html')).toHaveAttribute('data-palette','catppuccin');
 });
-
-test('fresh amber is retained until the recommended palette accent is explicitly chosen', async ({ page }) => {
-  await open(page);
-  expect(await page.evaluate(() => localStorage.getItem('tagrex.accent'))).toBe('#d4a15a');
-  await settings(page);
-  await choice(page, 'forest').click();
-  expect(await page.evaluate(() => localStorage.getItem('tagrex.accent'))).toBe('#d4a15a');
-  await page.locator('#set-palette-accent').click();
-  expect(await page.evaluate(() => localStorage.getItem('tagrex.accent'))).toBe('#bba36b');
-  await choice(page, 'navy').click();
-  expect(await page.evaluate(() => localStorage.getItem('tagrex.accent'))).toBe('#bba36b');
-});
-
-for (const theme of ['light', 'dark']) test(`palette choices are labelled and keyboard reachable at narrow width in ${theme}`, async ({ page }) => {
-  await page.setViewportSize({ width: 540, height: 850 });
-  await open(page);
-  await settings(page);
-  await page.locator(`#set-theme [data-theme-mode="${theme}"]`).click();
-  for (const id of ['navy', 'graphite', 'forest', 'plum']) {
-    const button = choice(page, id);
-    await button.focus();
-    await expect(button).toBeFocused();
-    await expect(button).toHaveAccessibleName(/\S/);
-    await button.press('Space');
-    await expect(button).toHaveAttribute('aria-pressed', 'true');
-    await expect(page.locator('#set-palette [aria-pressed="true"]')).toHaveCount(1);
-    const field = await page.locator('#set-palette').boundingBox();
-    const bounds = await button.boundingBox();
-    expect(bounds.x).toBeGreaterThanOrEqual(field.x);
-    expect(bounds.x + bounds.width).toBeLessThanOrEqual(field.x + field.width + 1);
-    expect(await button.evaluate(node => {
-      const style = getComputedStyle(node);
-      return style.outlineStyle !== 'none' || style.boxShadow !== 'none';
-    })).toBe(true);
-    await expect(page.locator('html')).toHaveAttribute('data-palette', id);
+for(const mode of ['light','dark']) test(`all ten theme presets retain shared UI hierarchy in ${mode}`,async({page},testInfo)=>{
+  test.setTimeout(90000);
+  await page.setViewportSize({width:1280,height:900});await open(page);
+  await page.locator('#root-display').click();await page.locator('#root').fill('/music');await page.locator('#root').press('Enter');
+  await expect(page.locator('#tracks-body tr[data-path]')).toHaveCount(3);
+  for(const [id,name] of themes){
+    await settings(page);await page.locator(`#set-theme [data-theme-mode="${mode}"]`).click();await choose(page,id,name);
+    await expect(page.locator('#settings-save')).toBeInViewport();await page.locator('#settings-cancel').click();
+    await page.locator('.subtab[data-subtab="editor"]').click();
+    const geometry=await page.locator('#editor-field-title').evaluate(n=>({height:n.getBoundingClientRect().height,radius:getComputedStyle(n).borderRadius,ink:getComputedStyle(n).color,bg:getComputedStyle(n).backgroundColor}));
+    expect(geometry.height).toBe(32);expect(geometry.radius).toBe('10px');expect(geometry.ink).not.toBe(geometry.bg);
+    await page.locator('#editor-field-title').fill('Theme preview');await expect(page.locator('#diff-apply')).toBeEnabled();
+    await page.locator('#diff-preview').click();await expect(page.locator('#tracks')).toHaveClass(/show-old/);
+    await expect.poll(()=>page.evaluate(()=>getComputedStyle(document.getElementById('staged-tab')).backgroundColor===getComputedStyle(document.getElementById('root-field')).backgroundColor)).toBe(true);
+    await page.screenshot({path:testInfo.outputPath(`${id}-${mode}.png`),animations:'disabled'});
+    await page.locator('#diff-discard').click();await page.locator('#files-tab').click();
+    for(const panel of ['renamer','generator','deduplicator','exporter','tagger']) { await page.locator(`.mode-tab[data-mode="${panel}"]`).click(); await expect(page.locator(`#panel-${panel}`)).toBeVisible(); }
+    await page.locator('#presets-edit').click();await expect(page.locator('#pe-editor')).toBeVisible();await page.keyboard.press('Escape');
   }
-  await expect(page.locator('#settings-save')).toBeInViewport();
+});
+test('theme dropdown is keyboard reachable in a narrow settings sheet',async({page})=>{
+  await page.setViewportSize({width:560,height:700});await open(page);await settings(page);
+  const picker=page.locator('#set-palette-control');await picker.focus();await picker.press('Enter');
+  await expect(page.getByRole('option',{name:'Everforest',exact:true})).toBeVisible();
+  await page.keyboard.press('End');await page.keyboard.press('Enter');
+  await expect(page.locator('html')).toHaveAttribute('data-palette','forest');await expect(picker).toBeFocused();
 });

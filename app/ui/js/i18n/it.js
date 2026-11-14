@@ -1390,4 +1390,5 @@ export const it = {
   "staging.empty": "Nessuna modifica in sospeso",
   "staging.tagFormats": "Formati dei tag…",
   "staging.applyFirst": "Applica o scarta le modifiche prima di rimuovere i file.",
+  "settings.themePresetHint": "Colori e accento coordinati per i temi chiaro e scuro.",
 };

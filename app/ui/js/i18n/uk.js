@@ -1390,4 +1390,5 @@ export const uk = {
   "staging.empty": "Немає очікуваних змін",
   "staging.tagFormats": "Формати тегів…",
   "staging.applyFirst": "Застосуйте або скиньте зміни перед вилученням файлів зі списку.",
+  "settings.themePresetHint": "Кольори й акцент підібрано для світлого й темного режиму.",
 };

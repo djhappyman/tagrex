@@ -1389,4 +1389,5 @@ export const en = {
   "staging.empty": "No staged edits",
   "staging.tagFormats": "Tag formats…",
   "staging.applyFirst": "Apply or discard staged edits before removing files.",
+  "settings.themePresetHint": "Colours and accent, matched for light and dark.",
 };

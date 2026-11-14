@@ -1390,4 +1390,5 @@ export const fr = {
   "staging.empty": "Aucune modification en attente",
   "staging.tagFormats": "Formats de tags…",
   "staging.applyFirst": "Appliquez ou annulez les modifications avant de retirer des fichiers.",
+  "settings.themePresetHint": "Couleurs et accent assortis aux modes clair et sombre.",
 };

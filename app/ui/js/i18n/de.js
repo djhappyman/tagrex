@@ -1386,4 +1386,5 @@ export const de = {
   "staging.empty": "Keine vorgemerkten Änderungen",
   "staging.tagFormats": "Tag-Formate…",
   "staging.applyFirst": "Änderungen vor dem Entfernen von Dateien anwenden oder verwerfen.",
+  "settings.themePresetHint": "Farben und Akzent, abgestimmt auf Hell und Dunkel.",
 };

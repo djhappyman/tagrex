@@ -6,7 +6,9 @@ Current direction agreed during the Settings and workbench restyles. Apply these
 iterating on the experimental interface; older design briefs are historical context.
 
 - Use the shared [surface palettes](palettes.md), typography and familiar control
-  shapes. Keep saved custom accents independent of the surface family.
+  shapes. A Theme choice applies coordinated surfaces and a stronger primary
+  from the same colour family in both modes. Keep older custom preferences
+  stored for recovery when migrating to complete presets.
 - Use spacing, tone and rounded surfaces to group content. Avoid outlining every
   field, row or section. Add a divider only when it marks a useful boundary.
 - Use the shared `--input-radius` for standard inputs, selects and compound
