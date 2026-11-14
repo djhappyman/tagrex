@@ -46,7 +46,7 @@ The bundled native snapshot is now concretely reconciled with accepted upstream 
 
 The cache, encoder and output modules match those source heads exactly. The interface's `read_track`, `read_track_rows`, `preview_live_edits_with_base`, `render_columns`, plan/base-plan pooling, preview validity, cache invalidation and BPM session-generation guards remain. Main's waveform shell command/state/registration is restored alongside the unchanged stable player API. Ordered field-lock IPC is adapted to retain mounted component controls and `reflectLockButton`.
 
-The latest #761 head `5affdb3233a62e26adb1e85a4be9b05cb3789404` is integrated at `4215fc2`. Its cached-row DTO regression verifies that both initial and cached `list_tracks` reads retain the native compilation key. The only addition beyond the previously verified runtime source is this regression; the field was already preserved in `track_dto`.
+The latest #761 head `5affdb3233a62e26adb1e85a4be9b05cb3789404` is integrated at `4215fc2`. Its cached-row DTO regression verifies that both initial and cached `list_tracks` reads retain the native compilation key. That integration added only the regression; the field was already preserved in `track_dto`. The later fallback correction below changes core key selection while retaining that cached-row wiring.
 
 The simpler artwork module is deliberately used upstream. In the parent's disclosed release microbenchmark (100 references to a 1.9 MB image, nine repetitions), median time changed from 3.26 ms to 88.84 ms with identical output. This is a measured simplicity/performance tradeoff, not equivalent performance; the personal fork retains its original faster encoder. The maintainer was informed in [#742's discussion](https://github.com/tagrex/tagrex/pull/742#issuecomment-6879665997).
 
@@ -67,3 +67,13 @@ The combined native/frontend source passes 731 workspace Rust tests (12 ignored)
 The first reconciled-head macOS ExFAT job failed before Rust because direct image formatting was refused by hdiutil. The later reviewed workflow creates an unformatted disposable image, selects only its attached whole device from the returned plist, formats/mounts it and verifies the filesystem. Bash syntax passes. This workflow-only correction leaves the fully tested native/frontend source unchanged; actual filesystem jobs remain hosted gates.
 
 After including #761's new cached-row DTO regression, the complete command-layer suites pass again (226 tests, no failures), along with command-layer all-target Clippy with warnings denied and formatting. The previously verified production source is unchanged; the added test proves compilation metadata survives the display cache.
+
+## Bounded maintainer follow-up
+
+The response to [#761 review 6879975757](https://github.com/tagrex/tagrex/pull/761#issuecomment-6879975757) is included from source `e4b9f93a319a1054612d6ecbdf9a3956ca7aab1d` as `71cf08b`. A capable read block keeps its native key; otherwise compilation metadata falls back to the format's primary write tag. ID3v1-only MP3, RIFF INFO WAV and text-only AIFF now expose TCMP rather than hiding a writable flag. All three core compilation tests and the cached-row DTO regression pass.
+
+The portable uppercase nine-character volume label `TAGREXTEST` is included from workflow correction `5715a8a928909d7f19402dccd08efb2391744e6b` as `3dab762`. This addresses the invalid FAT/exFAT volume label identified in diskutil output. Shell syntax is verified; actual filesystem/platform jobs remain exact-head hosted gates.
+
+Accepted main advanced during this bounded follow-up to `b44bbde2ac266f2946d2b4053a9778650386fb93`. It is merged at `f7427a7`, retaining both the existing semicolon-genre regressions and the new Ogg regressions. Unsupported Ogg codecs are refused instead of being mistaken for AAC and corrupted; supported Ogg codecs remain readable.
+
+Fresh core/commands suites pass **623 tests, 8 ignored**, including the three compilation-key tests, cached-row metadata and both Ogg regressions. Formatting and core/commands all-target Clippy with warnings denied pass. Frontend source is byte-identical to the preceding 403-test checkpoint and was not rerun. Earlier full-workspace/frontend results above describe their recorded source; this native follow-up is covered by the fresh affected native suites. Standalone proposal acceptance/main-to-next integration, fresh hosted checks and experiment gates remain outstanding. No upstream merge is performed.
