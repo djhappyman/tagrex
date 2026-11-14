@@ -11,7 +11,7 @@ TagRex Personal builds on [tagrex/tagrex](https://github.com/tagrex/tagrex). Thi
 | Interrupted rollback recovery | [#738](https://github.com/tagrex/tagrex/pull/738), accepted/merged into `main` |
 | Metadata-only Undo history | [#739](https://github.com/tagrex/tagrex/pull/739), accepted/merged into `main` |
 | Provider clients and streamed duplicate hashes | [#740](https://github.com/tagrex/tagrex/pull/740), accepted/merged into `main` |
-| Display metadata cache | [#741](https://github.com/tagrex/tagrex/pull/741), open/proposed, `main` |
+| Display metadata cache | [#741](https://github.com/tagrex/tagrex/pull/741), accepted/merged into `main` |
 | Shared artwork transport and encoding reuse | [#742](https://github.com/tagrex/tagrex/pull/742), open/proposed, `main` |
 | Guarded/staged exports | [#743](https://github.com/tagrex/tagrex/pull/743), open/proposed, `main` |
 | Linux experimental compositor workaround | [#744](https://github.com/tagrex/tagrex/pull/744), Draft, `next`; native evidence pending |
@@ -40,7 +40,7 @@ Fresh local checks: fork source has 91 unit tests and 404 browser tests passing 
 - #744 is now accurately marked Draft. Native flash and restart/launch-path evidence remain outstanding; a green build does not close them.
 - New upstream AppleDouble scanning and dependency safeguards are adopted in the fork without changing its interface, identity or release policy. They exclude macOS `._` files, enable the trash 5.3 Linux backend explicitly, and keep incompatible Windows/zbus major updates out of automated proposals.
 
-No upstream PR has been merged by this delivery. #741, #742, #743 and #761 remain open for maintainer review. Fork follow-ups require their own full hosted gate before merging.
+The maintainer has now merged #741 into main. #742, #743 and #761 remain open for maintainer review. No upstream merge was performed by this agent. Fork follow-ups require their own full hosted gate before merging.
 
 ## Explaining intentional differences
 
