@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Rename, move and file-name cleanup previews list each folder once to find the companion files that travel with a track, instead of once per track, and check a file's type only for names that match. A preview over 2000 tracks in 20 folders went from about a second to about a tenth of one; the plans are the same ([#751](https://github.com/tagrex/tagrex/pull/751)).
 - Putting files in folder order compares the numbers in their names without copying them first, so sorting a large folder is about a quarter faster; the order is the same ([#750](https://github.com/tagrex/tagrex/pull/750)).
 - Tags read for the table are kept in memory and reused by previews and column renders until the file changes on disk, so a second listing or a preview over 2000 files takes milliseconds instead of re-reading every file. Writes and Undo clear the memory, and the check before a write still reads each file afresh ([#741](https://github.com/tagrex/tagrex/pull/741)).
+- Playlists, CUE sheets, reports and exported covers are written to a temporary file first and only then put in place, so a failed export leaves the previous file as it was. An export refuses to write through a link or into a folder that resolves outside the library, and never replaces a file that appeared in the meantime. This works on FAT and exFAT volumes such as USB sticks too ([#743](https://github.com/tagrex/tagrex/pull/743)).
 
 ### Fixed
 
