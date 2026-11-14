@@ -14,7 +14,7 @@
 | `b8199e4` | Ten paired light/dark theme presets | `43987a6784a3ac80d1b67c810b33d1a2cbe91071` |
 | Catalogue validation correction | Six staging-key quotes recognized by native validation | `a35b36116ad4c4e3d523fa5a928b09a27dc24ca1` |
 
-The additive compilation metadata and regressions from [#761](https://github.com/tagrex/tagrex/pull/761), head `86aa61a3a2b88245ec1f69b3634ba7c126a81fbb`, are included as an explicit **pending-main dependency** so this inspector's compilation controls have complete backend support. The standalone proposal must be reviewed through `main`, then integrated into `next` and reconciled with this copy. Inclusion here is not upstream acceptance.
+The additive compilation metadata and regressions from [#761](https://github.com/tagrex/tagrex/pull/761), head `5affdb3233a62e26adb1e85a4be9b05cb3789404` (including accepted-cache integration and the cached-row DTO regression), are included as an explicit **pending-main dependency** so this inspector's compilation controls have complete backend support. The standalone proposal must be reviewed through `main`, then integrated into `next` and reconciled with this copy. Inclusion here is not upstream acceptance.
 
 ## Shared native proposals and merge order
 
@@ -46,6 +46,8 @@ The bundled native snapshot is now concretely reconciled with accepted upstream 
 
 The cache, encoder and output modules match those source heads exactly. The interface's `read_track`, `read_track_rows`, `preview_live_edits_with_base`, `render_columns`, plan/base-plan pooling, preview validity, cache invalidation and BPM session-generation guards remain. Main's waveform shell command/state/registration is restored alongside the unchanged stable player API. Ordered field-lock IPC is adapted to retain mounted component controls and `reflectLockButton`.
 
+The latest #761 head `5affdb3233a62e26adb1e85a4be9b05cb3789404` is integrated at `4215fc2`. Its cached-row DTO regression verifies that both initial and cached `list_tracks` reads retain the native compilation key. The only addition beyond the previously verified runtime source is this regression; the field was already preserved in `track_dto`.
+
 The simpler artwork module is deliberately used upstream. In the parent's disclosed release microbenchmark (100 references to a 1.9 MB image, nine repetitions), median time changed from 3.26 ms to 88.84 ms with identical output. This is a measured simplicity/performance tradeoff, not equivalent performance; the personal fork retains its original faster encoder. The maintainer was informed in [#742's discussion](https://github.com/tagrex/tagrex/pull/742#issuecomment-6879665997).
 
 Source reconciliation is complete for these exact heads; upstream acceptance is not. Review/merge the remaining #742/#743/#761 proposals through `main`, flow accepted main into `next`, then reconcile any later source movement before merging #729. Their inclusion here does not authorize or perform upstream merges. Hosted filesystem/platform gates and experiment evaluation remain separate. Future UI contributions should be focused follow-ups once this foundation lands.
@@ -63,3 +65,5 @@ Exact-head hosted Linux, Windows, macOS and advisory gates remain required after
 The combined native/frontend source passes 731 workspace Rust tests (12 ignored), 87 JavaScript unit tests and 403 Chromium browser tests (6 optional scale skips), production frontend and native workspace builds, Rust formatting, workspace all-target Clippy with warnings denied and two private D-Bus MPRIS tests. These are local Linux checks. Hosted Windows/macOS/FAT/exFAT checks must run on the exact pushed head. Duplicate test declarations from overlapping histories were removed only after their bodies were verified equivalent; every regression remains active once.
 
 The first reconciled-head macOS ExFAT job failed before Rust because direct image formatting was refused by hdiutil. The later reviewed workflow creates an unformatted disposable image, selects only its attached whole device from the returned plist, formats/mounts it and verifies the filesystem. Bash syntax passes. This workflow-only correction leaves the fully tested native/frontend source unchanged; actual filesystem jobs remain hosted gates.
+
+After including #761's new cached-row DTO regression, the complete command-layer suites pass again (226 tests, no failures), along with command-layer all-target Clippy with warnings denied and formatting. The previously verified production source is unchanged; the added test proves compilation metadata survives the display cache.
