@@ -74,6 +74,7 @@ let searchPerPage = searchPerPagePref();
 let searchPage = 0; // last page fetched (0 = none yet)
 let searchHasMore = false; // provider likely has another page
 let searchGen = 0; // generation token
+let searchFailed = false;
 let loadingResults = false; // a page fetch is in flight
 let prefetching = false; // the background per-release detail sweep is running
 
@@ -155,6 +156,7 @@ async function runSearch(reset) {
   const gen = searchGen;
   const page = searchPage + 1;
   loadingResults = true;
+  searchFailed = false;
   updateLoadMoreUi();
   try {
     const hits = await invoke("provider_search", {
@@ -173,6 +175,8 @@ async function runSearch(reset) {
     renderReleaseList();
     prefetchReleaseCounts(added, gen); // count only the newly added page
   } catch (e) {
+    if (gen !== searchGen) return;
+    searchFailed = true;
     toast(String(e), true);
   } finally {
     if (gen === searchGen) {
@@ -185,6 +189,15 @@ async function runSearch(reset) {
 // Show/hide the Load more / Stop footer to match the current loading state.
 function updateLoadMoreUi() {
   const busy = searchBusy();
+  const empty = el("discogs-empty");
+  const heading = el("online-empty-heading");
+  const state = loadingResults ? "searching" : searchFailed ? "searchError" : searchPage ? "searchNone" : "searchEmpty";
+  empty.hidden = releaseCandidates.length > 0;
+  const messageKey = state === "searchEmpty" ? "online.empty" : `inspector.${state}`;
+  empty.dataset.i18n = messageKey;
+  empty.textContent = t(messageKey);
+  heading.dataset.i18n = `inspector.${state}Heading`;
+  heading.textContent = t(heading.dataset.i18n);
   // The search button is one toggling slot (#111): magnifier ⇄ Stop square.
   const btn = el("discogs-search");
   btn.classList.toggle("busy", busy);

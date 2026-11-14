@@ -46,8 +46,9 @@ test('Escape closes a settings dropdown before its parent dialog; options fit a 
   await expect(page.locator('#set-code-page')).toHaveValue('koi8-r');
 });
 
-test('clicking the wrapping Source label opens its visible select and applies one choice', async ({ page }) => {
-  await page.locator('[data-i18n="online.source"]').click();
+test('the source selector keeps its accessible name without a redundant visible label', async ({ page }) => {
+  await expect(page.locator('#online-source')).toHaveAttribute('aria-label','Source');
+  await page.locator('#online-source-control').click();
   await expect(page.locator('.app-select-menu')).toBeVisible();
   await page.getByRole('option', { name: 'MusicBrainz', exact: true }).click();
   await expect(page.locator('#online-source')).toHaveValue('musicbrainz');

@@ -268,7 +268,11 @@ test('a delayed mask-column batch cannot replace values from a newer library', a
 test('mask builder keeps one active preview and only the latest queued expression', async ({ page }) => {
   await open(page);
   await page.locator('.subtab[data-subtab="filename"]').click();
+  // The inspector now shares this backend batch command. Let its debounced
+  // sample settle before instrumenting only the builder's request queue.
+  await expect(page.locator('#from-name-probe .probe-tracks')).toBeVisible();
   await page.evaluate(() => {
+    window.perfCalls.probe_tags_from_names = 0;
     window.perfHeldProbes = [];
     const resolve = Promise.resolve;
     Promise.resolve = function (value) {

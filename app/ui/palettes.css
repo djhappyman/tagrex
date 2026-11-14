@@ -2,6 +2,7 @@
    table/controls. Dark palettes lift those surfaces above the shell, matching
    the approved reference. Accent and semantic colours stay independent. */
 :root[data-palette="navy"] {
+  --field-ghost: #5d6b81;
   --bg: #f8fafc;
   --panel: #eaf0f6;
   --text: #1c2839;
@@ -11,6 +12,7 @@
   --row-stripe: #f1f5f9;
 }
 :root[data-palette="navy"][data-theme="dark"] {
+  --field-ghost: #8d99b5;
   --bg: #252a40;
   --panel: #1a1f34;
   --text: #c2cae9;
@@ -20,6 +22,7 @@
   --row-stripe: #2b3046;
 }
 :root[data-palette="graphite"] {
+  --field-ghost: #696a70;
   --bg: #fafafa;
   --panel: #efeff0;
   --text: #262729;
@@ -29,6 +32,7 @@
   --row-stripe: #f4f4f5;
 }
 :root[data-palette="graphite"][data-theme="dark"] {
+  --field-ghost: #9898a5;
   --bg: #2a2b31;
   --panel: #1f2024;
   --text: #cacad8;
@@ -38,6 +42,7 @@
   --row-stripe: #303137;
 }
 :root[data-palette="forest"] {
+  --field-ghost: #5c6f62;
   --bg: #f8faf8;
   --panel: #ebf1ed;
   --text: #1b2b23;
@@ -47,6 +52,7 @@
   --row-stripe: #f1f6f2;
 }
 :root[data-palette="forest"][data-theme="dark"] {
+  --field-ghost: #8c9d92;
   --bg: #242d29;
   --panel: #1a2220;
   --text: #bcd0c1;
@@ -56,6 +62,7 @@
   --row-stripe: #29332f;
 }
 :root[data-palette="plum"] {
+  --field-ghost: #74657d;
   --bg: #fbf9fc;
   --panel: #f2eef4;
   --text: #2e2334;
@@ -65,6 +72,7 @@
   --row-stripe: #f7f3f8;
 }
 :root[data-palette="plum"][data-theme="dark"] {
+  --field-ghost: #a393ac;
   --bg: #2f2836;
   --panel: #251d29;
   --text: #d4c6df;

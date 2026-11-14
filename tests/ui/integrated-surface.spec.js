@@ -73,7 +73,7 @@ test('Transformations header collapses to its header and gives Inspector the rec
   await expect(toggle(page)).toBeFocused();
 });
 
-test('Core, Standard and Advanced headers are accessible collapsibles and retired Add controls are absent', async ({ page }) => {
+test('Core, More tags and Advanced headers are accessible collapsibles and retired Add controls are absent', async ({ page }) => {
   await open(page);
   await editor(page);
   await expect(page.locator('#fields-body .fe-group[data-group="core"] > button.fe-group-head')).toHaveAttribute('aria-expanded', 'true', { timeout: 1200 });
@@ -90,8 +90,9 @@ test('Core, Standard and Advanced headers are accessible collapsibles and retire
       if (!text) return Infinity;
       const range = document.createRange(); range.selectNodeContents(text);
       return range.getBoundingClientRect().left - node.getBoundingClientRect().left;
-    }, kind);
+    }, kind === 'standard' ? 'more tags' : kind);
     expect(labelOffset).toBeLessThan(32);
+    if (await head.getAttribute('aria-expanded') === 'false') await head.click();
     await head.focus();
     await page.keyboard.press('Space');
     await expect(head).toHaveAttribute('aria-expanded', 'false');
