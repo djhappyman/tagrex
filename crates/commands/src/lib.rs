@@ -2372,18 +2372,26 @@ impl App {
         })
     }
 
+    /// Read tags, audio properties and tag-block metadata from one validated
+    /// display snapshot. Executor preflight deliberately reads independently.
     fn read_snapshot(
         &self,
         path: &Path,
     ) -> Result<tagrex_core::model::TrackRead, tagrex_core::model::TagIoError> {
         self.read_cache.borrow_mut().read(path)
     }
+
+    /// Read only the tag-file view of the same cached snapshot.
     fn read_cached(
         &self,
         path: &Path,
     ) -> Result<tagrex_core::model::TrackFile, tagrex_core::model::TagIoError> {
         self.read_snapshot(path).map(|read| read.file)
     }
+
+    /// Build a table row from one probe: tags, playing time (#172) and tag
+    /// blocks (#47). Length and Tags columns must reuse that read, so they
+    /// remain free rather than probing the file again.
     fn track_dto(&self, path: &Path) -> TrackDto {
         match self.read_snapshot(path) {
             Ok(read) => TrackDto {
@@ -2396,6 +2404,9 @@ impl App {
             Err(_) => TrackDto::unreadable(path),
         }
     }
+
+    /// Gather only the file properties a mask needs, reusing cached audio
+    /// properties while reading filesystem size/date freshly when requested.
     fn file_context<'a>(
         &self,
         mask: &Mask,
@@ -13271,6 +13282,45 @@ mod tests {
     }
 
     // ---- mask-defined table columns (#150) ----
+
+    #[test]
+    fn cached_reads_refresh_after_external_write_apply_and_undo() {
+        let dir = TempDir::new("cache-invalidation");
+        let path = dir.tagged_flac("track.flac", "Before", "Title");
+        let mut app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["Before"]
+        );
+        let mut track = TagEngine::read(&path).unwrap();
+        track.tags.insert(TagField::Artist, "External".into());
+        TagEngine::write(&track).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["External"]
+        );
+        let plan = app
+            .preview_tag_edits(&[TagEditDto {
+                path: path.to_string_lossy().into_owned(),
+                field: "artist".into(),
+                value: Some("Applied".into()),
+            }])
+            .unwrap();
+        let batch = app.apply(&plan).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["Applied"]
+        );
+        app.undo(batch.id).unwrap();
+        assert_eq!(
+            app.render_column("%artist%", std::slice::from_ref(&path))
+                .unwrap(),
+            ["External"]
+        );
+    }
 
     #[test]
     fn render_column_renders_a_pattern_over_a_batch() {
