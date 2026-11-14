@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Online sources reuse their connection between requests instead of building a new client for each one; a changed token or proxy setting still takes effect at once. Finding duplicates by content reads each file through a small buffer instead of loading the whole file into memory ([#740](https://github.com/tagrex/tagrex/pull/740)).
 - Rename, move and file-name cleanup previews list each folder once to find the companion files that travel with a track, instead of once per track, and check a file's type only for names that match. A preview over 2000 tracks in 20 folders went from about a second to about a tenth of one; the plans are the same ([#751](https://github.com/tagrex/tagrex/pull/751)).
 - Putting files in folder order compares the numbers in their names without copying them first, so sorting a large folder is about a quarter faster; the order is the same ([#750](https://github.com/tagrex/tagrex/pull/750)).
+- Tags read for the table are kept in memory and reused by previews and column renders until the file changes on disk, so a second listing or a preview over 2000 files takes milliseconds instead of re-reading every file. Writes and Undo clear the memory, and the check before a write still reads each file afresh ([#741](https://github.com/tagrex/tagrex/pull/741)).
 
 ### Fixed
 
