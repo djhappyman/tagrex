@@ -10351,6 +10351,22 @@ mod tests {
     }
 
     #[test]
+    fn cached_rows_keep_the_native_compilation_field() {
+        let dir = TempDir::new("compilation-metadata-cache");
+        dir.tagged_flac("track.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        for _ in 0..2 {
+            let rows = app.list_tracks();
+            assert_eq!(rows.len(), 1);
+            assert!(!rows[0].unreadable);
+            assert_eq!(
+                rows[0].compilation_field.as_deref(),
+                Some("custom:COMPILATION")
+            );
+        }
+    }
+
+    #[test]
     fn lists_tagged_tracks() {
         let dir = TempDir::new("list");
         dir.tagged_flac("x.flac", "Boards of Canada", "Roygbiv");
