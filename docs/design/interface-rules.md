@@ -1,5 +1,7 @@
 # Interface rules
 
+For corner, spacing, typography or font changes, read the shared [Visual system](visual-system.md) and edit the named style owner.
+
 Current direction agreed during the Settings and workbench restyles. Apply these rules when
 iterating on the experimental interface; older design briefs are historical context.
 

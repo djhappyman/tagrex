@@ -265,8 +265,9 @@ export async function initPlaceholderReference() {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !el("ph-menu").hidden) {
+      const opener = anchor;
       closeReference();
-      anchor?.focus();
+      opener?.focus();
     }
   });
 

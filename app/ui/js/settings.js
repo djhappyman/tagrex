@@ -54,6 +54,7 @@ import {
   valueFont,
 } from "./prefs.js";
 import { DEFAULT_ACCENT, PALETTE_DEFAULT, paletteAccent } from "./palettes.js";
+import { interfaceFont, applyInterfaceFont, INTERFACE_FONT_DEFAULT } from "./interface-fonts.js";
 import { MEDIA_GLYPH_SET_OPTIONS } from "./mediaglyphs.js";
 import { checkUpdateNow } from "./updatecheck.js";
 import { setBpmEnabled } from "./bpm.js";
@@ -196,6 +197,10 @@ function setValueFontChoice(mode) {
   el("set-value-font")
     .querySelectorAll(".seg-btn")
     .forEach((b) => b.classList.toggle("active", b.dataset.valueFont === mode));
+}
+
+function setInterfaceFontChoice(mode) {
+  el("set-interface-font").value = applyInterfaceFont(mode);
 }
 
 // Tag-read priority (#84): the order tag blocks are consulted when a file
@@ -437,6 +442,7 @@ async function openSettings() {
   setLanguageChoice(langMode());
   el("set-checkbox-col").checked = checkboxColEnabled();
   setValueFontChoice(valueFont());
+  el("set-interface-font").value = interfaceFont();
   el("set-table-font").value = tableFontPx();
   el("set-table-font-val").textContent = `${tableFontPx()}px`;
   el("set-tracklist-font").value = tracklistFontPx();
@@ -674,6 +680,11 @@ el("set-accent").addEventListener("click", (e) => {
 el("set-accent-custom").addEventListener("input", (e) => setAccentChoice(e.target.value));
 el("set-accent-reset").addEventListener("click", () => setAccentChoice(null));
 // Value font is live too — swap on click so the effect shows behind the sheet.
+el("set-interface-font").addEventListener("change", event => {
+  setInterfaceFontChoice(event.target.value);
+  refreshGroupResets();
+});
+
 el("set-value-font").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-value-font]");
   if (btn) setValueFontChoice(btn.dataset.valueFont);
@@ -782,6 +793,7 @@ initGroupResets([
       langMode() === "auto" &&
       themeMode() === "auto" &&
       paletteMode() === PALETTE_DEFAULT &&
+      interfaceFont() === INTERFACE_FONT_DEFAULT &&
       accentColor() === DEFAULT_ACCENT &&
       !el("set-checkbox-col").checked &&
       el("set-check-updates").checked,
@@ -789,6 +801,7 @@ initGroupResets([
       setLanguageChoice("auto");
       setThemeChoice("auto");
       setPaletteChoice(PALETTE_DEFAULT);
+      setInterfaceFontChoice(INTERFACE_FONT_DEFAULT);
       setAccentChoice(DEFAULT_ACCENT);
       el("set-checkbox-col").checked = false;
       el("set-check-updates").checked = true;

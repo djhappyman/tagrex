@@ -9,13 +9,9 @@
 import { filterRegex, filterCase } from "./state.js";
 import { DEFAULT_ACCENT, PALETTE_DEFAULT, normalizePalette } from "./palettes.js";
 
-// Value-font preference: which face every value surface uses — the file table,
-// the release tracklist, deduplicator paths, rename/export pattern fields and
-// editor inputs. "mono" is the default disambiguating monospace; "sans" and
-// "condensed" swap in the bundled UI faces app-wide (the stylesheet redefines
-// --font-mono-bundled off a body class). Grew out of the #100 condensed-table
-// toggle, which was table-only — the old boolean key migrates below. A pure
-// display choice, so it persists in localStorage, not the backend settings.
+// Data-font preference: file names, tags and tracklists use the selected face.
+// Literal pattern/regex syntax keeps its immutable Mono role. The saved sans
+// value means "follow the interface"; old mono/condensed choices stay intact.
 const VALUE_FONT_STORAGE_KEY = "tagrex.valueFont";
 const CONDENSED_STORAGE_KEY = "tagrex.condensedTable"; // legacy, migrated once
 const VALUE_FONTS = ["mono", "sans", "condensed"];
@@ -200,7 +196,7 @@ function applyBadgeFont(mode) {
   // different x-heights (#176).
   document.documentElement.style.setProperty(
     "--badge-font",
-    m === "sans" ? "var(--font-ui)" : "var(--font-mono-bundled)",
+    m === "sans" ? "var(--font-ui)" : "var(--font-literal)",
   );
   try {
     localStorage.setItem(BADGE_FONT_STORAGE_KEY, m);

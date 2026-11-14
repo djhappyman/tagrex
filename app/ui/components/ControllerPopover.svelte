@@ -13,6 +13,16 @@
   function connect(node: HTMLElement) {
     root = nativeRoot || node;
     root.classList.add('controller-popup-root');
+    // Imperative placement owns the viewport budget. Carry that definite length
+    // through the Bits wrapper; max-height: inherit stops at display:contents.
+    const syncAvailableHeight = () => {
+      const available = root.style.maxHeight || 'calc(100dvh - 16px)';
+      if (root.style.getPropertyValue('--controller-available-height') !== available)
+        root.style.setProperty('--controller-available-height', available);
+    };
+    syncAvailableHeight();
+    const placement = new MutationObserver(syncAvailableHeight);
+    placement.observe(root, { attributes: true, attributeFilter: ['style'] });
     const bridge = connectControllerSurface(root, (value) => { open = value; });
     // This chooser also opens without a Popover.Trigger, from header context
     // clicks. Its retained shell needs its own Escape route and focus return.
@@ -25,7 +35,7 @@
       anchor?.focus({ preventScroll: true });
     };
     if (root.id === 'columns-menu') window.addEventListener('keydown', closeColumns, true);
-    return { destroy() { bridge.destroy(); if (root.id === 'columns-menu') window.removeEventListener('keydown', closeColumns, true); } };
+    return { destroy() { placement.disconnect(); bridge.destroy(); if (root.id === 'columns-menu') window.removeEventListener('keydown', closeColumns, true); } };
   }
   function content(host: HTMLElement) {
     host.append(...nodes);

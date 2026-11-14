@@ -1,5 +1,5 @@
 /* Inputs share a soft corner. Pill geometry belongs to action buttons. */
-:root { --input-radius:10px; --input-inset:9px; --input-text-size:var(--text-sm); --input-line-height:var(--lh-tight); }
+:root { --input-radius:var(--r-control); --input-inset:9px; --input-text-size:var(--text-sm); --input-line-height:var(--lh-tight); }
 body input[data-slot='input'], body textarea[data-slot='textarea'],
 body select[data-slot='native-select'], body .field,
 body button.app-select-trigger, body .lib .path-open,

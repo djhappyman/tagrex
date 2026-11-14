@@ -124,3 +124,6 @@ body button[data-slot="button"].palette-choice:is(:hover, [aria-pressed="true"])
 :root[data-theme="light"] [data-palette-choice="graphite"] { --palette-preview-bg: #fafafa; --palette-preview-panel: #efeff0; }
 :root[data-theme="light"] [data-palette-choice="forest"] { --palette-preview-bg: #f8faf8; --palette-preview-panel: #ebf1ed; }
 :root[data-theme="light"] [data-palette-choice="plum"] { --palette-preview-bg: #fbf9fc; --palette-preview-panel: #f2eef4; }
+
+/* Labels recede without changing the approved palette text roles. */
+:root[data-theme="dark"] { --label:color-mix(in srgb,var(--text) 80%,var(--panel)); }

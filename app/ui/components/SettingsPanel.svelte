@@ -39,6 +39,18 @@
               <p class="settings-hint" data-i18n="settings.themeHint">Auto follows your system's light or dark appearance.</p>
             </div>
             <div class="settings-field">
+              <div class="settings-row">
+                <label for="set-interface-font" data-i18n="settings.interfaceFont">Interface font</label>
+                <NativeSelect id="set-interface-font" aria-label="Interface font" data-i18n-aria-label="settings.interfaceFont">
+                  <NativeSelectOption value="inter">Inter</NativeSelectOption>
+                  <NativeSelectOption value="plex">IBM Plex Sans</NativeSelectOption>
+                  <NativeSelectOption value="source">Source Sans 3</NativeSelectOption>
+                  <NativeSelectOption value="mono">JetBrains Mono</NativeSelectOption>
+                </NativeSelect>
+              </div>
+              <p class="settings-hint" data-i18n="settings.interfaceFontHint">Controls and labels. Saves immediately; your data font stays separate.</p>
+            </div>
+            <div class="settings-field">
               <div class="settings-row col">
                 <span class="settings-label" data-i18n="settings.palette">Surface palette</span>
                 <div class="palette-picker" id="set-palette" role="group" data-i18n-aria-label="settings.palette" aria-label="Surface palette">
@@ -330,14 +342,14 @@
             </div>
             <div class="settings-field">
               <div class="settings-row">
-                <span class="settings-label" data-i18n="settings.valueFont">Value font</span>
-                <div class="seg" id="set-value-font" role="tablist" data-i18n-aria-label="settings.valueFont" aria-label="Value font">
+                <span class="settings-label" data-i18n="settings.valueFont">Data font</span>
+                <div class="seg" id="set-value-font" role="tablist" data-i18n-aria-label="settings.valueFont" aria-label="Data font">
                   <Button variant="ghost" size="sm" class="seg-btn" type="button" data-value-font="mono" data-i18n="settings.font.mono">Mono</Button>
-                  <Button variant="ghost" size="sm" class="seg-btn" type="button" data-value-font="sans" data-i18n="settings.font.sans">Sans</Button>
+                  <Button variant="ghost" size="sm" class="seg-btn" type="button" data-value-font="sans" data-i18n="settings.font.sans">Interface</Button>
                   <Button variant="ghost" size="sm" class="seg-btn" type="button" data-value-font="condensed" data-i18n="settings.font.condensed">Condensed</Button>
                 </div>
               </div>
-              <p class="settings-hint" data-i18n="settings.valueFontHint">For file names, tags, tracklists and patterns. Mono aligns values and distinguishes 0/O. Sans matches the interface. Condensed fits more text.</p>
+              <p class="settings-hint" data-i18n="settings.valueFontHint">Files, tags and tracklists. Patterns always use Mono.</p>
             </div>
             <div class="settings-field">
               <div class="settings-row">
@@ -364,7 +376,7 @@
                 <span class="settings-label" data-i18n="settings.badgeFont">Release badge font</span>
                 <div class="seg" id="set-badge-font" role="tablist" data-i18n-aria-label="settings.badgeFont" aria-label="Release badge font">
                   <Button variant="ghost" size="sm" class="seg-btn" type="button" data-badge-font="mono" data-i18n="settings.font.mono">Mono</Button>
-                  <Button variant="ghost" size="sm" class="seg-btn" type="button" data-badge-font="sans" data-i18n="settings.font.sans">Sans</Button>
+                  <Button variant="ghost" size="sm" class="seg-btn" type="button" data-badge-font="sans" data-i18n="settings.font.sans">Interface</Button>
                 </div>
               </div>
               <p class="settings-hint" data-i18n="settings.badgeFontHint">For catalogue numbers and track counts. Mono aligns numbers and distinguishes 0/8.</p>
