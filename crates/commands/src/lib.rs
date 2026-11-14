@@ -14207,6 +14207,79 @@ mod tests {
     }
 
     #[test]
+    fn provider_clients_are_retained_and_invalidated_by_connection_settings() {
+        let hub = ProviderHub::default();
+        hub.discogs_provider("first-token").unwrap();
+        hub.musicbrainz_provider().unwrap();
+        hub.beatport_provider("access-token").unwrap();
+        hub.bandcamp_provider().unwrap();
+        hub.soundeo_provider().unwrap();
+        assert!(hub.discogs.borrow().is_some());
+        assert!(hub.musicbrainz.borrow().is_some());
+        assert!(hub.beatport.borrow().is_some());
+        assert!(hub.bandcamp.borrow().is_some());
+        assert!(hub.soundeo.borrow().is_some());
+        hub.apply_settings(&SettingsDto {
+            rate_limit_per_min: 30,
+            ..Default::default()
+        });
+        assert!(
+            hub.musicbrainz.borrow().is_some(),
+            "rate changes keep the client"
+        );
+        hub.discogs_provider("replacement-token").unwrap();
+        assert_eq!(
+            hub.discogs.borrow().as_ref().unwrap().0,
+            "replacement-token"
+        );
+        hub.apply_settings(&SettingsDto {
+            proxy: "http://localhost:3128".into(),
+            ..Default::default()
+        });
+        assert!(hub.discogs.borrow().is_none());
+        assert!(hub.musicbrainz.borrow().is_none());
+        assert!(hub.beatport.borrow().is_none());
+        assert!(hub.bandcamp.borrow().is_none());
+        assert!(hub.soundeo.borrow().is_none());
+        hub.musicbrainz_provider().unwrap();
+        assert!(hub.musicbrainz.borrow().is_some());
+    }
+
+    #[test]
+    fn streaming_hash_groups_identical_files_across_buffer_boundaries() {
+        let dir = TempDir::new("streaming-hash");
+        let a = dir.tagged_flac("a.flac", "Artist", "Title");
+        let b = dir.0.join("b.flac");
+        let c = dir.0.join("c.flac");
+        use std::io::Write;
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&a)
+            .unwrap()
+            .write_all(&vec![7; 192 * 1024 + 17])
+            .unwrap();
+        std::fs::copy(&a, &b).unwrap();
+        std::fs::copy(&a, &c).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&c)
+            .unwrap()
+            .write_all(&[8])
+            .unwrap();
+        let app = open_app(&dir);
+        let groups = app.find_duplicates("hash").unwrap();
+        assert_eq!(groups.len(), 1);
+        let paths: std::collections::HashSet<_> =
+            groups[0].files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [a.to_str().unwrap(), b.to_str().unwrap()]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[test]
     fn find_duplicates_groups_by_normalized_artist_and_title() {
         let dir = TempDir::new("dups");
         dir.tagged_flac("a.flac", "The Field", "Over the Ice");

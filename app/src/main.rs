@@ -1006,6 +1006,66 @@ fn player_seek(player: State<Player>, secs: f64) {
     player.seek(secs);
 }
 
+/// Waveforms already computed, newest last (#101): the file's path, the mtime
+/// it was decoded at, and the buckets.
+///
+/// Keyed by mtime as well as path because a file whose tags were just rewritten
+/// is a different file on disk, and a stale picture beside a track that has
+/// changed is exactly the kind of small lie that makes a display untrustworthy.
+/// Bounded, and a kilobyte an entry — the cache exists so replaying a track
+/// costs nothing, not so a whole library can be held.
+type WaveformState = Mutex<Vec<(String, u64, Vec<u8>)>>;
+
+/// How many waveforms are kept. Sixty-four kilobytes of pictures, which is more
+/// than anybody plays through in a sitting.
+const WAVEFORM_CACHE_ENTRIES: usize = 64;
+
+/// The amplitude envelope of a file, for the player's seek bar (#101).
+///
+/// `async` and off on a blocking thread, both deliberately: decoding an
+/// hour-long mix takes seconds, a *synchronous* command would run it on the main
+/// thread and freeze the whole webview, and an async one that blocked would sit
+/// on a runtime worker that provider requests also want.
+#[tauri::command]
+async fn waveform(cache: State<'_, WaveformState>, path: String) -> Result<Vec<u8>, ErrorDto> {
+    let target = path.clone();
+    let stamp = IMAGE_READ_QUEUE
+        .run(move || {
+            Ok({
+                std::fs::metadata(&target)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|since| since.as_secs())
+                    .unwrap_or(0)
+            })
+        })
+        .await?;
+
+    // Scoped so no guard is alive across the await below.
+    {
+        let entries = cache.lock().unwrap();
+        if let Some((_, _, peaks)) = entries
+            .iter()
+            .find(|(cached, at, _)| cached == &path && *at == stamp)
+        {
+            return Ok(peaks.clone());
+        }
+    }
+    let target = PathBuf::from(&path);
+    let peaks = tauri::async_runtime::spawn_blocking(move || tagrex_player::waveform(&target))
+        .await
+        .map_err(shell_error)?
+        .map_err(shell_error)?;
+    let mut entries = cache.lock().unwrap();
+    entries.retain(|(cached, _, _)| cached != &path);
+    entries.push((path, stamp, peaks.clone()));
+    if entries.len() > WAVEFORM_CACHE_ENTRIES {
+        entries.remove(0);
+    }
+    Ok(peaks)
+}
+
 #[tauri::command]
 fn player_set_volume(player: State<Player>, level: f64) {
     player.set_volume(level as f32);
@@ -2122,6 +2182,7 @@ fn main() {
             Ok(())
         })
         .manage(Player::new())
+        .manage(WaveformState::default())
         .invoke_handler(tauri::generate_handler![
             open_library,
             open_drop,
@@ -2199,6 +2260,7 @@ fn main() {
             player_resume,
             player_stop,
             player_seek,
+            waveform,
             player_set_volume,
             builtin_action_groups,
             transform_sample,
@@ -2386,6 +2448,109 @@ mod tests {
         ] {
             assert!(provider_page_url(source, entity, id).is_err());
         }
+    }
+
+    #[test]
+    fn saved_preferences_reach_a_library_that_is_still_opening() {
+        use std::sync::{mpsc, Arc, Mutex};
+        use std::time::{Duration, Instant, SystemTime};
+        let root = std::env::temp_dir().join(format!(
+            "tagrex-settings-open-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let state: super::AppState = Arc::new(Mutex::new(None));
+        let providers: super::ProviderState = Arc::new(super::ProviderQueues::default());
+        let (started, ready) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let opening = tauri::async_runtime::spawn({
+            let state = state.clone();
+            let root = root.clone();
+            async move {
+                super::SESSION_QUEUE
+                    .run(move || {
+                        started.send(()).unwrap();
+                        wait.recv_timeout(Duration::from_secs(10)).unwrap();
+                        let app = super::App::open(&root, &root.join("journal.sqlite")).unwrap();
+                        app.apply_settings(&super::SettingsDto::default());
+                        *state.lock().unwrap() = Some(app);
+                        Ok(())
+                    })
+                    .await
+            }
+        });
+        ready.recv_timeout(Duration::from_secs(5)).unwrap();
+        let saving = tauri::async_runtime::spawn(super::save_settings_at(
+            root.join("settings.json"),
+            state.clone(),
+            providers.clone(),
+            super::SettingsDto {
+                bpm_max_minutes: 7,
+                ..Default::default()
+            },
+        ));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while providers.settings.lock().unwrap().bpm_max_minutes != 7 && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let persisted = providers.settings.lock().unwrap().bpm_max_minutes == 7;
+        release.send(()).unwrap();
+        tauri::async_runtime::block_on(opening).unwrap().unwrap();
+        tauri::async_runtime::block_on(saving).unwrap().unwrap();
+        assert!(persisted);
+        let actual = state.lock().unwrap().as_ref().unwrap().bpm_max_length();
+        drop(state);
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(actual, Some(Duration::from_secs(7 * 60)));
+    }
+
+    #[test]
+    fn provider_sources_keep_independent_persistent_queues() {
+        let providers = super::ProviderQueues::default();
+        let first = providers.source("discogs").unwrap();
+        assert!(std::sync::Arc::ptr_eq(
+            &first,
+            &providers.source("discogs").unwrap()
+        ));
+        assert!(!std::sync::Arc::ptr_eq(
+            &first,
+            &providers.source("musicbrainz").unwrap()
+        ));
+        assert!(providers.source("unknown").is_err());
+    }
+
+    #[test]
+    fn saving_network_preferences_does_not_wait_for_inflight_http() {
+        let providers = std::sync::Arc::new(super::ProviderQueues::default());
+        let source = providers.source("discogs").unwrap();
+        // Represents a provider request holding its hub during HTTP/throttling.
+        let inflight = source.hub.lock().unwrap();
+        let (finished, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn({
+            let providers = providers.clone();
+            move || {
+                let settings = super::SettingsDto {
+                    rate_limit_per_min: 15,
+                    ..Default::default()
+                };
+                providers.apply_settings(&settings).unwrap();
+                finished.send(()).unwrap();
+            }
+        });
+        let ready = received
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .is_ok();
+        drop(inflight);
+        worker.join().unwrap();
+        assert!(
+            ready,
+            "saving settings waited for an in-flight provider request"
+        );
+        assert_eq!(source.settings.lock().unwrap().rate_limit_per_min, 15);
     }
 
     #[test]
