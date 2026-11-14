@@ -74,7 +74,8 @@ jobs:
           # Select only the whole device returned for this newly attached image;
           # never enumerate or choose an unrelated host disk for formatting.
           device="$(python3 -c 'import plistlib,re,sys; p=plistlib.load(open(sys.argv[1], "rb")); d=[x["dev-entry"] for x in p["system-entities"] if re.fullmatch(r"/dev/disk[0-9]+", x.get("dev-entry", ""))]; assert len(d)==1, d; print(d[0])' "$RUNNER_TEMP/tagrex-output-attach.plist")"
-          diskutil eraseDisk "$OUTPUT_FILESYSTEM" TagRexOutputs MBR "$device"
+          # Keep the label within FAT's short uppercase naming rules.
+          diskutil eraseDisk "$OUTPUT_FILESYSTEM" TAGREXTEST MBR "$device"
           diskutil unmountDisk "$device"
           mkdir "$mount"
           diskutil mount -mountPoint "$mount" "${device}s1"
