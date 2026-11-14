@@ -143,3 +143,22 @@ body button.ph-row { height: auto; min-height: var(--ctl-h-sm); white-space: nor
 .controller-popover-content, .controller-context-content { font-size: var(--type-body-size); line-height: 1.5; }
 
 .ph-desc { overflow-wrap: anywhere; }
+
+/* One compact action-menu rhythm, shared by framework and controller menus.
+   Selects use the same shell but keep option/checkmark semantics. */
+body :is([data-slot='dropdown-menu-content'], [data-slot='context-menu-content']):not(.controller-context-content) {
+  padding:var(--menu-inset); border:1px solid var(--border);
+  border-radius:var(--r-menu); background:var(--bg); color:var(--text);
+  min-width:160px; max-width:calc(100dvw - 16px);
+  font-family:var(--font-ui); font-size:var(--type-body-size);
+  box-shadow:0 12px 32px rgb(0 0 0 / .25); --tw-ring-shadow:0 0 transparent;
+}
+body :is([data-slot='dropdown-menu-item'], [data-slot='context-menu-item'], [data-slot='context-menu-checkbox-item'], [data-slot='context-menu-radio-item']) {
+  min-height:32px; border-radius:var(--r-menu-item); padding:var(--sp-1) var(--sp-2);
+  gap:var(--sp-2); justify-content:flex-start; text-align:start;
+  font-size:var(--type-body-size); line-height:1.5;
+}
+.controller-context-content { max-height:var(--controller-available-height, calc(100dvh - 16px)); overflow-y:auto; overscroll-behavior:contain; }
+
+body .controller-context-content button.ctx-item { justify-content:flex-start; text-align:start; gap:var(--sp-2); }
+body .col-menu button.col-menu-row { justify-content:flex-start; text-align:start; min-height:32px; }

@@ -10,7 +10,7 @@ import { upgradeComponentMarkup } from "../lib/component-elements.js";
 // (#57): read once from `load_settings`, rewritten with `save_settings`. The UI
 // is a delegated popover shared by every mask input, the same shape as the
 // placeholder reference (#148) it sits beside.
-import { el, escapeHtml, toast } from "./dom.js";
+import { placeFloating, el, escapeHtml, toast } from "./dom.js";
 import { t } from "./i18n.js";
 import { invoke } from "./invoke.js";
 import { maskPresets, savedSettings, setMaskPresets, setSavedSettings } from "./state.js";
@@ -71,21 +71,7 @@ function render() {
 // tall menu whose panel scrolls, so fixed positioning rather than the absolute
 // `.col-menu` shell.
 function place(menu, button) {
-  const rect = button.getBoundingClientRect();
-  const width = Math.min(360, window.innerWidth - 16);
-  menu.style.width = `${width}px`;
-  const left = Math.min(Math.max(8, rect.right - width), window.innerWidth - width - 8);
-  menu.style.left = `${left}px`;
-  const below = window.innerHeight - rect.bottom;
-  if (below > 260 || below > rect.top) {
-    menu.style.top = `${rect.bottom + 4}px`;
-    menu.style.bottom = "auto";
-    menu.style.maxHeight = `${below - 12}px`;
-  } else {
-    menu.style.top = "auto";
-    menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-    menu.style.maxHeight = `${rect.top - 12}px`;
-  }
+  placeFloating(menu, button, { align: "right", width: Math.min(360, innerWidth - 16) });
 }
 
 export function closePresets() {

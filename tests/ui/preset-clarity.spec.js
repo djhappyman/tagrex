@@ -206,12 +206,12 @@ test('sidebar groups collapse accessibly and new presets reveal themselves',asyn
   await create(page); await expect(page.getByRole('button',{name:'Your presets',exact:true})).toHaveAttribute('aria-expanded','true');
 });
 
-test('pointer dropdowns open at the pointer and keyboard dropdowns remain usable',async({page})=>{
+test('field dropdowns stay attached to their control for pointer and keyboard',async({page})=>{
   await create(page); await add(page,'case');
   const trigger=page.getByRole('combobox',{name:'Letter case',exact:true});
   const r=await trigger.boundingBox(); const x=r.x+12,y=r.y+r.height/2;
   await page.mouse.click(x,y); const menu=page.locator('.app-select-menu[data-state="open"]'); await expect(menu).toBeVisible();
-  const bounds=await menu.boundingBox(); expect(Math.abs(bounds.x-x)).toBeLessThan(16); expect(Math.abs(bounds.y-y)).toBeLessThan(16);
+  await expect.poll(async()=>{const bounds=await menu.boundingBox();return Math.abs(bounds.x-r.x)+Math.abs(bounds.y-r.y-r.height-4);}).toBeLessThan(2);
   await page.keyboard.press('Escape'); await trigger.focus(); await trigger.press('ArrowDown');
   await expect(menu).toBeVisible(); await page.keyboard.press('Escape'); await expect(trigger).toBeFocused();
 });
@@ -242,7 +242,7 @@ test('clicking another preset during rename commits without swallowing the click
   await expect(page.locator('#pe-list').getByText('Renamed',{exact:true})).toBeVisible();
 });
 
-test('rule menus anchor at the pointer and fit inside narrow windows',async({page})=>{
+test('rule action menus attach to the button and fit inside narrow windows',async({page})=>{
   await page.setViewportSize({width:375,height:667}); await create(page);
   const trigger=page.locator('#pe-empty-add'); await trigger.scrollIntoViewIfNeeded();
   const r=await trigger.boundingBox(),x=r.x+10,y=r.y+r.height/2;
@@ -253,13 +253,12 @@ test('rule menus anchor at the pointer and fit inside narrow windows',async({pag
   const preset=await page.locator('#pe-preset-menu').boundingBox(); expect(preset.x+preset.width).toBeLessThanOrEqual(375); expect(preset.y+preset.height).toBeLessThanOrEqual(667);
 });
 
-test('preset menu opens at the actual pointer inside a centred desktop dialog',async({page},testInfo)=>{
+test('preset three-dot menu attaches to its button inside a centred desktop dialog',async({page},testInfo)=>{
   await create(page); const trigger=page.locator('.pe-list-item:has(.pe-list-row.active) .pe-preset-more');
-  await trigger.evaluate(e=>e.addEventListener('click',event=>{window.morePoint={x:event.clientX,y:event.clientY};},{once:true,capture:true}));
   await trigger.click({timeout:5000}); await expect(page.locator('#pe-preset-menu')).toBeVisible();
-  const {x,y}=await page.evaluate(()=>window.morePoint);
+  const owner=await trigger.boundingBox();
   const menu=await page.locator('#pe-preset-menu').boundingBox();
-  expect(Math.abs(menu.x-x)).toBeLessThan(2); expect(Math.abs(menu.y-y)).toBeLessThan(2);
+  expect(Math.abs(menu.x+menu.width-owner.x-owner.width)).toBeLessThan(2); expect(Math.abs(menu.y-owner.y-owner.height-4)).toBeLessThan(2);
   expect(menu.width).toBeLessThanOrEqual(160);
   await expect(page.locator('#pe-preset-menu [data-cmd=rename]')).toHaveCSS('justify-content','flex-start');
   await page.screenshot({path:testInfo.outputPath('preset-menu.png'),animations:'disabled',timeout:5000});
@@ -304,4 +303,13 @@ for (const theme of ['light','dark']) for (const [width,height] of [[1280,800],[
   await expect(page.locator('#pe-sample-out')).not.toHaveAttribute('aria-busy','true');
   await page.locator('#pe-editor').evaluate(async e=>{await Promise.all(e.getAnimations({subtree:true}).map(a=>a.finished.catch(()=>{})));});
   await page.screenshot({path:testInfo.outputPath(`preset-${theme}-${width}.png`)});
+});
+
+test('preset right-click stays at the pointer while its three-dot menu follows the button',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'});await create(page);
+  const row=page.locator('.pe-list-row.active');const r=await row.boundingBox();const x=r.x+40,y=r.y+16;
+  await row.click({button:'right',position:{x:40,y:16}});const menu=page.locator('#pe-preset-menu');await expect(menu).toBeVisible();let box=await menu.boundingBox();expect(Math.abs(box.x-x)).toBeLessThan(2);expect(Math.abs(box.y-y)).toBeLessThan(2);
+  await page.keyboard.press('Escape');await expect(row).toBeFocused();
+  const more=page.locator('.pe-list-item:has(.pe-list-row.active) .pe-preset-more');await more.click();await expect(menu).toBeVisible();const owner=await more.boundingBox();box=await menu.boundingBox();expect(Math.abs(box.x+box.width-owner.x-owner.width)).toBeLessThan(2);expect(Math.abs(box.y-owner.y-owner.height-4)).toBeLessThan(2);
+  await page.keyboard.press('Escape');await expect(more).toBeFocused();
 });

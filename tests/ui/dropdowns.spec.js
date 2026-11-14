@@ -124,3 +124,55 @@ test('a dynamic settings select follows its field when the window grows and reta
   await page.setViewportSize({ width:844, height:844 });
   expect((await fixed.boundingBox()).width).toBeCloseTo(140, 0);
 });
+
+for(const theme of ['light','dark']) {
+  test(`field choices attach to the field regardless of click position (${theme})`,async({page})=>{
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.evaluate(v=>document.documentElement.dataset.theme=v,theme);
+    const trigger=page.locator('#online-source-control');
+    const field=await trigger.boundingBox();
+    for(const fraction of [.15,.85]){
+      await trigger.click({position:{x:field.width*fraction,y:field.height/2}});
+      const menu=page.locator('.app-select-menu');await expect(menu).toBeVisible();
+      await expect.poll(async()=>Math.abs((await menu.boundingBox()).x-field.x)).toBeLessThan(2);
+      const box=await menu.boundingBox();expect(Math.abs(box.y-field.y-field.height-4)).toBeLessThan(2);expect(box.width).toBeGreaterThanOrEqual(field.width-1);
+      await page.keyboard.press('Escape');await expect(trigger).toBeFocused();
+    }
+    await trigger.press('ArrowDown');const menu=page.locator('.app-select-menu');await expect(menu).toBeVisible();expect(Math.abs((await menu.boundingBox()).x-field.x)).toBeLessThan(2);await page.keyboard.press('Escape');
+  });
+}
+
+test('settings choice menu stays attached inside a centred dialog',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.locator('#settings-open').click();const trigger=page.locator('#set-interface-font-control');await trigger.click({position:{x:16,y:16}});
+  const field=await trigger.boundingBox(),menu=page.locator('.app-select-menu');await expect(menu).toBeVisible();const box=await menu.boundingBox();expect(Math.abs(box.x-field.x)).toBeLessThan(2);expect(Math.abs(box.y-field.y-field.height-4)).toBeLessThan(2);
+  await page.getByRole('option',{name:'IBM Plex Sans',exact:true}).click();await expect(trigger).toContainText('IBM Plex Sans');await expect(trigger).toBeFocused();
+});
+
+test('reference popups follow a scrolling owner, keep their own list open, and close when clipped',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  await page.evaluate(()=>{
+    const host=document.createElement('div');host.id='scrolling-popup-owner';host.style.cssText='position:fixed;left:100px;top:100px;width:300px;height:250px;overflow:auto;z-index:350;background:var(--panel)';
+    const inner=document.createElement('div');inner.style.height='1000px';const button=document.createElement('button');button.id='scrolling-reference';button.className='ph-btn';button.dataset.phTarget='mask';button.textContent='Scrolling reference';button.style.marginTop='100px';inner.append(button);host.append(inner);document.body.append(host);
+  });
+  const trigger=page.locator('#scrolling-reference');await trigger.click();const menu=page.locator('#ph-menu');await expect(menu).toBeVisible();
+  await page.locator('#ph-menu .ph-body').evaluate(node=>{node.scrollTop=60;});await expect(menu).toBeVisible();
+  const before=await menu.boundingBox();await page.locator('#scrolling-popup-owner').evaluate(node=>{node.scrollTop=20;});
+  await expect.poll(async()=>Math.abs((await menu.boundingBox()).y-before.y+20)).toBeLessThan(2);
+  await page.locator('#scrolling-popup-owner').evaluate(node=>{node.scrollTop=450;});await expect(menu).toBeHidden();
+});
+
+test('release artwork actions anchor to their button and support keyboard return without saving',async({page})=>{
+  await page.emulateMedia({reducedMotion:'reduce'});
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.locator('#discogs-token').evaluate(n=>{n.value='fixture';});await page.locator('#discogs-query').fill('Helter Skelter');await page.locator('#discogs-search').click();
+  const card=page.locator('.release-card').first();await expect(card).toBeVisible();await card.locator('.release-head').click();
+  const trigger=card.locator('[data-act="save-menu"]');await expect(trigger).toBeVisible();await trigger.click();const menu=card.locator('.tk-save-menu');await expect(menu).toBeVisible();
+  const owner=await trigger.boundingBox(),box=await menu.boundingBox();const viewport=page.viewportSize();expect(Math.abs(box.x-Math.max(8,Math.min(owner.x,viewport.width-box.width-8)))).toBeLessThan(2);expect(Math.min(Math.abs(box.y-owner.y-owner.height-4),Math.abs(box.y+box.height-owner.y+4))).toBeLessThan(2);
+  const items=menu.locator('button');await expect(items.first()).toHaveCSS('justify-content','flex-start');await expect(items.first()).toHaveCSS('text-align','start');await expect(items.first()).toHaveCSS('min-height','32px');await expect(items.first()).toBeFocused();await page.keyboard.press('ArrowDown');await expect(items.nth(1)).toBeFocused();await page.keyboard.press('Home');await expect(items.first()).toBeFocused();
+  await page.keyboard.press('Escape');await expect(menu).toBeHidden();await expect(trigger).toBeFocused();await expect(trigger).toHaveAttribute('aria-expanded','false');expect(errors).toEqual([]);
+});
+
+test('Escape from an input right-click menu restores its field and keeps the draft',async({page})=>{
+  const field=page.locator('#discogs-query');await field.fill('Keep this query');await field.click({button:'right'});await expect(page.locator('#edit-ctx')).toBeVisible();await page.keyboard.press('Escape');await expect(page.locator('#edit-ctx')).toBeHidden();await expect(field).toBeFocused();await expect(field).toHaveValue('Keep this query');
+});

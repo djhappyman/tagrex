@@ -14,6 +14,7 @@ import {
   ico,
   confirmDialog,
   placeFloating,
+  placeContextMenu,
   closePlanReport,
   dismissStickyToast,
   report,
@@ -2570,12 +2571,9 @@ function showEditCtx(x, y, field) {
       })
       .catch(() => {});
   }
+  editCtx.returnFocusTo = field;
   editCtx.hidden = false;
-  // Measure once visible, then clamp so the menu never spills off-screen.
-  const r = editCtx.getBoundingClientRect();
-  const pad = 8;
-  editCtx.style.left = Math.max(pad, Math.min(x, window.innerWidth - r.width - pad)) + "px";
-  editCtx.style.top = Math.max(pad, Math.min(y, window.innerHeight - r.height - pad)) + "px";
+  placeContextMenu(editCtx, x, y);
 }
 
 document.addEventListener("contextmenu", (e) => {
@@ -2646,11 +2644,9 @@ function showFileCtx(x, y, tr) {
   bpmItem.disabled = bpmRunning() || bpmButton.disabled;
   fileCtx.querySelector('[data-cmd="clear"]').disabled = el("clear-tags").disabled;
   for (const key of fileCtx.querySelectorAll(".ctx-key")) key.textContent = formatCombo(comboOf(key.dataset.action));
+  fileCtx.returnFocusTo = document.activeElement;
   fileCtx.hidden = false;
-  const r = fileCtx.getBoundingClientRect();
-  const pad = 8;
-  fileCtx.style.left = Math.max(pad, Math.min(x, window.innerWidth - r.width - pad)) + "px";
-  fileCtx.style.top = Math.max(pad, Math.min(y, window.innerHeight - r.height - pad)) + "px";
+  placeContextMenu(fileCtx, x, y);
 }
 
 // Drop rows from the table without touching disk. The library is the model, so

@@ -101,3 +101,28 @@ coverage, internal naming, licence notices and source hashes; rebuild them with
 
 Browser mocks prove their exercised UI scope. Native dialogs, media writes,
 platform rasterization and OS scaling require separate evidence before claims.
+
+## Popup behaviour
+
+- A field choice list attaches to the **whole field**, with the same position for
+  mouse, label activation and keyboard. It is at least the field width (or 160px
+  for compact controls), bounded by the viewport. Selected options keep a check.
+- A button action menu opens 4px below its button; trailing three-dot actions
+  align their right edges. It flips above when needed. Rule pickers and pattern
+  tools follow this rule, rather than the precise point clicked inside them.
+- A right-click menu opens at the pointer. Keyboard context menus attach to the
+  focused target. Screen edges can move either kind inward, with an 8px gutter.
+- Menus share the 16px shell / 8px item radius, 7px shell padding plus 1px border,
+  32px basic row, left-aligned text, quiet descriptions and opaque palette fill.
+  Longer descriptions may grow rows; form/help popovers retain their own layout.
+- Only popup content scrolls when it is too tall. Scrolling within it preserves
+  the menu. Anchored controller popups follow their owner as its panel scrolls,
+  and close if the owner is hidden/clipped; point menus dismiss on outside wheel
+  scrolling or resize. Escape closes the current menu and returns focus to its
+  owner; choosing a native-field option still emits one native change event.
+
+`AnimatedSelect.svelte` owns native-field proxy semantics. Framework primitives
+own their trigger positioning and collision gutters. `js/popup-position.js`
+owns viewport and transformed-dialog placement for imperative controllers;
+`dom.js` re-exports its API. Do not add cursor anchors to field selectors or
+reimplement positioning separately for each action menu.
