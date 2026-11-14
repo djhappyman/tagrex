@@ -12,6 +12,11 @@ updates:
     ignore:
       - dependency-name: "rten"
       - dependency-name: "rten-tensor"
+      # windows-future 0.100 already belongs to the next windows-rs generation
+      # while the windows crate (used by the app, tao and cpal) has no matching
+      # release yet, so the group below would offer it alone and it would not
+      # compile (#756). Bump it by hand together with the windows crate.
+      - dependency-name: "windows-future"
     groups:
       # windows-future must match the windows crate's core types, so a bump of
       # either one alone does not compile (#716). Listed first because a
