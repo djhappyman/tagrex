@@ -3,6 +3,24 @@
 const EDGE = 8;
 const placements = new Map();
 let frame = 0;
+const layered = new WeakSet();
+
+// Native top-layer placement escapes every ancestor's transform, clipping and
+// stacking context without moving the node away from delegated controllers.
+function elevate(box) {
+  if (typeof box.showPopover !== 'function') return;
+  if (!layered.has(box)) {
+    box.setAttribute('popover', 'manual');
+    box.style.position = 'fixed';
+    box.style.inset = 'auto';
+    box.style.margin = '0';
+    new MutationObserver(() => {
+      if (box.hidden && box.matches(':popover-open')) box.hidePopover();
+    }).observe(box, { attributes:true, attributeFilter:['hidden'] });
+    layered.add(box);
+  }
+  if (!box.hidden && !box.matches(':popover-open')) box.showPopover();
+}
 
 function layoutSize(box, axis) {
   if (typeof getComputedStyle === 'undefined') return axis === 'width' ? box.offsetWidth : box.offsetHeight;
@@ -13,6 +31,7 @@ function layoutSize(box, axis) {
   return value + sides.reduce((sum, side) => sum + (parseFloat(style['padding' + side]) || 0) + (parseFloat(style['border' + side + 'Width']) || 0), 0);
 }
 function measure(box, width) {
+  elevate(box);
   box.style.left = '0px'; box.style.top = '0px'; box.style.bottom = 'auto';
   box.style.maxHeight = `${Math.max(0, innerHeight - EDGE * 2)}px`;
   box.style.setProperty?.('--controller-available-height', box.style.maxHeight);

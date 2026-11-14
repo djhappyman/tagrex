@@ -70,7 +70,7 @@ import {
 let id3Choice = "v24"; // "v23" | "v24", mirrored by the segmented control
 // Whether an import brings the release's cover (#207): "never" | "if-missing"
 // | "always", mirrored by its segmented control.
-let importCoverChoice = "if-missing";
+let importCoverChoice = "always";
 // How an import writes a vinyl position as the track number (#642): "number"
 // (the default, the numeric track number the standards define) | "position".
 let importTrackChoice = "number";
@@ -95,10 +95,14 @@ function bpmMaxFromForm() {
 }
 
 function setImportCoverChoice(choice) {
+  choice = choice === 'never' ? 'never' : 'always';
   importCoverChoice = choice;
   el("set-import-cover")
     .querySelectorAll(".seg-btn")
-    .forEach((b) => b.classList.toggle("active", b.dataset.importCover === choice));
+    .forEach((b) => {
+      b.hidden = b.dataset.importCover === 'if-missing';
+      b.classList.toggle("active", b.dataset.importCover === choice);
+    });
 }
 
 function setImportTrackChoice(choice) {

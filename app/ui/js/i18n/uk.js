@@ -14,6 +14,21 @@
 // 2 треки, 5 треків; 21 is `one` again and 11 is `many`. `tn` asks
 // `Intl.PluralRules` rather than guessing, so a form is never picked by hand.
 export const uk = {
+
+  "online.importFields": "Поля імпорту",
+  "online.importAction": "Імпортувати",
+  "online.importArtwork": "Обкладинка",
+  "online.importFieldsRemembered": "Збережено для наступних імпортів",
+  "online.importArtworkHint": "Замінити основну обкладинку",
+  "online.importFieldsMore": "Інші поля",
+  "online.importFieldsAll": "Вибрати все",
+  "online.importFieldsClear": "Зняти всі позначки",
+  "online.importFieldsLoading": "Завантаження полів…",
+  "online.importFieldsError": "Не вдалося завантажити або зберегти вибір. Спробуйте ще раз.",
+  "table.artwork.added": "Обкладинку буде додано",
+  "table.artwork.replaced": "Обкладинку буде замінено",
+  "table.artwork.removed": "Обкладинку буде видалено",
+
   // ---- units that appear inside other messages ----
   "unit.track": { one: "{n} трек", few: "{n} треки", many: "{n} треків" },
   "unit.file": { one: "{n} файл", few: "{n} файли", many: "{n} файлів" },
@@ -170,6 +185,7 @@ export const uk = {
   "online.matchByLength": "За тривалістю",
   "online.matchByLengthTitle": "Переставити вибрані файли за тривалостями з цього релізу, не зважаючи на імена",
   "online.embed": "Вбудувати обкладинку",
+  "online.embedSelected": "Вбудувати у вибрані треки",
   "online.embedTitle": "Вбудувати обкладинку цього релізу у вибрані файли",
   "online.importTitle": "Імпортувати цей реліз у вибрані файли",
   "online.openRelease": "Відкрити сторінку релізу",

@@ -103,8 +103,10 @@ beats fall. Choose **70-140** if your library writes a 174 BPM track as 87;
 checkbox each, all on by default. A field switched off is left exactly as the
 file has it; see [Import, then fix](tagger.md#import-then-fix).
 
-**Cover art**: whether an import also embeds the release's cover: **Never**,
-**If missing** (the default, only files with no artwork at all) or **Always**.
+**Cover art**: **Never** imports tags alone; **Always** replaces the main cover and
+preserves other embedded pictures. The Artwork checkbox beside the online search
+controls the same saved preference. Older **If missing** settings migrate to this
+explicit replacement choice.
 
 **Track number**: how an import writes a vinyl position such as `A1`.
 **Number** (the default) writes `1`: the tag standards define the track number

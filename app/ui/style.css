@@ -3820,9 +3820,8 @@ button.release-import {
   clip-path: circle(calc(50% - var(--art-inset, 0%) - 0.5px));
 }
 
-/* Media-type + disc-count badge (List only), pinned bottom-left so it never
-   rides sleeve logos or the catalogue chip. The glyph shows immediately from
-   `format`; the ×N disc count fills in once the release is fetched (#98). */
+/* Artwork-count badge, pinned bottom-left away from the catalogue chip.
+   The image count fills in once the release is fetched. */
 .media-badge {
   position: absolute;
   left: 3px;
@@ -3842,7 +3841,7 @@ button.release-import {
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
   font-family: var(--font-value);
-  /* The disc-count next to the glyph (#334). */
+  /* Image count next to the artwork glyph. */
   font-size: var(--text-xs);
   line-height: 1;
 }
@@ -3857,7 +3856,7 @@ button.release-import {
   flex: none;
 }
 
-/* Disc count only appears when >1; a hairline splits the glyph from the number. */
+/* Keep image count compact and legible over the artwork. */
 .media-badge .n {
   padding-left: 3px;
   margin-left: 1px;
@@ -4040,6 +4039,17 @@ button.release-import {
 .release-card:not([aria-expanded="true"]) .release-tracklist {
   display: none;
 }
+.release-card[aria-expanded="true"] .release-tracklist {
+  animation: release-expand 180ms cubic-bezier(.16, 1, .3, 1) both;
+  transform-origin: top;
+}
+@keyframes release-expand {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .release-card[aria-expanded="true"] .release-tracklist { animation: none; }
+}
 
 .tracklist-actions {
   display: flex;
@@ -4070,7 +4080,7 @@ button.release-import {
 .tk-head th.tk-lead {
   left: 0;
   z-index: 2;
-  box-shadow: 1px 0 0 0 var(--border);
+  box-shadow: none;
 }
 .tk-head .tk-selcount {
   text-align: right;

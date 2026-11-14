@@ -6,6 +6,7 @@ import { clearLiveInputs, hasLiveInputs, liveInputChanged, recordLiveField, hasI
 "use strict";
 
 import { TAURI, invoke } from "./js/invoke.js";
+import { createApplyReview } from './js/apply-review.js';
 import {
   el,
   toast,
@@ -64,6 +65,7 @@ import {
 } from "./js/cover.js";
 import {
   allColumnKeys,
+  tableColumnKeys, setReviewColumns, syncTableColumns,
   columnLabel,
   columnWidth,
   customColumnOf,
@@ -132,6 +134,7 @@ Object.assign(hooks, {
   renderTableHead,
   revealPath,
   navigablePaths: () => navPaths,
+  orderPathsForDisplay,
   // A language change repaints the static markup itself; the open panel builds
   // some of its own text, so it is asked to draw again (#50). The library
   // indicator is dynamic too (#287) — repaint it so an open folder's name and
@@ -241,6 +244,7 @@ const tracksBody = el("tracks-body");
 const tracksEmpty = el("tracks-empty");
 let stagedView = false;
 let stagedMembershipPending = false;
+let activeApplyReview = null;
 let excludedApplyPaths = new Set();
 const fileViewScroll = { files: { top:0, left:0 }, staged: { top:0, left:0 } };
 function editablePreview() {
@@ -262,6 +266,8 @@ function setFileView(staged) {
   document.dispatchEvent(new CustomEvent('tagrex:reveal-module',{detail:'files'}));
 }
 function syncFileView() {
+  if (setReviewColumns(stagedView)) stagedMembershipPending = true;
+  const columnsChanged = syncTableColumns();
   document.body.classList.toggle('staged-view',stagedView);
   el('tracks').classList.toggle('show-old',stagedView);
   for (const [id,on] of [['files-tab',!stagedView],['staged-tab',stagedView]]) {
@@ -269,6 +275,7 @@ function syncFileView() {
   }
   tableWrap.setAttribute('aria-labelledby',stagedView?'staged-tab':'files-tab');
   tracksEmpty.textContent = stagedView ? msg('staging.empty') : msg('table.empty');
+  return columnsChanged;
 }
 const applyBtn = el("diff-apply");
 const undoBtn = el("undo");
@@ -656,13 +663,23 @@ function decorateTrackArtwork(row, track) {
   if (!file) return row;
   row.querySelector('td.sel')?.setAttribute('aria-colindex', '1');
   file.setAttribute('aria-colindex', String(TABLE_DATA_COLUMN_OFFSET + 1));
-  const state = coverState(track);
+  const stagedCover = diffByPath?.get(track.path)?.cover_change;
+  const state = stagedCover && !stagedCover.invalid
+    ? (stagedCover.new.length ? 'embedded' : 'missing')
+    : coverState(track);
   const indicator = document.createElement('span');
   indicator.className = 'track-artwork';
   indicator.dataset.coverState = state;
   indicator.setAttribute('role', 'img');
   indicator.setAttribute('aria-label', msg(`table.artwork.${state}`));
   indicator.title = msg(`table.artwork.${state}`);
+  if (stagedCover && !stagedCover.invalid) {
+    const operation = !stagedCover.new.length ? 'removed' : !stagedCover.old.length ? 'added' : 'replaced';
+    indicator.classList.add('artwork-changing');
+    indicator.dataset.coverChange = operation;
+    indicator.title = msg(`table.artwork.${operation}`);
+    indicator.setAttribute('aria-label', indicator.title);
+  }
   indicator.innerHTML = ico('image');
   const cell = document.createElement('td');
   cell.className = 'artwork-col';
@@ -687,7 +704,7 @@ function buildTrackRow(track, groupKey) {
     tr.innerHTML = `
       <td class="sel"></td>
       <td class="file" title="${escapeHtml(msg("app.unreadablePath", { path: track.path }))}">${escapeHtml(fileName(track.path))}</td>
-      ${visibleColumns.length > 1 ? `<td class="unreadable-note" colspan="${visibleColumns.length - 1}">${escapeHtml(msg("app.unreadableNote"))}</td>` : ""}`;
+      ${tableColumnKeys().length > 1 ? `<td class="unreadable-note" colspan="${tableColumnKeys().length - 1}">${escapeHtml(msg("app.unreadableNote"))}</td>` : ""}`;
     return decorateTrackArtwork(tr, track);
   }
   // Diff-state (#117): a staged plan renders its change into this same table in
@@ -705,7 +722,7 @@ function buildTrackRow(track, groupKey) {
   tr.innerHTML = `
       <td class="sel"></td>
       <td class="file" title="${escapeHtml(track.path)}">${escapeHtml(fileName(track.path))}</td>`;
-  for (const field of visibleColumns) {
+  for (const field of tableColumnKeys()) {
     if (field === "file") continue; // rendered above (structural, always first)
     // A mask column (#150): computed, so read-only like Position — and it shows
     // what is on disk, since the backend renders it from the file.
@@ -764,7 +781,7 @@ function fillDiffRow(tr, track) {
     tr.innerHTML =
       `<td class="sel"></td>` +
       `<td class="file" title="${escapeHtml(track.path)}">${escapeHtml(fileName(track.path))}</td>`;
-    for (const field of visibleColumns) {
+    for (const field of tableColumnKeys()) {
       if (field === "file") continue;
       const td = document.createElement("td");
       const derived = virtualCellText(track, field, pending);
@@ -783,7 +800,7 @@ function fillDiffRow(tr, track) {
   tr.innerHTML =
     `<td class="sel"></td>` +
     diffFileCellHtml(change, track);
-  for (const field of visibleColumns) {
+  for (const field of tableColumnKeys()) {
     if (field === "file") continue;
     const derived = virtualCellText(track, field, pending);
     if (derived !== null) {
@@ -877,14 +894,14 @@ function buildGroupHeader(key, count) {
           dest.extras.map((to) => (to.startsWith(dest.dir) ? to.slice(dest.dir.length + 1) : to)).join("\n"),
         )}">+ ${escapeHtml(tn("unit.folderFile", dest.extras.length))}</span>`
       : "";
-    tr.innerHTML = `<td class="group-cell" colspan="${TABLE_DATA_COLUMN_OFFSET + visibleColumns.length}"><span class="group-heading-content">
+    tr.innerHTML = `<td class="group-cell" colspan="${TABLE_DATA_COLUMN_OFFSET + tableColumnKeys().length}"><span class="group-heading-content">
       <span class="group-caret">${ico("caret-down")}</span>
       ${label}
       <span class="group-count muted">· ${escapeHtml(tn("unit.file", count))}${extras}</span>
     </span></td>`;
     return tr;
   }
-  tr.innerHTML = `<td class="group-cell" colspan="${TABLE_DATA_COLUMN_OFFSET + visibleColumns.length}"><span class="group-heading-content">
+  tr.innerHTML = `<td class="group-cell" colspan="${TABLE_DATA_COLUMN_OFFSET + tableColumnKeys().length}"><span class="group-heading-content">
       <span class="group-caret">${ico("caret-down")}</span>
       <span class="group-label">${escapeHtml(groupLabel(key))}</span>
       <span class="group-count muted">· ${tn("unit.file", count)}</span>
@@ -922,6 +939,19 @@ let navPaths = [];
 let navPathIndex = new Map();
 let groupPaths = new Map(); // group key -> its paths, in order
 let viewGroups = []; // group keys in order
+// Folder position belongs to the session, independently of column direction,
+// filtering, collapse state, and the row data re-read after Apply/Undo.
+const folderSortOrders = new Map();
+function folderOrderForSort() {
+  if (groupBy !== 'folder' && groupBy !== 'drop') return null;
+  let order = folderSortOrders.get(groupBy);
+  if (!order) folderSortOrders.set(groupBy, (order = new Map()));
+  for (const track of tracks) {
+    const key = groupKeyOf(track);
+    if (!order.has(key)) order.set(key, order.size);
+  }
+  return order;
+}
 // A staged rename/move that sends files to another folder is grouped by where
 // they land (#385), not by where they sit: `destGrouping` says the model is in
 // that shape, `destGroups` describes each destination group by its key.
@@ -1020,6 +1050,7 @@ function labelDestGroups() {
 // Rebuild the model from the track list, the filter, the grouping and the staged
 // plan. No DOM work at all — the window render is what touches the table.
 function buildViewModel(preparedFilter = null) {
+  const folderOrder = folderOrderForSort();
   // A staged change always stays visible so the whole plan can be reviewed and
   // scoped, even if the current filter would otherwise hide it (#117).
   matchingTrackCount = 0;
@@ -1102,15 +1133,10 @@ function buildViewModel(preparedFilter = null) {
       }
       byKey.get(key).push(track);
     }
-    // Group order (#196): with a column sort active, first appearance means "the
-    // folder whose first file sorts first", which reads as random. So the
-    // folders take their own order, in the sort's direction. With nothing
-    // sorted, first appearance is the scan order — what opening a folder implies.
-    if (sortKey) {
-      order.sort(
-        (a, b) => numericCollator.compare(groupLabel(a), groupLabel(b)) * sortDir,
-      );
-    }
+    // Folder positions do not follow the track comparator or its direction.
+    // Other grouping modes retain their existing label-order behavior.
+    if (folderOrder) order.sort((a, b) => folderOrder.get(a) - folderOrder.get(b));
+    else if (sortKey) order.sort((a, b) => numericCollator.compare(groupLabel(a), groupLabel(b)) * sortDir);
     for (const key of order) {
       viewGroups.push(key);
       viewItems.push({ kind: "group", key, count: byKey.get(key).length });
@@ -1143,7 +1169,7 @@ function spacerRow(height) {
   tr.className = "spacer";
   tr.setAttribute("aria-hidden", "true");
   const td = document.createElement("td");
-  td.colSpan = TABLE_DATA_COLUMN_OFFSET + visibleColumns.length;
+  td.colSpan = TABLE_DATA_COLUMN_OFFSET + tableColumnKeys().length;
   td.style.height = `${Math.max(0, Math.round(height))}px`;
   tr.appendChild(td);
   return tr;
@@ -1215,6 +1241,7 @@ function buildItemRow(i) {
   const tr = item.kind === "group" ? buildGroupHeader(item.key, item.count) : buildTrackRow(item.track, item.groupKey);
   tr.setAttribute("aria-rowindex", String(gridRowNumber(i)));
   if (item.kind === "group") return tr;
+  activeApplyReview?.paint(tr);
   tr.tabIndex = item.track.path === activeRowPath ? 0 : -1;
   renderedRows.set(item.track.path, tr);
   return tr;
@@ -1367,6 +1394,8 @@ document.addEventListener("tagrex:dock-resize-end", () => {
 });
 
 function renderTracks({ preparedFilter = null } = {}) {
+  setReviewColumns(stagedView);
+  syncTableColumns();
   filterRenderVersion++;
   filterPending = false;
   updateSortIndicators();
@@ -1538,7 +1567,7 @@ function renderPreview(plan) {
       else { stagedMembershipPending = false; renderTracks(); }
     }
     document.body.classList.add('diffing','automatic-transform-preview');
-    syncFileView();
+    if (syncFileView()) renderTracks();
     for (const [path,row] of renderedRows) {
       const displaySignature = change => JSON.stringify([change?.tag_changes, !!change?.cover_change, change?.cover_change?.new?.length]);
       if (displaySignature(previous.get(path)) === displaySignature(next.get(path))) continue;
@@ -1730,7 +1759,7 @@ function updateDiffBar(scope) {
 const DIFF_MAIN_COLS = ["file", "artist", "title", "album", "year"];
 
 function diffLabel(field) {
-  return field.startsWith("custom:") ? field.slice(7) : fieldLabel(field);
+  return fieldLabel(field);
 }
 
 function diffDir(path) {
@@ -2156,10 +2185,8 @@ async function afterOpen(label, version = openVersion, savedView = null) {
   if (version !== openVersion) return;
   const loadedTracks = await invoke("list_tracks", {});
   if (version !== openVersion) return;
+  folderSortOrders.clear();
   setTracks(loadedTracks);
-  // The scanner lists names as text (`1, 10, 2`); the header's sort is what the
-  // table shows, here as after an apply (#196, #526).
-  sortTracks();
   // Only the first readable track is selected on open (#128), so an operation
   // never silently hits the whole library — the user picks what to work on
   // (a row, a range, a whole folder via its group header, or the select-all
@@ -2189,6 +2216,7 @@ async function afterOpen(label, version = openVersion, savedView = null) {
   clearHealth(); // a check belongs to the library it was run on (#436)
   syncFilterControls(); // clears the parsed query + any regex-error state
   setGroupBy(dropFolders ? "drop" : groupByPref(), { persist: false, rerender: false });
+  folderOrderForSort();
   if (savedView) {
     filterConditions = normalizeConditions(savedView.conditions);
     filterConditionMode = savedView.conditionMode === "any" ? "any" : "all";
@@ -2200,10 +2228,10 @@ async function afterOpen(label, version = openVersion, savedView = null) {
     const validColumns = new Set(allColumnKeys());
     setSortKey(validColumns.has(savedView.sortKey) || savedView.sortKey === 'artwork' ? savedView.sortKey : null);
     setSortDir(savedView.sortDir);
-    sortTracks();
     // Group fields are checked against the current menu, not trusted from storage.
     const groups = [...el('group-menu').querySelectorAll('[data-group]')].map(option => option.dataset.group);
     if (groups.includes(savedView.groupBy)) setGroupBy(savedView.groupBy, { persist: false, rerender: false });
+    sortTracks();
     collapsedGroups.clear();
     for (const key of savedView.collapsed) collapsedGroups.add(key);
     selection.clear();
@@ -2345,13 +2373,28 @@ function remapTransformSelection(paths) {
   selBase = new Set([...selBase].map(path => paths.get(path) || path));
 }
 
-function freezeMutationSurfaces() {
+function freezeMutationSurfaces({ scrollableFiles = false } = {}) {
   const surfaces = [...document.querySelectorAll('.mode-col, #files-view')];
   const states = surfaces.map(node => [node, node.inert]);
   const controls = surfaces.flatMap(node => [...node.querySelectorAll('input,textarea,select,button')]).map(node => [node,node.disabled]);
-  for (const [node] of states) node.inert = true;
+  for (const [node] of states) node.inert = scrollableFiles && node.id === 'files-view' ? false : true;
   for (const [node] of controls) node.disabled = true;
+  // Keep native scrolling and scrollbar dragging, while blocking table edits,
+  // sorting and selection for the duration of the transaction.
+  const block = event => {
+    if (event.type === 'pointerdown' && event.target === tableWrap) return;
+    if (event.type === 'keydown') {
+      const distance = { PageDown:tableWrap.clientHeight * .85, PageUp:-tableWrap.clientHeight * .85, ArrowDown:40, ArrowUp:-40 }[event.key];
+      if (distance) tableWrap.scrollTop += distance;
+      else if (event.key === 'Home') tableWrap.scrollTop = 0;
+      else if (event.key === 'End') tableWrap.scrollTop = tableWrap.scrollHeight;
+    }
+    event.preventDefault(); event.stopImmediatePropagation();
+  };
+  const blocked = ['pointerdown','click','dblclick','contextmenu','keydown'];
+  if (scrollableFiles) for (const type of blocked) tableWrap.addEventListener(type, block, true);
   return () => {
+    if (scrollableFiles) for (const type of blocked) tableWrap.removeEventListener(type, block, true);
     for (const [node,disabled] of controls) if (node.isConnected) node.disabled = disabled;
     for (const [node,inert] of states) node.inert = inert;
   };
@@ -2367,9 +2410,11 @@ async function apply() {
   // Only the ticked rows are applied (#81). The apply scope is the sel-column
   // tick set (`applySelection`) while diffing. The plan the backend gets — and
   // undo journals — is exactly this subset.
+  const changesByPath = new Map(previewPlan.changes.map(change => [change.path, change]));
   const appliedPlan = {
     ...previewPlan,
-    changes: previewPlan.changes.filter((c) => applySelection.has(c.path)),
+    changes: orderPathsForDisplay([...changesByPath.keys()])
+      .filter(path => applySelection.has(path)).map(path => changesByPath.get(path)),
   };
   if (appliedPlan.changes.length === 0) {
     toast(msg("app.tickOneRow"), true);
@@ -2379,12 +2424,25 @@ async function apply() {
   // A second Apply (the shortcut, a double click) would queue behind the first.
   if (applying || undoing) return;
   applying = true;
-  const releaseMutationSurfaces = freezeMutationSurfaces();
+  spreadsheet?.refresh();
+  const releaseMutationSurfaces = freezeMutationSurfaces({ scrollableFiles: true });
   const sourceTracks = tracks;
+  const review = createApplyReview(appliedPlan.changes, {
+    columns: tableColumnKeys().slice(), offset: TABLE_DATA_COLUMN_OFFSET,
+    rowForPath: renderedRow, artworkLabel: state => msg(`table.artwork.${state}`),
+  });
+  activeApplyReview = review;
+  for (const row of renderedRows.values()) review.paint(row);
   pauseAutomaticTransformPreview();
   try {
-    await beginApplyProgress();
+    await beginApplyProgress(progress => {
+      // The initial pass validates every file without writing. Follow rows only
+      // once the executor starts the sequential write pass.
+      if (!progress.completed && progress.done < appliedPlan.changes.length) return;
+      review.progress(progress);
+    });
     const batch = await invoke("apply_plan", { plan: appliedPlan });
+    review.completeAll();
     if (sourceTracks !== tracks) return;
     rememberBatchScope(batch, appliedPlan);
     toast(msg("toast.applied", { files: tn("unit.file", appliedPlan.changes.length) }));
@@ -2413,19 +2471,30 @@ async function apply() {
       ? new Map(appliedPlan.changes.map(change => [change.path, new Set((change.tag_changes || []).map(field => field.field))])) : undefined;
     invalidateCustomColumns(readback === "scoped" ? batchRefreshScopes.get(batch.id) : null, scopedFields);
     // exitDiffState() drops the plan + apply scope and repaints the table.
+    // Successful work leaves a clean selection for the next operation. Keep
+    // these anchors on rollback so the same preview remains available to retry.
+    selection.clear();
+    selAnchor = null; selBase.clear();
+    reviewAnchor = null; reviewBase.clear();
+    spreadsheet?.clearRange({ refresh:false });
+    activeApplyReview = null;
     exitDiffState();
     refreshCustomColumnCells();
     await refreshHistory();
   } catch (e) {
+    activeApplyReview = null;
+    review.restore();
     // A cancel is the user's own doing and left everything as it was: say so
     // rather than raising it as a failure (#437).
     const code = e && e.failure && e.failure.message && e.failure.message.code;
     if (code === "error.plan.cancelled") toast(msg("toast.applyCancelled"));
     else toast(String(e), true);
   } finally {
+    activeApplyReview = null;
     endApplyProgress();
     applying = false;
     releaseMutationSurfaces();
+    spreadsheet?.refresh();
     resumeAutomaticTransformPreview({ dismiss: !hasLiveInputs() });
   }
 }
@@ -3415,6 +3484,14 @@ function refreshRoving() {
   for (const [path, tr] of renderedRows) tr.tabIndex = path === activeRowPath ? 0 : -1;
 }
 
+// Use the complete view model rather than mounted rows: grouping can place
+// files in a different order from the filename-sorted library array. Selected
+// paths outside the current filter retain their captured order at the end.
+function orderPathsForDisplay(paths) {
+  return [...paths].sort((a, b) =>
+    (viewPathIndex.get(a) ?? Infinity) - (viewPathIndex.get(b) ?? Infinity));
+}
+
 // Scroll `path` into view when it is outside the window, so a row reached by
 // keyboard exists to be focused. The sticky header sits over the top of the
 // scroller, so a row arriving from above is placed below it rather than under it.
@@ -3521,12 +3598,15 @@ function sortTracks() {
   setManualOrder(false);
   // Build expensive display keys once for this sort, without retaining stale
   // keys after edits. Preserve the library array and each track object.
+  const folderOrder = folderOrderForSort();
   const keyed = tracks.map((track) => ({
     track,
+    folderRank: folderOrder?.get(groupKeyOf(track)),
     value: sortValue(track, sortKey),
     unknown: sortKey === "artwork" && coverState(track) === "unknown",
   }));
   keyed.sort((a, b) => {
+    if (folderOrder && a.folderRank !== b.folderRank) return a.folderRank - b.folderRank;
     if (a.unknown !== b.unknown) return Number(a.unknown) - Number(b.unknown);
     return numericCollator.compare(a.value, b.value) * sortDir;
   });
@@ -3847,7 +3927,7 @@ spreadsheet = initSpreadsheet({
   table: el("tracks"),
   getRows: () => navPaths,
   getRowIndex: (path) => navPathIndex.get(path),
-  getColumns: () => visibleColumns,
+  getColumns: () => tableColumnKeys(),
   getRow: renderedRow,
   rowCount: () => viewItems.length,
   rowNumber: (path) => gridRowNumber(itemIndexByPath.get(path)),
@@ -3868,7 +3948,7 @@ spreadsheet = initSpreadsheet({
     return "";
   },
   validate: (field, value, path) => validateFieldValue(field, value, [path]),
-  isReviewing: () => !editablePreview(),
+  isReviewing: () => applying || !editablePreview(),
   batchProblem: spreadsheetBatchProblem,
   stage: stageSpreadsheetEdits,
   beginEdit: beginCellEdit,

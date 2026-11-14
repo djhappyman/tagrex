@@ -1,3 +1,4 @@
+import { prepareImportPreferences } from './import-preferences.js';
 import { beginLiveImport, finishLiveImport, isLiveImportCurrent, replaceLiveImport, adoptLiveCoverPlan } from "./live-preview.js";
 import { createComponentElement, upgradeComponentMarkup } from "../lib/component-elements.js";
 // The ONLINE sub-tab of TAGGER (#27, #143 split it out of app.js).
@@ -7,7 +8,7 @@ import { createComponentElement, upgradeComponentMarkup } from "../lib/component
 // browser, the query presets that build a search string from the selection, and
 // the import that merges a release onto the selected files. Everything it
 // stages goes through the ordinary preview/apply/undo path.
-import { confirmDialog, el, escapeHtml, fileName, ico, placeFloating, toast } from "./dom.js";
+import { confirmDialog, el, escapeHtml, fileName, ico, placeFloating, placeContextMenu, toast } from "./dom.js";
 import { t, tn } from "./i18n.js";
 import { chooseArtwork } from "./artworkpicker.js";
 import { invoke } from "./invoke.js";
@@ -15,8 +16,6 @@ import { hooks } from "./hooks.js";
 import { fmtTime } from "./player.js";
 import { refreshFieldEditor } from "./editor.js";
 import { updateSettingsDot } from "./settings.js";
-import { MEDIA_GLYPH_SETS } from "./mediaglyphs.js";
-import { mediaGlyphSet } from "./prefs.js";
 import {
   edits,
   captureSelection,
@@ -24,21 +23,17 @@ import {
   previewPlan,
   savedSettings,
   selectedPaths,
-  selection,
-  setManualOrder,
   setPreviewPlan,
   setPendingImportCover,
   setPreviewSource,
-  setTracks,
   tag,
-  trackAt,
   trackByPath,
   tracks,
 } from "./state.js";
 
 // ---- Discogs import (release picker cards, #27 step 2) ----
 // Each search hit is a card; expanding it lazily fetches the release (tracklist)
-// and its cover. Import / auto-match / embed-cover are per-card and route
+// and its cover. Import and artwork actions are per-card and route
 // through the same preview/apply/undo path as before.
 let releaseCandidates = []; // last search results (CandidateDto[])
 // Which provider produced the current results (#33). Captured at search time so
@@ -50,6 +45,7 @@ const artworkImages = new Map(); // releaseId -> URL -> fetched image promise
 const artworkRotations = new Map(); // releaseId -> committed image orientations
 const artworkChoices = new Map(); // releaseId -> chosen image index
 let artworkPickerOpen = false;
+let artworkMenuRequest = 0;
 const coverCache = new Map(); // releaseId -> CoverArtDto (full cover, for embed)
 // Fetched images as data URIs, so re-rendering (layout toggle) never re-fetches.
 const imageCache = new Map(); // releaseId -> { thumb?, cover? }
@@ -309,43 +305,36 @@ function mediaTagValue(format) {
   return label || (format || "").trim() || null;
 }
 
-// The inline SVG glyphs (currentColor, CSP-safe) come from mediaglyphs.js, which
-// holds the shipped hand-drawn set plus the icon families being trialled in the
-// LAB. The chosen family is a display pref; an unknown value falls back to the
-// shipped set.
-function activeGlyphs() {
-  return MEDIA_GLYPH_SETS[mediaGlyphSet()] || MEDIA_GLYPH_SETS.ours;
-}
-
-// The badge for a candidate. The media glyph is known up front (from `format`);
-// the ×N disc count only appears once the release is fetched (disc count needs
-// its tracklist), so re-render it via `updateMediaBadge` after the prefetch.
+// Artwork count appears on the cover once the release images are known.
 function mediaBadgeMarkup(c) {
   const kind = mediaKind(c.format);
   const release = releaseCache.get(c.id);
-  const discs = release ? discCount(release) : 1;
-  const n = discs > 1 ? `<span class="n">×${discs}</span>` : "";
-  const label = MEDIA_LABEL[kind] && mediaTitle(kind);
-  return `<span class="media-badge"${label ? ` title="${escapeHtml(label)}"` : ""}>${activeGlyphs()[kind]}${n}</span>`;
+  const images = release ? (release.images?.length || (release.cover_image_url ? 1 : 0)) : 0;
+  const n = images ? `<span class="n">${images}</span>` : "";
+  const label = [MEDIA_LABEL[kind] && mediaTitle(kind), images && tn("unit.image", images)].filter(Boolean).join(" · ");
+  return `<span class="media-badge"${label ? ` title="${escapeHtml(label)}"` : ""}>${ico("image")}${n}</span>`;
 }
 
-// Swap every visible card's glyph when the LAB glyph-set pref changes, without a
-// full re-render — the pref is read fresh by mediaBadgeMarkup, so re-emitting the
-// badges is enough.
-document.addEventListener("tagrex:mediaglyphset", () => {
-  for (const c of releaseCandidates) updateMediaBadge(c);
-});
-
-// Refresh the badge (its ×N) for one release after its tracklist is fetched.
+// Refresh artwork count after fetching release details.
 function updateMediaBadge(c) {
   const badge = coverElOf(c.id)?.querySelector(".media-badge");
   if (badge) badge.outerHTML = mediaBadgeMarkup(c);
+  const card = cardEl(c.id);
+  if (card) {
+    const candidate = releaseCandidates.find(candidate => candidate.id === c.id) || c;
+    const meta = card.querySelector('.release-meta');
+    if (meta) meta.textContent = releaseMeta(candidate);
+    const label = card.querySelector('.release-label');
+    const markup = releaseLabel(candidate);
+    if (label && label.dataset.markup !== markup) {
+      label.innerHTML = markup; label.dataset.markup = markup;
+      upgradeComponentMarkup(label);
+    }
+  }
 }
 
 function renderReleaseList() {
   const list = releaseList();
-  // The buttons about to be rebuilt carry their default label again (#191).
-  armedByLength.clear();
   list.innerHTML = "";
   el("release-toolbar").hidden = releaseCandidates.length === 0;
   // The whole phrase, not just the number: "Found 1 entries" was the same
@@ -517,15 +506,23 @@ window.addEventListener("resize", () => {
   if (!el("query-preset-menu").hidden) placeQueryPresets();
 });
 
-// Plain catalogue/count facts. Keep the provider-link and async count hooks,
-// with no badge chrome or invented catalogue placeholder.
-function releaseBadge(c) {
-  const catalogue = String(c.catalog_number || "").trim();
-  const catno = catalogue && catalogue.toLowerCase() !== "none"
-    ? `<span class="rb-catno" title="${escapeHtml(t("online.openRelease"))}">${escapeHtml(catalogue)}</span>`
-    : "";
-  const counts = releaseCache.has(c.id) ? countLabel(c.id) : "";
-  return `<span class="release-facts">${catno}<span class="rb-count tk-count">${escapeHtml(counts)}</span></span>`;
+function releaseMeta(c) {
+  const release = releaseCache.get(c.id);
+  const format = release?.format || c.format || '';
+  const medium = MEDIA_LABEL[mediaKind(format)] || String(format).split(',')[0].trim();
+  const quantity = release && isPhysicalMedia(format) ? discCount({ ...release, format }) : 1;
+  return [release?.year || c.year, release?.country || c.country, quantity > 1 ? `${quantity}×${medium}` : medium].filter(Boolean).join(' · ');
+}
+
+function releaseLabel(c) {
+  const labels = releaseCache.get(c.id)?.labels || [];
+  if (labels.length > 1) return `<select class="label-picker" aria-label="${escapeHtml(t('online.labelPickerTitle'))}" title="${escapeHtml(t('online.labelPickerTitle'))}">${labels.map((label,index)=>
+    `<option value="${index}">${escapeHtml([label.name,label.catalog_number].filter(Boolean).join(' · '))}</option>`).join('')}</select>`;
+  const name = labels[0]?.name || '';
+  const catalogue = String(labels[0]?.catalog_number || c.catalog_number || '').trim();
+  const number = catalogue.toLowerCase() === 'none' ? '' : catalogue;
+  if (!name && !number) return '';
+  return `<button type="button" class="release-label-link" title="${escapeHtml(t('online.openRelease'))}">${name ? `<span>${escapeHtml(name)}</span>` : ''}${name && number ? '<span aria-hidden="true"> · </span>' : ''}${number ? `<span class="rb-catno">${escapeHtml(number)}</span>` : ''}</button>`;
 }
 
 // Open a candidate's provider release page (#92). Source is the committed search
@@ -543,9 +540,9 @@ function cardMarkup(c) {
   // provider format/edition wording available without filling the result row.
   const artist = c.artist ? `<span class="release-artist" title="${escapeHtml(c.artist)}">${escapeHtml(c.artist)}</span>` : "";
   const fullMeta = candidateMeta(c);
-  const medium = String(c.format || "").split(",")[0].trim();
-  const meta = [c.year, c.country, medium].filter(Boolean).join(" · ");
+  const meta = releaseMeta(c);
   const metaLine = meta ? `<span class="release-meta" title="${escapeHtml(fullMeta)}">${escapeHtml(meta)}</span>` : "";
+  const label = releaseLabel(c);
   return `
     <article class="release-card" data-id="${escapeHtml(c.id)}" aria-expanded="false">
       <div class="release-header-row">
@@ -554,12 +551,12 @@ function cardMarkup(c) {
           <span class="release-info">
             <span class="release-title" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</span>
             ${artist}
-            ${releaseBadge(c)}
             ${metaLine}
           </span>
           <span class="release-caret" aria-hidden="true">${ico("chevron-right")}</span>
         </button>
-        <button class="release-import icon" type="button" data-act="import" title="${escapeHtml(t("online.importTitle"))}" aria-label="${escapeHtml(t("online.importTitle"))}"><svg class="ico"><use href="#i-import"/></svg></button>
+        <div class="release-label" data-markup="${escapeHtml(label)}">${label}</div>
+        <button class="release-import btn-sm" type="button" data-act="import" title="${escapeHtml(t("online.importTitle"))}" aria-label="${escapeHtml(t("online.importTitle"))}"><svg class="ico"><use href="#i-import"/></svg><span>${t("online.importAction")}</span></button>
       </div>
       <div class="release-tracklist"></div>
     </article>`;
@@ -829,6 +826,7 @@ async function toggleCard(card) {
       release = await invoke("provider_fetch_release", { source: releaseSource, token, releaseId: id });
       releaseCache.set(id, release);
     }
+    updateMediaBadge(releaseCandidates.find(c => c.id === id) || { id, format: release.format });
     renderTracklist(card, release);
     body.dataset.loaded = "1";
     const tkPill = countPillOf(id); if (tkPill) tkPill.textContent = countLabel(id);
@@ -841,181 +839,8 @@ async function toggleCard(card) {
   }
 }
 
-// ---- length match against the selection (#188) ----
-// A release card says what each track should run to; the table already knows
-// what the selected files really run to. The difference between the two is what
-// tells a CD rip filed under a vinyl catalogue number from the vinyl itself —
-// and it has to be readable BEFORE an import, because after one the wrong
-// lengths are already written as tags.
-//
-// Both sides are in memory (the release carries its durations, every row of the
-// table carries the file's), so this is arithmetic, not I/O, and it can follow
-// the selection as it changes.
-
-// Within this many seconds two lengths are the same recording; up to `NEAR` a
-// plausible other master or fade-out; past that a different recording. Nothing
-// is paired at all beyond `PAIR_LIMIT` — a number that far out invites reading
-// meaning into a coincidence.
-const MATCH_SECS = 2;
-const NEAR_SECS = 10;
-const PAIR_LIMIT_SECS = 120;
-
-// Pair each release track with the selected file closest to it in length, one
-// file to one track, closest pairs claimed first. Deliberately NOT the import's
-// positional pairing: three files of a five-track release line up against
-// tracks 1-3 there, which is exactly the case this is meant to see through.
-// Returns the map track index -> { delta (file minus track), path, secs }, and
-// how many selected files could take part at all — an empty map means "nothing
-// to compare" or "nothing close enough", and the tally says different things
-// about the two.
-function durationPairs(release) {
-  const files = [];
-  for (const path of selectedPaths()) {
-    const t = trackAt(path);
-    if (t && t.duration_secs) files.push({ path, secs: t.duration_secs });
-  }
-  const byTrack = new Map();
-  if (files.length === 0) return { pairs: byTrack, files: 0 };
-  const whole = release.tracks.every((t) => !t.duration_secs || Number.isInteger(t.duration_secs))
-    && files.every((f) => Number.isInteger(f.secs));
-  const pairing = whole ? pairByClosestLength(release.tracks, files) : pairByClosestLengthSorted(release.tracks, files);
-  for (const [i, j] of pairing) {
-    byTrack.set(i, { delta: files[j].secs - release.tracks[i].duration_secs, path: files[j].path, secs: files[j].secs });
-  }
-  return { pairs: byTrack, files: files.length };
-}
-
-// Each track with a length takes the free file closest to it in length, within
-// PAIR_LIMIT_SECS: the closest pairs of all are settled first, a tie goes to the
-// earlier track, then to the earlier file. Returns track index -> file index.
-//
-// Built by listing every track-file pair and sorting them, this ran on each change
-// of the selection: with a release of 3,353 tracks open and 1,000 files selected
-// that was 2 million pairs and a second's freeze per click. Lengths are whole
-// seconds, so the same settling walks the distance up from 0 instead, taking for
-// each open track the earliest free file of a length that far off; the files of
-// one length are taken in order, so the earliest free one is always the next.
-function pairByClosestLength(tracks, files) {
-  const byLength = new Map(); // length -> { indices of the files of that length, the next free one }
-  files.forEach((f, j) => {
-    let bucket = byLength.get(f.secs);
-    if (!bucket) byLength.set(f.secs, (bucket = { files: [], next: 0 }));
-    bucket.files.push(j);
-  });
-  const free = (secs) => {
-    const bucket = byLength.get(secs);
-    return bucket && bucket.next < bucket.files.length ? bucket : null;
-  };
-  const pairing = new Map();
-  let open = [];
-  tracks.forEach((t, i) => {
-    if (t.duration_secs) open.push(i);
-  });
-  for (let distance = 0; distance <= PAIR_LIMIT_SECS && open.length; distance++) {
-    const still = [];
-    for (const i of open) {
-      const secs = tracks[i].duration_secs;
-      const shorter = free(secs - distance);
-      const longer = distance > 0 ? free(secs + distance) : null;
-      let bucket = shorter;
-      if (longer && (!bucket || longer.files[longer.next] < bucket.files[bucket.next])) bucket = longer;
-      if (bucket) pairing.set(i, bucket.files[bucket.next++]);
-      else still.push(i);
-    }
-    open = still;
-  }
-  return pairing;
-}
-
-// The same pairing by listing and sorting every pair: what a length that is not
-// a whole number of seconds needs, which the backend does not send today.
-function pairByClosestLengthSorted(tracks, files) {
-  const pairs = [];
-  tracks.forEach((t, i) => {
-    if (!t.duration_secs) return;
-    files.forEach((f, j) => {
-      const delta = f.secs - t.duration_secs;
-      if (Math.abs(delta) <= PAIR_LIMIT_SECS) pairs.push({ i, j, delta });
-    });
-  });
-  pairs.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta));
-  const pairing = new Map();
-  const takenFiles = new Set();
-  for (const p of pairs) {
-    if (pairing.has(p.i) || takenFiles.has(p.j)) continue;
-    pairing.set(p.i, p.j);
-    takenFiles.add(p.j);
-  }
-  return pairing;
-}
-
-function deltaBand(delta) {
-  const d = Math.abs(delta);
-  if (d <= MATCH_SECS) return "match";
-  if (d <= NEAR_SECS) return "near";
-  return "off";
-}
-
-// "+2s" / "-1:14" — seconds while they read as seconds, m:ss beyond a minute.
-function deltaLabel(delta) {
-  const d = Math.abs(delta);
-  const sign = delta > 0 ? "+" : delta < 0 ? "-" : "";
-  return `${sign}${d < 60 ? t("unit.secondsShort", { n: d }) : fmtTime(d)}`;
-}
-
-// The duration cell of one track row: the release's own time, plus the
-// difference to the file paired with it when there is one.
-function durationCell(track, pair) {
-  const base = track.duration_secs ? fmtTime(track.duration_secs) : "—";
-  if (!pair) return base;
-  const title = t("online.runs", { file: fileName(pair.path), time: fmtTime(pair.secs) });
-  return `${base}<span class="tk-delta ${deltaBand(pair.delta)}" title="${escapeHtml(title)}">${deltaLabel(
-    pair.delta,
-  )}</span>`;
-}
-
-// Re-derive the pairing for one rendered tracklist and write it into the rows.
-// Rows are rendered in `release.tracks` order, so the index is the row.
-function applyDurationDeltas(card, release) {
-  const { pairs, files } = durationPairs(release);
-  // The pairing is kept with the tracklist, not in the rows: only the rows in
-  // view are drawn, and the ones drawn later must show it too.
-  const state = tracklistState.get(card);
-  if (state) {
-    state.pairs = pairs;
-    renderWindow(card, true);
-  }
-  const fit = card.querySelector(".tk-fit");
-  if (!fit) return;
-  // The tally answers the question the rows only imply — is this the edition? —
-  // and says nothing at all when there was nothing to compare, rather than
-  // reporting a miss the user never asked for.
-  const stated = release.tracks.filter((t) => t.duration_secs).length;
-  const hits = [...pairs.values()].filter((p) => deltaBand(p.delta) === "match").length;
-  const comparable = files > 0 && stated > 0;
-  fit.textContent = !comparable
-    ? ""
-    : hits
-      ? t("online.lengthsMatch", { hits, stated })
-      : t("online.noLengthsMatch");
-  fit.classList.toggle("hit", comparable && hits > 0);
-  fit.classList.toggle("miss", comparable && hits === 0);
-}
-
-// Follow the selection: the deltas are about the files the user has picked, so
-// they go stale the moment that changes (app.js calls this from paintSelection).
-function refreshReleaseMatches() {
-  // The second press answers about the selection it was armed for (#191); a
-  // different selection is a different question.
-  if (armedByLength.size && selectionSignature() !== armedSelection) disarmLengthMatch();
-  for (const id of expandedIds) {
-    const card = cardEl(id);
-    const release = releaseCache.get(id);
-    if (card && release && card.querySelector(".release-tracklist")?.dataset.loaded === "1") {
-      applyDurationDeltas(card, release);
-    }
-  }
-}
+// Selection changes do not alter release order or track checkboxes.
+function refreshReleaseMatches() {}
 
 // ---- the drawn window of a tracklist ----
 // A release can list thousands of tracks (USB "editions" of 1,017 and 3,353),
@@ -1023,9 +848,9 @@ function refreshReleaseMatches() {
 // whole, that was about 7,000 composited layers and 34,000 nodes, and the list
 // scrolled at 15 fps. Only the rows in and near view are in the DOM; a spacer
 // row of the exact height stands for the rows above and another for those
-// below. The ticks and the length pairs live in the state below, not in the
+// below. The ticks live in the state below, not in the
 // rows, so they hold for the rows not drawn.
-const tracklistState = new WeakMap(); // card element -> { release, rows, checked, pairs, ... }
+const tracklistState = new WeakMap(); // card element -> { release, rows, checked, ... }
 const WINDOW_MARGIN_PX = 1000; // drawn beyond each edge of the view
 const WINDOW_CHUNK = 32; // the window moves this many rows at a time
 
@@ -1039,7 +864,7 @@ function trackRowHtml(state, i) {
   return `<tr class="tk-row">
     <td class="tk-lead"><span class="tk-lead-inner"><input type="checkbox"${state.checked[i] ? " checked" : ""} data-i="${i}" /><span class="tk-num">${escapeHtml(t.position)}</span></span></td>
     <td class="tk-track"><span class="tk-track-inner"><span class="tk-t" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</span>${artistEl}</span></td>
-    <td class="tk-dur">${durationCell(t, state.pairs.get(i))}</td>
+    <td class="tk-dur">${t.duration_secs ? fmtTime(t.duration_secs) : "—"}</td>
   </tr>`;
 }
 
@@ -1275,7 +1100,24 @@ function fixTrackColumnWidth(card) {
   }
 }
 
+function releaseArtworkMenu(card, release) {
+  const existing = card.querySelector('.tk-save-menu');
+  if (existing) return existing;
+  const images = release.images || [];
+  const menu = document.createElement('div');
+  menu.className = 'col-menu tk-save-menu';
+  menu.hidden = true;
+  menu.innerHTML = `
+    <button type="button" class="col-menu-row tk-menu-item" data-act="embed">${t("online.embedSelected")}</button>
+    ${images.length ? `<button type="button" class="col-menu-row tk-menu-item" data-act="save-cover">${t("online.saveAsFolder")}</button>` : ""}
+    ${images.length > 1 ? `<button type="button" class="col-menu-row tk-menu-item" data-act="save-all">${t("online.saveAll", { images: tn("unit.image", images.length) })}</button>` : ""}`;
+  // Artwork actions belong to the card, independently of its hidden tracklist.
+  card.append(menu);
+  return menu;
+}
+
 function renderTracklist(card, release) {
+  releaseArtworkMenu(card, release);
   // A sub-section header row (#328) precedes the first track of each labelled
   // run — a Discogs heading or a MusicBrainz medium title. It carries no
   // checkbox and no duration, and stands in the list of rows to draw on its own.
@@ -1292,71 +1134,16 @@ function renderTracklist(card, release) {
     rows,
     // Every track starts ticked; the ticks live here, not in the rows.
     checked: new Uint8Array(release.tracks.length).fill(1),
-    pairs: new Map(),
     offsets: null, // where each drawn row starts, once a row of each kind is measured
     heights: null,
     start: -1,
     end: -1,
   });
-  // Label / catalogue-number picker (#90): a release can list several pairs
-  // (even from one label); the user picks the single one to write. One pair (or
-  // none) needs no picker — importRelease falls back to the first.
-  const labels = release.labels || [];
-  const labelPicker =
-    labels.length > 1
-      ? `<div class="tracklist-label"><label>${t("online.labelCat")}
-          <select class="label-picker" title="${escapeHtml(t("online.labelPickerTitle"))}">${labels
-            .map(
-              (l, i) =>
-                `<option value="${i}">${escapeHtml(l.name)}${l.catalog_number ? " — " + escapeHtml(l.catalog_number) : ""}</option>`,
-            )
-            .join("")}</select></label></div>`
-      : "";
-  // Cover controls (#102): resolution + image count (from the release JSON's
-  // images, dimensions when the provider states them), and save-to-disk actions.
-  const images = release.images || [];
-  const primary = images[0];
-  const res = primary && primary.width && primary.height ? `${primary.width}×${primary.height}` : "";
-  // The resolution describes the PRIMARY image specifically — provider.rs orders
-  // `images` primary-first and `cover_image_url` is that first entry, so it's the
-  // exact file "Save as folder.jpg" writes. Embedding uses the image chosen
-  // through the artwork browser, or this primary image by default. It used to
-  // sit in the row as "600×594 · 12 images", where it read as a property of the
-  // whole set; it now hangs off the action it actually qualifies (and the button
-  // tooltip), which also frees the row of a text block.
-  const resNote = res ? `<span class="tk-menu-note">${res}</span>` : "";
-  const artTitle =
-    t("online.saveArtworkTitle") +
-    (res ? ` — ${t("online.frontCover", { res })}` : "") +
-    (images.length > 1 ? ` · ${tn("unit.image", images.length)}` : "");
-  const artCount = images.length > 1 ? `<span class="tk-art-count">${images.length}</span>` : "";
-  // Saving artwork is one call with a boolean (saveReleaseImages), so it reads as
-  // ONE control rather than two competing buttons: a plain button when the
-  // release carries a single image, a split button whose caret offers "all N"
-  // when there are more. The count stays in the menu item and the adjacent
-  // "N images" readout instead of being stamped on the button face.
-  const saveBtn = !images.length
-    ? ""
-    : images.length === 1
-      ? `<button class="btn-sm io tk-art-btn" data-act="save-cover" aria-label="${escapeHtml(t("online.saveCoverAria"))}" title="${escapeHtml(artTitle)}">${ico("image")}</button>`
-      : `<div class="col-picker tk-save">
-           <button class="btn-sm io tk-art-btn" data-act="save-menu" aria-label="${escapeHtml(t("online.saveMenuAria"))}" title="${escapeHtml(artTitle)}">${ico("image")}${artCount}${ico("caret-down")}</button>
-           <div class="col-menu tk-save-menu" hidden>
-             <button type="button" class="col-menu-row tk-menu-item" data-act="save-cover">${t("online.saveAsFolder")}${resNote}</button>
-             <button type="button" class="col-menu-row tk-menu-item" data-act="save-all">${t("online.saveAll", { images: tn("unit.image", images.length) })}</button>
-           </div>
-         </div>`;
   card.querySelector(".release-tracklist").innerHTML = `
-    <div class="tracklist-actions">
-      <button class="btn-sm" data-act="automatch" title="${escapeHtml(t("online.automatchTitle"))}">${t("online.automatch")}</button>
-      <button class="btn-sm" data-act="embed" title="${escapeHtml(t("online.embedTitle"))}">${t("online.embed")}</button>
-      ${saveBtn}
-    </div>
-    ${labelPicker}
     <div class="tracklist-scroll"><table>
       <thead><tr class="tk-head">
         <th class="tk-lead"><label class="tk-selall" title="${escapeHtml(t("online.selectAllTitle"))}"><input type="checkbox" class="tk-selall-box" aria-label="${escapeHtml(t("online.selectAllAria"))}" /></label></th>
-        <th class="tk-selcount muted" colspan="2"><span class="tk-readout"><span class="tk-fit" title="${escapeHtml(t("online.fitTitle"))}"></span><span class="tk-tally"></span></span></th>
+        <th class="tk-selcount muted" colspan="2"><span class="tk-readout"><span class="tk-count">${escapeHtml(countLabel(card.dataset.id))}</span><span class="tk-tally"></span></span></th>
       </tr></thead>
       <tbody></tbody></table></div>`;
   upgradeComponentMarkup(card.querySelector('.release-tracklist'));
@@ -1366,10 +1153,6 @@ function renderTracklist(card, release) {
   fixTrackColumnWidth(card);
   tracklistResize.observe(card.querySelector(".release-tracklist table"));
   updateTracklistCount(card);
-  // The rows above carry the release's own durations; the difference to the
-  // selected files is written in afterwards, by the one path that also keeps it
-  // current as the selection changes (#188).
-  applyDurationDeltas(card, release);
 }
 
 function updateTracklistCount(card) {
@@ -1389,7 +1172,7 @@ function updateTracklistCount(card) {
   }
 }
 
-// The enabled tracks of a card, shaped for import / auto-align.
+// Enabled tracks stay in release order for sequential import.
 function enabledTracksOf(card) {
   const state = tracklistState.get(card);
   if (!state) return [];
@@ -1430,326 +1213,6 @@ async function loadFullCover(id, url, card) {
     if (coverEl) setCoverImage(coverEl, `data:${cover.mime};base64,${cover.data_base64}`);
   } catch (e) {
     /* embedding just won't be available for this card */
-  }
-}
-
-// ---- applying a match (#185, shared by both presses of #191) ----
-// A match is only usable if the ticks agree with it: the import pairs the i-th
-// ENABLED track with the i-th file, so tick exactly the tracks that matched,
-// untick the rest, and put the files in the order of the tracks they matched.
-// Then the dense pairing is right by construction, including when the folder
-// holds fewer files than the release has tracks.
-function applyMatchOrder(card, paths, matchedPairs, unmatched) {
-  matchedPairs.sort((a, b) => a.track - b.track);
-  const wanted = new Set(matchedPairs.map((p) => p.track));
-  const state = tracklistState.get(card);
-  if (state) {
-    state.checked.forEach((_, i) => (state.checked[i] = wanted.has(i) ? 1 : 0));
-    renderWindow(card, true);
-  }
-  updateTracklistCount(card);
-  // Matched files first, in release order; anything unmatched keeps its own
-  // order after them, where the untouched tail of the tracklist is.
-  const order = [...matchedPairs.map((p) => p.path), ...unmatched];
-  const byPath = new Map(tracks.map((t) => [t.path, t]));
-  const selected = new Set(paths);
-  let next = 0;
-  setTracks(tracks.map((t) => (selected.has(t.path) ? byPath.get(order[next++]) : t)));
-  // The match orders the files it was given, and says so — it does not cancel
-  // the column sort (#198). Cancelling it also released the folder order, so
-  // lining up three files reshuffled every folder in the library.
-  setManualOrder(true);
-  hooks.renderTracks();
-}
-
-// ---- the second press: match by length (#191) ----
-// Two lengths this close are the same number as far as ordering goes, so a
-// release with two tracks within this many seconds of each other cannot say
-// which file is which — and the honest answer is to leave those alone rather
-// than to pick one.
-const AMBIGUOUS_SECS = 2;
-
-// Which cards currently offer "Match by length" instead of "Auto-match": armed
-// by a match on names, disarmed by a match on lengths (#199) and whenever the
-// selection or the results change, because the answer it would give is about
-// THIS selection.
-const armedByLength = new Set();
-let armedSelection = "";
-
-function selectionSignature() {
-  return [...selection].sort().join("\n");
-}
-
-function setMatchButton(card, byLength) {
-  const btn = card.querySelector('[data-act="automatch"]');
-  if (!btn) return;
-  btn.textContent = byLength ? t("online.matchByLength") : t("online.automatch");
-  btn.title = byLength ? t("online.matchByLengthTitle") : t("online.automatchTitle");
-}
-
-function armLengthMatch(card) {
-  armedByLength.add(card.dataset.id);
-  armedSelection = selectionSignature();
-  setMatchButton(card, true);
-}
-
-function disarmLengthMatch() {
-  for (const id of armedByLength) {
-    const card = cardEl(id);
-    if (card) setMatchButton(card, false);
-  }
-  armedByLength.clear();
-}
-
-// One card back to offering the names (#199), leaving any other card's offer
-// alone — the two rules alternate, so a length match that crossed the wrong two
-// files is undone by the next press rather than by clearing the selection.
-function disarmCard(card) {
-  armedByLength.delete(card.dataset.id);
-  setMatchButton(card, false);
-}
-
-// ---- what the lengths say about a match by name (#192) ----
-// A title that matches wins outright, and that is usually right: lengths differ
-// for innocent reasons — a fade, a different master, a listing rounded by hand.
-// A minute of disagreement is not innocent, though, and reporting it with the
-// same confidence as a clean match is how a whole folder gets tagged one title
-// out of step. This much apart is worth saying out loud.
-const NAME_MATCH_TOLERANCE_SECS = 10;
-
-function gapLabel(secs) {
-  return secs < 60 ? `${secs}s` : fmtTime(secs);
-}
-
-// The total the pairing is out by, over the pairs where both sides know their
-// length, plus the worst single one.
-function lengthDisagreement(release, pairsByTrack) {
-  let total = 0;
-  let worst = 0;
-  let off = 0;
-  for (const [track, path] of pairsByTrack) {
-    const file = trackAt(path)?.duration_secs;
-    const listed = release.tracks[track]?.duration_secs;
-    if (!file || !listed) continue;
-    const gap = Math.abs(file - listed);
-    total += gap;
-    if (gap > worst) worst = gap;
-    if (gap > NAME_MATCH_TOLERANCE_SECS) off += 1;
-  }
-  return { total, worst, off };
-}
-
-// What the names produced, weighed against what the lengths would have. When
-// the lengths put different files against the same tracks AND fit markedly
-// better, that is the crossed case — the one worth pointing at, because the
-// second press (#191) is exactly the fix.
-function lengthVerdict(release, matchedPairs) {
-  const byName = new Map(matchedPairs.map((p) => [p.track, p.path]));
-  const mine = lengthDisagreement(release, byName);
-  const { pairs } = durationPairs(release);
-  // Compare on the tracks both rules claimed, so the totals are about the same
-  // question.
-  const shared = [...pairs.entries()].filter(([track]) => byName.has(track));
-  const differs = shared.some(([track, pair]) => pair.path !== byName.get(track));
-  const theirs = lengthDisagreement(
-    release,
-    new Map(shared.map(([track, pair]) => [track, pair.path])),
-  );
-  const mineShared = lengthDisagreement(
-    release,
-    new Map(shared.map(([track]) => [track, byName.get(track)])),
-  );
-  return {
-    off: mine.off,
-    worst: mine.worst,
-    // A wide margin, so an ordinary second of rounding never reads as a
-    // different order being better.
-    suggestsOther: differs && mineShared.total - theirs.total > NAME_MATCH_TOLERANCE_SECS * 2,
-  };
-}
-
-// Order the files by the lengths the release lists rather than by their names.
-// This is the same pairing the card's deltas already show — one file to one
-// track, closest pairs claimed first — and it may CROSS, which is the case
-// names cannot express: two tracks whose names are swapped against their
-// lengths. The core's duration alignment preserves order and would refuse to
-// cross, so it is deliberately not what this uses.
-async function matchByLength(card) {
-  const release = releaseCache.get(card.dataset.id);
-  const paths = selectedPaths();
-  if (!release || paths.length === 0) {
-    toast(t("online.selectTracksFirst"), true);
-    return;
-  }
-  const { pairs } = durationPairs(release);
-  // Only claim a pairing the lengths actually support: a delta past the "near"
-  // band is a different recording, not a file out of order.
-  const claimed = [...pairs.entries()].filter(([, pair]) => Math.abs(pair.delta) <= NEAR_SECS);
-  // And drop the ones the lengths can't tell apart. The rival is any OTHER
-  // track of nearly the same length, matched or not: if two tracks run the same
-  // time, saying which of them a file is remains a guess even when only one of
-  // them has a file to claim.
-  const ambiguous = new Set();
-  for (const [i] of claimed) {
-    const mine = release.tracks[i].duration_secs;
-    const rival = release.tracks.some(
-      (t, k) => k !== i && t.duration_secs && Math.abs(t.duration_secs - mine) <= AMBIGUOUS_SECS,
-    );
-    if (rival) ambiguous.add(i);
-  }
-  const matchedPairs = claimed
-    .filter(([i]) => !ambiguous.has(i))
-    .map(([track, pair]) => ({ path: pair.path, track }));
-  // Where two tracks are too alike in length to choose, the names choose (#529).
-  if (ambiguous.size) {
-    try {
-      const byName = await invoke("auto_align", { paths, tracks: releaseTrackRefs(release) });
-      resolveSameLengths(release, paths, ambiguous, matchedPairs, byName);
-    } catch (e) {
-      /* the names are a help here, not a requirement */
-    }
-  }
-  if (matchedPairs.length === 0) {
-    toast(
-      ambiguous.size
-        ? t("online.sameLength")
-        : t("online.noCloseLengths"),
-      true,
-    );
-    return;
-  }
-  const taken = new Set(matchedPairs.map((p) => p.path));
-  const unmatched = paths.filter((path) => !taken.has(path));
-  applyMatchOrder(card, paths, matchedPairs, unmatched);
-  // The lengths have had their say; the button now offers the names again
-  // (#199). A press that changed nothing returned above with the offer intact.
-  disarmCard(card);
-  const dropped = release.tracks.length - matchedPairs.length;
-  const placed = new Set(matchedPairs.map((p) => p.track));
-  const stillAmbiguous = [...ambiguous].filter((track) => !placed.has(track)).length;
-  const notes = [];
-  if (stillAmbiguous)
-    notes.push(t("match.sameLength", { tracks: tn("unit.track", stillAmbiguous) }));
-  if (dropped > 0) notes.push(t("match.leftOut", { tracks: tn("unit.releaseTrack", dropped) }));
-  toast(
-    t("toast.match.byLength", {
-      matched: matchedPairs.length,
-      files: tn("unit.file", paths.length),
-    }) + (notes.length ? ` (${notes.join(", ")})` : ""),
-  );
-}
-
-// Settle the tracks the lengths could not tell apart (#529), adding to
-// `matchedPairs` in place. First the names: a file whose name points at such a
-// track, and whose length is near it, takes it. Then whatever that left: a
-// track none of whose same-length rivals is still free is no longer ambiguous,
-// and takes the one free file near its length.
-function resolveSameLengths(release, paths, ambiguous, matchedPairs, byName) {
-  const taken = new Set(matchedPairs.map((p) => p.path));
-  const placed = new Set(matchedPairs.map((p) => p.track));
-  const secsOf = (path) => trackAt(path)?.duration_secs;
-  const listed = (track) => release.tracks[track]?.duration_secs;
-  const near = (path, track) =>
-    secsOf(path) && listed(track) && Math.abs(secsOf(path) - listed(track)) <= NEAR_SECS;
-  const place = (path, track) => {
-    matchedPairs.push({ path, track });
-    taken.add(path);
-    placed.add(track);
-  };
-  paths.forEach((path, i) => {
-    const track = byName[i] ? byName[i].track : null;
-    if (track === null || !ambiguous.has(track) || placed.has(track) || taken.has(path)) return;
-    if (near(path, track)) place(path, track);
-  });
-  for (const track of ambiguous) {
-    if (placed.has(track)) continue;
-    const mine = listed(track);
-    const rivalFree = release.tracks.some(
-      (t, k) => k !== track && !placed.has(k) && t.duration_secs && Math.abs(t.duration_secs - mine) <= AMBIGUOUS_SECS,
-    );
-    if (rivalFree) continue;
-    const free = paths.filter((path) => !taken.has(path) && near(path, track));
-    if (free.length === 1) place(free[0], track);
-  }
-}
-
-// The release's tracks as the backend's alignment takes them.
-function releaseTrackRefs(release) {
-  return release.tracks.map((t) => ({
-    position: t.position,
-    artist: t.artist || release.artist,
-    title: t.title,
-    duration_secs: t.duration_secs ?? null,
-    isrc: t.isrc ?? null,
-  }));
-}
-
-async function autoMatchToRelease(card) {
-  const paths = selectedPaths();
-  const release = releaseCache.get(card.dataset.id);
-  if (!release || paths.length === 0) {
-    toast(t("online.selectTracksFirst"), true);
-    return;
-  }
-  const releaseTracks = releaseTrackRefs(release);
-  try {
-    // Each entry is { track, by_isrc } or null (#54).
-    const aligned = await invoke("auto_align", { paths, tracks: releaseTracks });
-    // The import pairs the i-th ENABLED track with the i-th file, so a match is
-    // only usable if the ticks agree with it (#185). Tick exactly the tracks
-    // that matched, untick the rest, and put the files in the order of the
-    // tracks they matched — then the dense pairing is right by construction,
-    // including when the folder holds fewer files than the release has tracks.
-    // Without this, a file matching track 5 of 5 in a folder of three had
-    // nowhere to go and was silently demoted to filler.
-    const matchedPairs = [];
-    const unmatched = [];
-    paths.forEach((path, i) => {
-      const k = aligned[i] ? aligned[i].track : null;
-      if (k === null || k === undefined) unmatched.push(path);
-      else matchedPairs.push({ path, track: k });
-    });
-    const hits = aligned.filter((m) => m);
-    const matched = hits.length;
-    if (matched) applyMatchOrder(card, paths, matchedPairs, unmatched);
-    // Names have had their say, whatever they said; the button now offers the
-    // other rule (#191) — for names that match perfectly while the lengths
-    // disagree, and for names that matched nothing at all.
-    armLengthMatch(card);
-    const byIsrc = hits.filter((m) => m.by_isrc).length;
-    // Surface *why* — an ISRC match is exact, worth calling out (#54).
-    const isrcNote = byIsrc ? " " + t("match.byIsrc", { count: byIsrc }) : "";
-    // Say when the release carries tracks this folder doesn't, so the ticks
-    // that just went off are not a surprise.
-    const dropped = release.tracks.length - matched;
-    const droppedNote =
-      matched && dropped > 0
-        ? ", " + t("match.leftOut", { tracks: tn("unit.releaseTrack", dropped) })
-        : "";
-    // The names decided; the lengths still get to say whether they agree (#192).
-    const verdict = matched ? lengthVerdict(release, matchedPairs) : { off: 0, suggestsOther: false };
-    const lengthNote = verdict.off
-      ? ". " +
-        t("match.lengthsDisagree", {
-          lengths: tn("unit.lengthDisagrees", verdict.off),
-          gap: gapLabel(verdict.worst),
-        }) +
-        (verdict.suggestsOther ? t("match.pressAgain") : "")
-      : "";
-    toast(
-      matched
-        ? t("toast.match.byName", {
-            matched,
-            files: tn("unit.file", paths.length),
-            isrc: isrcNote,
-            dropped: droppedNote,
-            lengths: lengthNote,
-          })
-        : t("toast.match.none"),
-      matched === 0 || verdict.off > 0,
-    );
-  } catch (e) {
-    toast(String(e), true);
   }
 }
 
@@ -1909,7 +1372,8 @@ async function requestImportPreview(args, version, subject) {
 }
 
 async function importRelease(card) {
-  const subject = captureSelection();
+  const captured = captureSelection();
+  const subject = { ...captured, paths: hooks.orderPathsForDisplay(captured.paths) };
   const paths = subject.paths;
   if (paths.length === 0) {
     toast(t("toast.online.selectImport"), true);
@@ -1951,6 +1415,8 @@ async function importRelease(card) {
     media_type: mediaTagValue(release.format),
   };
   try {
+    const preferences = await prepareImportPreferences();
+    if (!isSelectionCurrent(subject) || !isLiveImportCurrent(version)) return;
     const imported = await requestImportPreview({
       paths,
       selection,
@@ -1965,9 +1431,9 @@ async function importRelease(card) {
     // Awaited, unlike the fire-and-forget fetch that expanding a card starts:
     // importing straight after expanding would otherwise race it and drop the
     // artwork silently, which is the one failure this feature must not have.
-    await loadFullCover(card.dataset.id, release.cover_image_url, card);
+    if (preferences.import_cover !== 'never') await loadFullCover(card.dataset.id, release.cover_image_url, card);
     if (!isSelectionCurrent(subject) || !isLiveImportCurrent(version)) return;
-    if (!replaceLiveImport(imported, coverCache.get(card.dataset.id) || null, paths, version)) return;
+    if (!replaceLiveImport(imported, preferences.import_cover !== 'never' ? coverCache.get(card.dataset.id) || null : null, paths, version)) return;
     refreshFieldEditor({force:true});
     await hooks.previewEdits();
   } catch (e) {
@@ -2012,11 +1478,50 @@ el("search-format").addEventListener("change", () => {
   if (releaseCandidates.length || el("discogs-query").value.trim()) discogsSearch();
 });
 
+async function openReleaseArtworkMenu(event) {
+  const trigger = event.target.closest('.release-cover');
+  if (!trigger) return;
+  if (event.type === 'keydown' && event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
+  event.preventDefault(); event.stopPropagation();
+  const card = trigger.closest('.release-card');
+  if (!card) return;
+  const request = ++artworkMenuRequest;
+  const id = card.dataset.id, source = releaseSource, gen = searchGen;
+  trigger.setAttribute('aria-busy', 'true');
+  let menu;
+  try {
+    let release = releaseCache.get(id);
+    if (!release) {
+      const token = await providerToken(source);
+      release = await invoke('provider_fetch_release', { source, token, releaseId:id });
+      if (gen !== searchGen || !card.isConnected) return;
+      releaseCache.set(id, release);
+      updateMediaBadge(releaseCandidates.find(candidate => candidate.id === id) || { id, format:release.format });
+    }
+    if (request !== artworkMenuRequest || gen !== searchGen || !card.isConnected) return;
+    menu = releaseArtworkMenu(card, release);
+    // Let the shared menu shell mount before measuring its position.
+    await Promise.resolve();
+    if (request !== artworkMenuRequest || gen !== searchGen || !card.isConnected) return;
+  } catch (error) { toast(String(error), true); return; }
+  finally { trigger.removeAttribute('aria-busy'); }
+  document.querySelectorAll('.tk-save-menu').forEach(other => { if (other !== menu) other.hidden = true; });
+  menu.onkeydown = key => {
+    if (key.key === 'Escape') { menu.hidden = true; trigger.focus({ preventScroll: true }); }
+  };
+  menu.hidden = false;
+  if (event.type === 'keydown' || (!event.clientX && !event.clientY)) placeFloating(menu, trigger);
+  else placeContextMenu(menu, event.clientX, event.clientY);
+  queueMicrotask(() => menu.querySelector('button')?.focus({ preventScroll: true }));
+}
+el('release-list').addEventListener('contextmenu', openReleaseArtworkMenu);
+el('release-list').addEventListener('keydown', openReleaseArtworkMenu);
+
 // One delegated handler for every card interaction (they're re-rendered often).
 el("release-list").addEventListener("click", (e) => {
   // The catalogue chip opens the release's provider page (#92) in both layouts;
   // caught before the tile/card handlers so it never also expands/switches.
-  if (e.target.closest(".rb-catno")) {
+  if (e.target.closest(".release-label-link, .rb-catno")) {
     const host = e.target.closest("[data-id]");
     if (host) openReleasePage(host.dataset.id);
     return;
@@ -2026,29 +1531,8 @@ el("release-list").addEventListener("click", (e) => {
   const act = e.target.closest("[data-act]")?.dataset.act;
   if (act === "artwork") {
     pickReleaseArtwork(card);
-  } else if (act === "save-menu") {
-    // Split-button caret: toggle this card's save menu, closing any other.
-    const menu = card.querySelector(".tk-save-menu");
-    const anchor = e.target.closest('[data-act="save-menu"]');
-    e.stopPropagation();
-    document.querySelectorAll(".tk-save-menu").forEach((m) => {
-      if (m !== menu) m.hidden = true;
-    });
-    if (menu) {
-      menu.hidden = !menu.hidden;
-      anchor.setAttribute("aria-expanded", String(!menu.hidden));
-      if (!menu.hidden) {
-        menu.classList.add("floating");
-        placeFloating(menu, anchor);
-        queueMicrotask(() => menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true }));
-      }
-    }
-  } else if (act === "automatch") {
-    // One button, two rules (#191), alternating (#199): the label is the rule
-    // the next press will use, and each press offers the other one back.
-    if (armedByLength.has(card.dataset.id)) matchByLength(card);
-    else autoMatchToRelease(card);
   } else if (act === "embed") {
+    card.querySelector(".tk-save-menu").hidden = true;
     embedCoverFrom(card);
   } else if (act === "save-cover" || act === "save-all") {
     // Reached either from the plain single-image button or a menu item; dismiss
@@ -2057,7 +1541,9 @@ el("release-list").addEventListener("click", (e) => {
     if (menu) menu.hidden = true;
     saveReleaseImages(card, act === "save-all");
   } else if (act === "import") {
-    importRelease(card);
+    if (!releaseCache.has(card.dataset.id) || !tracklistState.has(card)) {
+      toggleCard(card).then(() => { if (tracklistState.has(card)) importRelease(card); });
+    } else importRelease(card);
   } else if (e.target.closest(".release-head")) {
     toggleCard(card);
   }
@@ -2084,7 +1570,7 @@ el("release-list").addEventListener("change", (e) => {
 // Outside-click closes an open save menu, matching the Columns/Presets popovers.
 document.addEventListener("click", (e) => {
   document.querySelectorAll(".tk-save-menu:not([hidden])").forEach((menu) => {
-    if (!menu.contains(e.target) && !e.target.closest('[data-act="save-menu"]')) menu.hidden = true;
+    if (!menu.contains(e.target)) menu.hidden = true;
   });
 });
 

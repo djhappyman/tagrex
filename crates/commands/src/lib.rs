@@ -2667,6 +2667,12 @@ impl App {
             settle_number_pair(&mut change, "track", "tracktotal", &locked);
             settle_number_pair(&mut change, "disc", "disctotal", &locked);
             settle_cleared_comment(&mut change, &locked);
+            // Staged rows describe actual writes, including imports whose tags
+            // already match. Keep invalid proposals visible for correction.
+            change.tag_changes.retain(|field| {
+                field.invalid
+                    || field.old.as_deref().unwrap_or("") != field.new.as_deref().unwrap_or("")
+            });
             // A file the lock emptied is no longer a change. Dropping it keeps
             // the "12 files to apply" count honest and stops the diff staging a
             // row in which nothing differs.
@@ -8788,6 +8794,51 @@ mod tests {
                 .map(String::as_str),
             Some("Title")
         );
+    }
+
+    #[test]
+    fn staged_import_omits_noop_tags_but_keeps_real_artwork_changes() {
+        let dir = TempDir::new("staged-import-noops");
+        let first = dir.tagged_flac("one.flac", "Artist", "Title");
+        let second = dir.tagged_flac("two.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        let unchanged = |path: &Path| FileChangeDto {
+            path: path.to_string_lossy().into_owned(),
+            tag_changes: vec![FieldChangeDto::new(
+                "title".into(),
+                Some("Title".into()),
+                Some("Title".into()),
+            )],
+            rename_to: None,
+            copy: false,
+            cover_change: None,
+            sidecar_renames: Vec::new(),
+            block_changes: Vec::new(),
+            rename_root: None,
+            creates_folder: false,
+            folder_extras: Vec::new(),
+        };
+        let mut artwork = unchanged(&second);
+        artwork.cover_change = Some(CoverChangeDto {
+            old: Vec::new(),
+            new: vec![cover_art_to_dto(&CoverArt {
+                mime: "image/png".into(),
+                data: vec![0x89, 0x50, 1].into(),
+                ..CoverArt::default()
+            })],
+        });
+        let plan = app.plan(
+            PlanMessage::EditTags,
+            Vec::new(),
+            vec![unchanged(&first), artwork],
+            false,
+        );
+        assert_eq!(plan.changes.len(), 1);
+        assert_eq!(plan.changes[0].path, second.to_string_lossy());
+        assert!(plan.changes[0].tag_changes.is_empty());
+        assert!(plan.changes[0].cover_change.is_some());
+        assert!(!app.read_track(&first).unwrap().has_cover);
+        assert!(!app.read_track(&second).unwrap().has_cover); // staging wrote nothing
     }
 
     #[test]

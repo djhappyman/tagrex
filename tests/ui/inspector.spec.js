@@ -60,7 +60,7 @@ async function search(page) {
   await page.locator('#discogs-query').fill('Helter Skelter');
   await page.locator('#discogs-search').click();
   await expect(page.locator('.release-card')).toHaveCount(5);
-  await expect(page.locator('.release-card').first().locator('.tk-count')).toContainText('3 tracks');
+  await expect(page.locator('.release-card').first().locator('.release-meta')).toContainText('2×Vinyl');
 }
 
 for (const width of [360, 480]) {
@@ -104,15 +104,15 @@ test('release entries stay transparent when hovered or expanded, with plain usef
   await sizeInspector(page, 360);
   await search(page);
   const card = page.locator('.release-card').first();
-  await expect(card.locator('.tk-count')).toContainText('2 discs');
-  await expect(card.locator('.rb-catno')).toHaveText('TOTH 001');
+  await expect(card.locator('.tk-count')).toHaveCount(0);
+  await expect(card.locator('.label-picker option').first()).toContainText('AS 5606');
   const summary = await card.locator('.release-info').evaluate((node) => {
     const title = node.querySelector('.release-title');
     const artist = node.querySelector('.release-artist');
-    const facts = node.querySelector('.release-facts');
+    const facts = node.querySelector('.release-meta');
     return { nodes: [...node.children].map((child) => child.className), title: Number(getComputedStyle(title).fontWeight), artist: Number(getComputedStyle(artist).fontWeight), facts: Number(getComputedStyle(facts).fontWeight) };
   });
-  expect(summary.nodes.slice(0, 3)).toEqual(['release-title', 'release-artist', 'release-facts']);
+  expect(summary.nodes.slice(0, 3)).toEqual(['release-title', 'release-artist', 'release-meta']);
   expect(summary.title).toBeGreaterThan(summary.artist);
   expect(summary.title).toBeGreaterThan(summary.facts);
   for (const state of ['rest', 'hover', 'expanded']) {
@@ -155,6 +155,7 @@ test('missing catalogue placeholders disappear while counts and complete edition
   await search(page);
   const card = page.locator('.release-card').first();
   await expect(card.locator('.rb-catno')).toHaveCount(0);
+  await card.locator('.release-head').click();
   await expect(card.locator('.tk-count')).toContainText('3 tracks');
   await expect(card.locator('.tk-count')).toContainText('2 discs');
   await expect(card.locator('.release-meta')).toContainText('Vinyl');

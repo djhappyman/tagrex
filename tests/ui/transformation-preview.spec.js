@@ -124,20 +124,22 @@ test('the same active filename rules run after a chosen Online import', async ({
   expect(await calls(page, 'apply_plan')).toBe(0);
 });
 
-test('automatic filename Apply and Undo follow the same selected file through renamed paths in Online', async ({ page }) => {
+test('automatic filename Apply and Undo keep paths correct without reselecting files in Online', async ({ page }) => {
   const original = await page.evaluate(() => window.tagrex.selectedPaths()[0]);
   await page.locator('.subtab[data-subtab="online"]').click();
   await tick(page, 'Upper filenames'); await changed(page);
   const renamed = (await plan(page)).changes[0].rename_to;
   await page.locator('#diff-apply').click();
-  await expect.poll(() => page.evaluate(() => window.tagrex.selectedPaths())).toEqual([renamed]);
+  await expect.poll(() => page.evaluate(path => window.tagrex.tracks.some(track=>track.path===path),renamed)).toBe(true);
+  expect(await page.evaluate(() => window.tagrex.selectedPaths())).toEqual([]);
   await expect.poll(() => plan(page)).toBe(null);
-  await expect(page.locator('#tracks-body tr.selected')).toHaveAttribute('data-path', renamed);
+  await expect(page.locator('#tracks-body tr.selected')).toHaveCount(0);
   expect(await calls(page, 'apply_plan')).toBe(1);
   await page.locator('#undo').click();
-  await expect.poll(() => page.evaluate(() => window.tagrex.selectedPaths())).toEqual([original]);
+  await expect.poll(() => page.evaluate(path => window.tagrex.tracks.some(track=>track.path===path),original)).toBe(true);
+  expect(await page.evaluate(() => window.tagrex.selectedPaths())).toEqual([]);
   await expect.poll(() => plan(page)).toBe(null);
-  await expect(page.locator('#tracks-body tr.selected')).toHaveAttribute('data-path', original);
+  await expect(page.locator('#tracks-body tr.selected')).toHaveCount(0);
   expect(await calls(page, 'undo')).toBe(1);
   await expect(page.locator('#groups-menu .preset-check').filter({ hasText: 'Upper filenames' }).locator('input.group-tick')).toBeChecked();
 });
@@ -171,6 +173,7 @@ test('Apply and Undo each use one batch and leave saved values visible with pres
   await expect(page.locator('#diff-actionbar')).toBeHidden();
   expect(await calls(page, 'undo')).toBe(1);
   await expect(page.locator('#groups-menu .preset-check').filter({ hasText: 'Append title mark' }).locator('input.group-tick')).toBeChecked();
+  await page.locator('#tracks-body tr[data-path] td.file').first().click();
   await tick(page, 'Append title mark', false); await tick(page, 'Append title mark'); await changed(page);
   expect((await plan(page)).changes[0].tag_changes[0].new).toBe('Desert Rain!');
 });

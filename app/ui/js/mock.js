@@ -16,6 +16,16 @@ import { fileName, plural } from "./dom.js";
 // the backend, so it has to hand over both or the browser path would exercise
 // only the fallback.
 let mockBpmCancel = false;
+function mockImportedCoverChange(track, image, mode) {
+  if (!image || mode === 'never') return null;
+  const old = track.coverSet || (track.cover ? [mockCoverImage(track.cover, 'front')] : []);
+  if (mode === 'if-missing' && old.length) return null;
+  const next = [...old];
+  const front = next.findIndex(cover => cover.kind === 'front');
+  const incoming = { ...image, kind: 'front', description: image.description || '' };
+  if (front < 0) next.unshift(incoming); else next[front] = incoming;
+  return JSON.stringify(old) === JSON.stringify(next) ? null : { old, new: next };
+}
 function plan(description, message, changes, notes = []) {
   return { description, message: { args: {}, count: null, ...message }, notes, changes };
 }
@@ -829,7 +839,7 @@ function mockInvoke(cmd, args) {
         const next = path.slice(0,path.lastIndexOf('/')+1)+name+'.'+ext;
         let image = (args.coverPaths || []).includes(path) ? args.cover : null;
         for (const assignment of args.covers || []) if (assignment.paths.includes(path)) image=assignment.cover;
-        const cover_change = args.basePlan?.changes?.find(change=>change.path===path)?.cover_change ?? (image && !track.cover ? {old:[],new:[image]} : null);
+        const cover_change = args.basePlan?.changes?.find(change=>change.path===path)?.cover_change ?? mockImportedCoverChange(track, image, s.settings?.import_cover || "if-missing");
         if(tag_changes.length || next!==path || cover_change) changes.push({path,rename_to:next!==path?next:null,tag_changes,cover_change});
       }
       return Promise.resolve({description:(args.edits || []).length || (args.covers || []).length ? 'Edit tags' : 'Transform',changes,locked_skipped:[...skipped].map(([field,files])=>({field,files}))});
@@ -889,6 +899,11 @@ function mockInvoke(cmd, args) {
         const t = findTrack(c.path);
         if (!t) continue;
         if (c.rename_to) t.path = c.rename_to;
+        if (c.cover_change) {
+          t.coverSet = c.cover_change.new;
+          t.has_cover = t.coverSet.length > 0;
+          t.cover = t.has_cover ? t.cover || '#2f6f4f' : null;
+        }
         for (const tc of c.tag_changes) t.tags[tc.field] = tc.new || "";
       }
       s.history.unshift({ id: s.history.length + 1, description: args.plan.description, applied_at: 0 });
@@ -1304,21 +1319,13 @@ function mockInvoke(cmd, args) {
       return renderMockColumn(args, s.tracks);
     case "import_fields":
       return Promise.resolve([
-        { keys: ["title"], label: "Title", code: "importField.title" },
-        { keys: ["artist"], label: "Artist", code: "importField.artist" },
-        { keys: ["album"], label: "Album", code: "importField.album" },
-        { keys: ["genre"], label: "Genre", code: "importField.genre" },
-        { keys: ["url"], label: "Release webpage", code: "importField.url" },
-        { keys: ["custom:RELEASECOUNTRY"], label: "Release country", code: "importField.releasecountry" },
-        {
-          keys: [
-            "custom:DISCOGS_RELEASE_ID",
-            "custom:MUSICBRAINZ_ALBUMID",
-            "custom:BEATPORT_RELEASE_ID",
-          ],
-          label: "Release id",
-          code: "importField.releaseid",
-        },
+        ...[['title','Title'],['artist','Artist'],['album','Album'],['albumartist','Album artist'],
+          ['track','Track number'],['tracktotal','Track total'],['disc','Disc number'],['disctotal','Disc total'],
+          ['year','Year'],['genre','Genre'],['publisher','Label / publisher'],['catalognumber','Catalogue number'],
+          ['isrc','ISRC'],['bpm','BPM'],['key','Key'],['url','Release webpage'],['media','Media type'],
+          ['custom:RELEASECOUNTRY','Release country'],['custom:POSITION','Track position']]
+          .map(([key,label])=>({keys:[key],label,code:'importField.'+key.replace('custom:','').toLowerCase()})),
+        {keys:['custom:DISCOGS_RELEASE_ID','custom:MUSICBRAINZ_ALBUMID','custom:BEATPORT_RELEASE_ID','custom:BANDCAMP_ALBUM_URL','custom:SOUNDEO_RELEASE_URL'],label:'Release id',code:'importField.releaseid'},
       ]);
     case "saved_discogs_token":
       return Promise.resolve(mockInvoke.state?.token || "");
@@ -1521,6 +1528,7 @@ function mockInvoke(cmd, args) {
         const tag_changes = [
           { field: "album", old: t ? t.tags.album || null : null, new: args.selection.album },
         ];
+        if (args.selection.year) tag_changes.push({field:'year',old:t?.tags.year||null,new:args.selection.year});
         if (args.selection.genre) {
           tag_changes.push({ field: "genre", old: t ? t.tags.genre || null : null, new: args.selection.genre });
         }
@@ -1538,6 +1546,7 @@ function mockInvoke(cmd, args) {
           tag_changes.push({ field: "media", old: t ? t.tags.media || null : null, new: args.selection.media_type });
         }
         if (rt) {
+          if (rt.position) tag_changes.push({field:'custom:POSITION',old:t?.tags['custom:POSITION']||null,new:rt.position});
           tag_changes.push({ field: "title", old: t ? t.tags.title || null : null, new: rt.title });
           tag_changes.push({ field: "artist", old: t ? t.tags.artist || null : null, new: rt.artist });
           // Mirror the backend: when the vinyl toggle is on and the position is a
@@ -1572,7 +1581,9 @@ function mockInvoke(cmd, args) {
             : src === "discogs"
               ? "Import Discogs release"
               : "Import release";
-      return Promise.resolve({ description: label, changes });
+      const denied = new Set(s.settings?.import_skip_fields || []);
+      for (const change of changes) change.tag_changes = change.tag_changes.filter(field => !denied.has(field.field) && field.old !== field.new);
+      return Promise.resolve({ description: label, changes: changes.filter(change => change.tag_changes.length) });
     }
     default:
       return Promise.reject(`unknown command: ${cmd}`);

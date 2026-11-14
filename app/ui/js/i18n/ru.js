@@ -13,6 +13,21 @@
 // 2 трека, 5 треков; 21 is `one` again and 11 is `many`. `tn` asks
 // `Intl.PluralRules` rather than guessing, so a form is never picked by hand.
 export const ru = {
+
+  "online.importFields": "Поля импорта",
+  "online.importAction": "Импортировать",
+  "online.importArtwork": "Обложка",
+  "online.importFieldsRemembered": "Сохранено для будущих импортов",
+  "online.importArtworkHint": "Заменить основную обложку",
+  "online.importFieldsMore": "Другие поля",
+  "online.importFieldsAll": "Выбрать всё",
+  "online.importFieldsClear": "Снять все отметки",
+  "online.importFieldsLoading": "Загрузка полей…",
+  "online.importFieldsError": "Не удалось загрузить или сохранить выбор. Повторите попытку.",
+  "table.artwork.added": "Обложка будет добавлена",
+  "table.artwork.replaced": "Обложка будет заменена",
+  "table.artwork.removed": "Обложка будет удалена",
+
   // ---- units that appear inside other messages ----
   "unit.track": { one: "{n} трек", few: "{n} трека", many: "{n} треков" },
   "unit.file": { one: "{n} файл", few: "{n} файла", many: "{n} файлов" },
@@ -169,6 +184,7 @@ export const ru = {
   "online.matchByLength": "По длительности",
   "online.matchByLengthTitle": "Переставить выбранные файлы по длительностям из этого релиза, не глядя на имена",
   "online.embed": "Встроить обложку",
+  "online.embedSelected": "Встроить в выбранные треки",
   "online.embedTitle": "Встроить обложку этого релиза в выбранные файлы",
   "online.importTitle": "Импортировать этот релиз в выбранные файлы",
   "online.openRelease": "Открыть страницу релиза",

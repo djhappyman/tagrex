@@ -115,7 +115,7 @@ test('Preview opens pending-only comparison, edits stay attached until commit, a
   await expect(page.locator('#tracks')).toHaveClass(/show-old/);
   const cell=page.locator('td.editable[data-field="title"]');
   await expect(cell).toContainText('New title');await expect(cell.locator('.cell-old')).toHaveText('Desert Rain');
-  const artist=page.locator('td.editable[data-field="artist"]');await expect(artist).toHaveCSS('opacity','0.65');
+  await expect(page.locator('td.editable[data-field="artist"]')).toHaveCount(0); // Staged omits unchanged columns
   expect(await page.evaluate(()=>[...window.tagrex.selection])).toEqual(selection);
   await cell.dblclick();await expect(cell).toHaveAttribute('contenteditable','true');
   await cell.fill('Desert Rain');
@@ -195,10 +195,10 @@ test('editing a manual tag preview preserves a narrowed Apply scope', async ({pa
   await expect(page.locator('#diff-apply')).toBeEnabled();await expect(page.locator('#ab-count')).toHaveText('3');
   await page.locator('#tracks-body tr[data-path]').first().locator('td.file').click();await expect(page.locator('#ab-count')).toHaveText('1');
   await page.locator('#diff-preview').click();
-  const title=page.locator('#tracks-body td[data-field="title"]').first();await title.dblclick();await title.fill('Scoped title');await title.press('Enter');
+  const artist=page.locator('#tracks-body td[data-field="artist"]').first();await artist.dblclick();await artist.fill('Scoped artist');await artist.press('Enter');
   await expect(page.locator('#diff-apply')).toBeEnabled();await expect(page.locator('#ab-count')).toHaveText('1');
   await page.locator('#diff-apply').click();
-  await expect.poll(()=>page.evaluate(()=>window.tagrex.tracks[0].tags.title)).toBe('Scoped title');
+  await expect.poll(()=>page.evaluate(()=>window.tagrex.tracks[0].tags.artist)).toBe('Scoped artist');
   expect(await page.evaluate(()=>window.tagrex.tracks.slice(1).every(track=>track.tags.artist!=='New artist'))).toBe(true);
 });
 

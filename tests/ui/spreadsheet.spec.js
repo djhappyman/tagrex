@@ -543,7 +543,10 @@ test('the table is a flat file list with no control strip or boxed cell selectio
       controls: tools.querySelectorAll('.spreadsheet-toolbar, #sheet-paste, #sheet-actions').length,
     };
   });
-  expect(state).toEqual({ paneRadius: '14px', cellShadow: 'none', filenameCursor: 'default', leftBorder: '0px', rightBorder: '0px', controlHeight: 0, controls: 0 });
+  // Keyboard-visible focus may underline the active cell; it must not box the
+  // cell or introduce a permanent control strip.
+  expect(state.cellShadow).toMatch(/^(none|.+ 0px -1px 0px 0px inset)$/);
+  expect({...state,cellShadow:'none'}).toEqual({ paneRadius: '14px', cellShadow: 'none', filenameCursor: 'default', leftBorder: '0px', rightBorder: '0px', controlHeight: 0, controls: 0 });
   await page.keyboard.press('Shift+F10');
   await expect(page.getByRole('menuitem', { name: /^Copy/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /^Paste/ })).toBeVisible();

@@ -269,6 +269,7 @@ impl Executor {
                 done: index,
                 total,
                 path: change.path.clone(),
+                completed: None,
             });
             ensure_within_roots(&change.path, &roots)?;
             ensure_not_stale(change)?;
@@ -386,7 +387,7 @@ impl Executor {
             apply_cover_change(&change.path, change, Direction::Apply)?;
             written.tag_steps[index] = 3;
             write_blocks(&change.path, change, Direction::Apply)?;
-            steps.done();
+            steps.complete(&change.path, ApplyStep::Tags);
         }
         // ...then the moves and copies, creating any folders the targets need.
         // Directories are created here rather than in the pre-flight so a
@@ -402,7 +403,7 @@ impl Executor {
                 ensure_target_free(&change.path, target, change.copy)?;
                 written.transferred.push(index);
                 transfer(&change.path, target, change.copy)?;
-                steps.done();
+                steps.complete(&change.path, ApplyStep::Transfer);
             }
         }
         // Sidecars follow their file, the same way (#58), after the main
@@ -435,7 +436,7 @@ impl Executor {
             write_tag_changes(target, change, Direction::Apply)?;
             apply_cover_change(target, change, Direction::Apply)?;
             write_blocks(target, change, Direction::Apply)?;
-            steps.done();
+            steps.complete(&change.path, ApplyStep::Tags);
         }
 
         // A move can leave the folder it emptied behind (#153). Removing those
@@ -674,12 +675,22 @@ fn without_kept_fields(
 
 /// How far a running [`Executor::apply_with`] has got (#437). `total` counts the
 /// preflight reads plus write steps (tags of a file, a move or copy, a sidecar),
-/// `done` those finished before `path`'s step, which is about to run.
+/// `done` those finished. `completed` distinguishes a successful write from a
+/// preflight/step-start notification. Completion paths use the original plan key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApplyProgress {
     pub done: usize,
     pub total: usize,
     pub path: PathBuf,
+    /// A successful write at the plan's original path. Never emitted for a
+    /// failed step; the enclosing batch may still roll back afterwards.
+    pub completed: Option<ApplyStep>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplyStep {
+    Tags,
+    Transfer,
 }
 
 /// Counts the steps of the write phase and is the one place it asks whether to
@@ -714,12 +725,23 @@ impl<'a> Steps<'a> {
             done: self.done,
             total: self.total,
             path: path.to_path_buf(),
+            completed: None,
         });
         Ok(())
     }
 
     fn done(&mut self) {
         self.done += 1;
+    }
+
+    fn complete(&mut self, path: &Path, kind: ApplyStep) {
+        self.done();
+        (self.progress)(&ApplyProgress {
+            done: self.done,
+            total: self.total,
+            path: path.to_path_buf(),
+            completed: Some(kind),
+        });
     }
 }
 

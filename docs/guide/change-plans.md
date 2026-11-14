@@ -50,6 +50,18 @@ not a failure.
 recorded in the journal as a single batch, so it undoes as a unit: a
 reorganize that renamed four hundred files is one entry, not four hundred.
 
+Apply follows the displayed order from top to bottom. During writes, existing
+cells show each saved tag value, artwork state or filename as its write succeeds.
+The active highlight eases in; a completed row loses its selection highlight and
+cannot be selected again during that batch. You can scroll freely to follow a
+large batch. Progress updates patch values and indicators in place, keeping the
+table's rows, columns, groups and scroll position stable. Reduced motion disables
+the highlight transitions. After the batch finishes, the normal disk readback
+reconciles sorting and clears the finished preview. Cancellation or failure rolls
+back the batch and restores its preview; one Undo still covers the whole batch.
+Successful Apply leaves all files and cell ranges deselected, ready for the next
+operation. Cancelling or rolling back keeps the selection available for retry.
+
 **Discard** throws the plan away; so do ⌘⌫ (Ctrl+Backspace) and Esc. Esc
 closes an open menu or popover first, and leaves the plan alone while you are
 typing in a field. If the plan came from staged EDITOR edits or a
