@@ -86,7 +86,7 @@ test('transformations run after raw Editor values once and toggling never compou
 
 test('invalid input blocks the entire pending Apply until corrected',async({page})=>{
   await field(page,'title').fill('Valid pending title');await ready(page);
-  await field(page,'year').fill('bad year');
+  await field(page,'year').fill('123');
   await expect(field(page,'year')).toHaveAttribute('aria-invalid','true');
   await expect(page.locator('#diff-apply')).toBeDisabled();
   expect(await calls(page,'apply_plan')).toBe(0);

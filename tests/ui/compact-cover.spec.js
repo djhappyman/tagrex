@@ -132,3 +132,19 @@ for (const [width, theme] of [[1440, 'dark'], [1440, 'light'], [375, 'dark']]) {
     expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width + 1);
   });
 }
+
+test('artwork hover and drop feedback remain visible for filled and empty covers', async ({ page }) => {
+  const edit=page.locator('#cover-well .cover-edit');
+  const before=await edit.evaluate(node=>getComputedStyle(node).backgroundColor);
+  await edit.hover();
+  await expect.poll(()=>edit.evaluate(node=>getComputedStyle(node).backgroundColor)).not.toBe(before);
+  for(const empty of [false,true]) {
+    if(empty){await page.evaluate(()=>{window.__cover.mode='empty';});await nextRow(page);}
+    const target=page.locator(empty?'.cover-empty-target':'.cover-main-image');
+    await expect(target).toBeVisible();
+    await page.locator('#cover-well').evaluate(node=>node.classList.add('dragover'));
+    expect(await target.evaluate(node=>{const s=getComputedStyle(node);return [s.outlineStyle,s.outlineWidth];})).toEqual(['dashed','2px']);
+    await page.locator('#cover-well').evaluate(node=>node.classList.remove('dragover'));
+  }
+  expect(await page.evaluate(()=>window.tagrex.previewPlan)).toBeNull();
+});

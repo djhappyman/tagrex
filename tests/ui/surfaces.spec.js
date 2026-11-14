@@ -178,8 +178,11 @@ test('standard and advanced field disclosures support native Enter and Space act
   const standard = page.locator('button[aria-controls="editor-group-standard"]');
   const advanced = page.locator('button[aria-controls="editor-group-advanced"]');
   await expect(standard).toHaveAttribute('data-slot', 'button');
-  await expect(standard).toHaveAttribute('aria-expanded', 'true');
+  await expect(standard).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('#editor-group-standard')).toBeHidden();
   await standard.focus();
+  await page.keyboard.press('Enter');
+  await expect(standard).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Space');
   await expect(standard).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('#editor-group-standard')).toBeHidden();

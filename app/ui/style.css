@@ -1,61 +1,4 @@
-/* Bundled disambiguating monospace (#76): JetBrains Mono Regular, SIL OFL 1.1,
-   subset to Latin + Cyrillic + punctuation, shipped as assets/tagrex-mono.woff2
-   (a local bundled asset, so the UI stays self-contained and offline). Code
-   ligatures are stripped so file names and tag values never fuse (e.g. "->"
-   stays two glyphs). Backs the --font-mono-bundled token; the system stack
-   remains the fallback. Licence text for every bundled font:
-   assets/THIRD-PARTY-FONT-LICENSES.md. */
-@font-face {
-  font-family: "TagRex Mono";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url(assets/tagrex-mono.woff2) format("woff2");
-}
-
-/* Optional condensed UI face for the dense file table (#100): a narrow sans so
-   more of each value fits before it truncates. Bundled-asset slot on the same
-   pattern as the mono above — drop a Latin+Cyrillic subset woff2 at
-   assets/tagrex-ui-condensed.woff2 and it takes over; until then the token's
-   fallback stack uses a system condensed face where one exists. */
-@font-face {
-  font-family: "TagRex Condensed";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url(assets/tagrex-ui-condensed.woff2) format("woff2");
-}
-
-/* Bundled UI sans (typography audit): IBM Plex Sans, OFL 1.1, subset to
-   Latin + Latin-ext + Cyrillic + digits + filename punctuation and shipped as
-   assets/tagrex-sans*.woff2 (local bundled assets, offline). Backs the
-   --font-ui token so UI text renders identically on macOS/Linux/Windows instead
-   of drifting across each OS's system sans; the system stack stays the fallback.
-   Three weights: 400 body, 600 (IBM Plex SemiBold) for medium/labels, 700 brand.
-   Pairs with the bundled "TagRex Condensed" (IBM Plex Sans Condensed) above — one
-   type superfamily. */
-@font-face {
-  font-family: "TagRex Sans";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url(assets/tagrex-sans.woff2) format("woff2");
-}
-@font-face {
-  font-family: "TagRex Sans";
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url(assets/tagrex-sans-medium.woff2) format("woff2");
-}
-@font-face {
-  font-family: "TagRex Sans";
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url(assets/tagrex-sans-bold.woff2) format("woff2");
-}
-
+/* Typography assets and licences: fonts.css and assets/FONT-PROVENANCE.md. */
 :root {
   /* Opt every native control (scrollbars, <select> popups, checkboxes, range,
      spinners, focus rings) into the OS light/dark preference. Without this the
@@ -99,35 +42,33 @@
      integration. */
 
   /* type: families */
-  /* Bundled IBM Plex Sans leads (see @font-face above) so UI text is identical
-     across OSes; the native stack — now with Linux faces (Cantarell/Noto Sans)
-     before the generic — is the fallback until the woff2 loads. */
-  --font-ui: "TagRex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Cantarell", "Noto Sans", sans-serif;
+  /* Offline interface faces are independent of the saved data-font choice. */
+  --font-ui-inter: "TagRex Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif;
+  --font-ui-plex: "TagRex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif;
+  --font-ui-source: "TagRex Source Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  /* Bundled disambiguating mono; falls back to the system stack until a
-     data-URI binary is dropped into a "TagRex Mono" @font-face. */
-  --font-mono-bundled: "TagRex Mono", var(--font-mono);
+  --font-literal: "TagRex Mono", var(--font-mono);
+  --font-ui: var(--font-ui-inter);
+  --font-value: var(--font-literal);
+  --font-mono-bundled: var(--font-value); /* legacy value-role alias */
   /* Optional condensed table face (#100). Prefers the bundled subset, then a
      system condensed sans where the OS ships one, then the normal UI stack. */
   --font-ui-condensed: "TagRex Condensed", "Avenir Next Condensed",
     "Roboto Condensed", "Fira Sans Condensed", "Bahnschrift SemiCondensed",
     var(--font-ui);
 
-  /* type: scale (tidies the ad-hoc 10/10.5/11/11.5/12/12.5/13px) */
-  /* One pixel up from the audit's scale (#467): most of the interface is set in
-     the two smallest sizes, and at 10 and 11 px the strokes are too thin to read
-     on Windows and Linux whatever the colour. */
-  --text-2xs: 11px;
-  --text-xs: 12px;
-  --text-sm: 13px;
-  --text-md: 14px;
-  --text-lg: 15px;
+  /* UI roles scale with the root; dense data-size preferences remain separate. */
+  --text-2xs: .6875rem;
+  --text-xs: .75rem;
+  --text-sm: .8125rem;
+  --text-md: .875rem;
+  --text-lg: .9375rem;
   --lh-tight: 1.2;
   --lh-snug: 1.35;
   --lh-normal: 1.5;
   --fw-regular: 400;
-  --fw-medium: 600;
+  --fw-medium: 500;
+  --fw-strong: 600;
   --fw-bold: 700;
   --ls-caps: 0.6px;
   --ls-caps-tight: 0.4px;
@@ -141,17 +82,41 @@
   --space-6: 18px;
   --space-7: 24px;
 
-  /* radii */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
-
-  /* control heights: one standard field/button height shared by inputs, selects
-     and buttons so a row lines up, plus a compact tier for dense toolbars, the
-     release-card tracklist header, and rule-chain fields. Single source of
-     truth — every pinned height below references these. */
-  --ctl-h: 28px;
-  --ctl-h-sm: 24px;
+  /* Shared visual roles. Compact data geometry remains independently owned. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --r-control: 10px;
+  --r-compact: 8px;
+  --r-inset: 14px;
+  --r-menu: 16px;
+  --r-menu-item: 8px;
+  --r-dialog: 22px;
+  --r-dialog-compact: 18px;
+  --r-pill: 999px;
+  --r-circle: 50%;
+  --r-media: 8px;
+  --r-media-edge: 2px;
+  --radius-sm: var(--r-compact);
+  --radius-md: var(--r-control);
+  --radius-lg: var(--r-inset);
+  --radius-xl: var(--r-dialog);
+  --menu-inset: 7px; /* with the 1px border, an 8px contour inset */
+  --text-destination: 1.25rem;
+  --text-destination-large: 1.375rem;
+  --type-heading-size: var(--text-md);
+  --type-dialog-size: var(--text-lg);
+  --type-body-size: var(--text-sm);
+  --type-help-size: var(--text-xs);
+  --type-meta-size: var(--text-2xs);
+  --label: var(--muted);
+  --ctl-h: 32px;
+  --ctl-h-sm: 28px;
+  --ctl-hit: 24px;
 
   /* The custom-styled scrollbar's own width, set below on ::-webkit-scrollbar. */
   --sb-w: 11px;
@@ -240,6 +205,10 @@
     --row-sel-hover: color-mix(in srgb, var(--accent) 58%, var(--bg));
   }
 }
+:root[data-ui-font="plex"] { --font-ui:var(--font-ui-plex); }
+:root[data-ui-font="source"] { --font-ui:var(--font-ui-source); }
+:root[data-ui-font="mono"] { --font-ui:var(--font-literal); }
+
 :root[data-theme="dark"] {
   --bg: #16181d;
   --panel: #1e2128;
@@ -1150,11 +1119,13 @@ body.panel-collapsed .col-splitter {
 
 /* ---- shared bits ---- */
 h2 {
-  font-size: var(--text-sm);
-  text-transform: uppercase;
-  letter-spacing: var(--ls-caps);
-  color: var(--muted);
-  margin: 0;
+  margin:0;
+  color:var(--text);
+  font-size:var(--type-heading-size);
+  font-weight:var(--fw-strong);
+  line-height:var(--lh-snug);
+  text-transform:none;
+  letter-spacing:0;
 }
 /* A count in a panel head is a note on the title, not part of it (#593):
    regular weight and sentence case, not the title's caps. */
@@ -1483,7 +1454,7 @@ body.diffing #tracks tbody tr.staged td.sel {
   font-variant-numeric: tabular-nums;
 }
 .dup-table .dup-path {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 /* Group header row: a labelled divider between duplicate sets. */
 .dup-table tr.dup-group td {
@@ -1621,7 +1592,7 @@ td.error {
 /* Compact, information-dense main table (the reference is tight). Monospace
    across every column so track numbers, filenames and tag values line up. */
 #tracks tbody td {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   /* Compact rows; size is user-adjustable (Settings › Display), default 11px
      (#274). The fallback only paints before prefs.js sets --table-font-size, so
      it tracks the JS default to avoid a first-frame size jump. */
@@ -1637,11 +1608,13 @@ td.error {
    one setting. Sans and Condensed trade column alignment (and the mono's strict
    0/O disambiguation) for density and a single-typeface look. Table size stays
    governed by --table-font-size. */
+body { --font-mono-bundled:var(--font-value); }
+body :is(input, textarea)::placeholder { color:var(--label); opacity:1; font-style:normal; }
 body.value-font-sans {
-  --font-mono-bundled: var(--font-ui);
+  --font-value: var(--font-ui);
 }
 body.value-font-condensed {
-  --font-mono-bundled: var(--font-ui-condensed);
+  --font-value: var(--font-ui-condensed);
 }
 
 /* Match the header to the tighter body rows. */
@@ -1887,17 +1860,12 @@ body:not(.show-checkbox) #tracks td.sel {
   gap: 6px;
 }
 
-/* Mask/pattern inputs read in the UI font, not the bundled monospace (#351).
-   The monospace was there to align %placeholders%, but it read as out of place
-   against the rest of the interface — the release-search box (`#discogs-query`)
-   was already carved back out to the UI font for that reason, and the
-   placeholder reference (#148) makes tokens discoverable without column
-   alignment. Genuine filesystem-path displays (e.g. `#move-dest`) keep the
-   monospace elsewhere; those read as paths, not patterns. */
-.mask-row input {
+/* Literal pattern syntax keeps its bundled Mono face, independent of data/UI preferences. */
+body .rule-fields .field > input { font-family:var(--font-literal); }
+.mask-row input:not(#discogs-query) {
   flex: 1;
   min-width: 0; /* shrink below intrinsic size so the row can't overflow a narrow panel */
-  font-family: var(--font-ui);
+  font-family: var(--font-literal);
 }
 
 /* RENAMER's live example (#382), the mask rendered against the first selected
@@ -1917,7 +1885,7 @@ body:not(.show-checkbox) #tracks td.sel {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 .hint.mask-example.muted {
   font-family: var(--font-ui);
@@ -2007,7 +1975,7 @@ body:not(.show-checkbox) #tracks td.sel {
 }
 
 .mono {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 
 /* "Show old values" toggle label — the checkbox control in the diff-state action
@@ -2263,7 +2231,7 @@ body.show-checkbox tr.playing td.sel {
   gap: 8px;
   padding: 3px 0;
   min-height: 36px;
-  font-size: 11px;
+  font-size:var(--type-meta-size);
   background: var(--panel);
   border-top: 1px solid var(--border);
 }
@@ -2384,7 +2352,7 @@ body.show-checkbox tr.playing td.sel {
   white-space: nowrap;
   text-overflow: ellipsis;
   font: inherit;
-  font-size: 10px;
+  font-size: var(--type-meta-size);
   line-height: 1.2;
   height: 12px;
   min-height: 0;
@@ -2398,7 +2366,7 @@ body.show-checkbox tr.playing td.sel {
 }
 #pl-title:hover:not(:disabled), #pl-title:focus-visible { color: var(--accent-ink); }
 #player.idle #pl-title { cursor: default; }
-#pl-time { flex: 0 0 auto; font-size: 10px; line-height: 1.2; font-variant-numeric: tabular-nums; }
+#pl-time { flex: 0 0 auto; font-size: var(--type-meta-size); line-height: 1.2; font-variant-numeric: tabular-nums; }
 .pl-vol { display: flex; align-items: center; flex: 0 0 83px; min-width: 0; gap: 3px; }
 #pl-seek, #pl-volume {
   appearance: none;
@@ -2450,7 +2418,7 @@ body.show-checkbox tr.playing td.sel {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
+  font-size:var(--type-help-size);
   color: var(--muted);
 }
 
@@ -2482,7 +2450,7 @@ body.show-checkbox tr.playing td.sel {
   display: flex;
   align-items: center;
   gap: var(--space-2); /* on the spacing scale (#594); it was 5px */
-  font-size: 12px;
+  font-size:var(--type-help-size);
 }
 
 .group-ctl select {
@@ -2809,7 +2777,7 @@ td.unreadable-note {
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
 }
 /* The shared `input[type="text"]` base (specificity 0,1,1) out-specifies a bare
@@ -2976,7 +2944,7 @@ td.unreadable-note {
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
   min-width: 0;
 }
@@ -3342,7 +3310,7 @@ td.unreadable-note {
   width: 100%;
 }
 .rule-fields .field > input {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 .rule-arrow {
   color: var(--muted);
@@ -3424,7 +3392,7 @@ td.unreadable-note {
   min-width: 0;
 }
 .rule-small-words > input {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 /* Read-only (a built-in preset): only a list that is on is worth showing. */
 .pe-rules-set:disabled .rule-small:not(:has(input[type="checkbox"]:checked)) {
@@ -3873,7 +3841,7 @@ button.release-import {
      alike — which a light pill did not. */
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   /* The disc-count next to the glyph (#334). */
   font-size: var(--text-xs);
   line-height: 1;
@@ -4202,7 +4170,7 @@ button.tk-art-btn > .ico:last-child {
 .tracklist-label select {
   height: var(--ctl-h-sm);
   font-size: var(--text-xs);
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   padding: 1px 19px 1px 6px; /* caret room (#115) */
   background-position: right 4px center;
   max-width: 260px;
@@ -4247,7 +4215,7 @@ button.tk-art-btn > .ico:last-child {
   min-width: max(100%, calc(var(--tk-section-min, 0px) + 2 * var(--space-2)));
   border-collapse: separate; /* sticky cells need separate borders */
   border-spacing: 0;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   /* LAB-adjustable (Settings › LAB); default lifted 11px → 12px so the tracklist
      matches the density of the rest of the card. */
   font-size: var(--tracklist-font-size, var(--text-sm));
@@ -4700,7 +4668,7 @@ td[data-field="year"],
    and the tidy-up flag share one row because they are one decision — what to do
    with the source. A copy empties nothing, so the flag dims out with it. */
 #move-dest {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
   color: var(--muted);
 }
@@ -4759,7 +4727,7 @@ td[data-field="year"],
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel);
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -4779,7 +4747,7 @@ td[data-field="year"],
 .probe-value {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   overflow-wrap: anywhere;
 }
 
@@ -4817,7 +4785,7 @@ td[data-field="year"],
   border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
   line-height: var(--lh-normal);
   white-space: pre;
@@ -5126,7 +5094,7 @@ td[data-field="year"],
   font-size: var(--text-xs);
 }
 .settings-row input.mono {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 .settings-row input:focus-visible {
   outline: none;
@@ -5425,8 +5393,8 @@ td[data-field="year"],
 .colmask-pattern {
   min-width: 0;
 }
-.colmask-pattern > input {
-  font-family: var(--font-mono-bundled);
+#colmask-pattern {
+  font-family: var(--font-literal);
 }
 /* Left / Center / Right hug their buttons instead of stretching across. */
 #colmask-align {
@@ -5756,7 +5724,7 @@ td[data-field="year"],
 #pe-sample-input {
   flex: 1;
   min-width: 0;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
 }
 .pe-sample-out {
   display: flex;
@@ -5778,7 +5746,7 @@ td[data-field="year"],
 .pe-sample-value {
   min-width: 0;
   overflow-wrap: anywhere;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   color: var(--accent-ink);
 }
 .pe-sample-value.same {
@@ -6045,7 +6013,7 @@ td[data-field="year"],
 }
 .ph-token {
   flex: none;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-literal);
   color: var(--accent);
 }
 .ph-desc {
@@ -6115,7 +6083,7 @@ td[data-field="year"],
   text-overflow: ellipsis;
 }
 .preset-mask {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-literal);
   font-size: var(--text-2xs);
   color: var(--muted);
   white-space: nowrap;
@@ -6281,55 +6249,6 @@ body.drag-active #drop-overlay {
   height: 1px;
   margin: var(--space-1) var(--space-2);
   background: var(--border);
-}
-
-/* ---- accent colour picker (#431) ---- */
-.accent-picker {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-.accent-swatch,
-.accent-custom {
-  width: 22px;
-  height: 22px;
-  min-width: 0;
-  padding: 0;
-  border: 2px solid var(--bg);
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-}
-.accent-swatch[aria-checked="true"],
-.accent-custom.active {
-  box-shadow: 0 0 0 2px var(--text);
-}
-.accent-swatch:focus-visible,
-.accent-custom:focus-within {
-  outline: none;
-  box-shadow: var(--ring);
-}
-/* The native colour input is the whole "custom" swatch: stretched over it and
-   invisible over a label that shows a rainbow, or the chosen colour once set. */
-.accent-custom {
-  position: relative;
-  overflow: hidden;
-  background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red);
-}
-.accent-custom input[type="color"] {
-  position: absolute;
-  inset: -6px;
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  border: none;
-  background: none;
-  opacity: 0;
-  cursor: pointer;
-}
-.accent-reset {
-  margin-left: var(--space-2);
 }
 
 /* ---- library health menu (#436, house style in #559) ------------------------
@@ -6656,6 +6575,8 @@ body.drag-active #drop-overlay {
    busy pill, never both. While stopping the count freezes, the bar goes muted
    and Stop is spent; a run that can't be stopped (undo) has no Stop. */
 .busy-pill {
+  min-width: 0;
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
@@ -6665,7 +6586,9 @@ body.drag-active #drop-overlay {
   display: none;
 }
 .busy-pill .ab-bar {
-  flex: 0 0 auto;
+  flex: 0 1 96px;
+  min-width: 16px;
+  max-width: 24%;
   width: 96px;
   height: 4px;
   border-radius: 999px;
@@ -6680,6 +6603,10 @@ body.drag-active #drop-overlay {
   transition: width 0.12s linear;
 }
 #busy-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -6687,8 +6614,11 @@ body.drag-active #drop-overlay {
 /* Stop: the field-tools tier, a filled square, --del on hover because it ends
    something. */
 .busy-stop.icon {
-  width: 22px;
-  height: 22px;
+  flex: none;
+  width: var(--ctl-hit);
+  min-width: var(--ctl-hit);
+  height: var(--ctl-hit);
+  min-height: var(--ctl-hit);
   padding: 0;
   border: 0;
   border-radius: var(--radius-sm);
@@ -6788,7 +6718,7 @@ body.drag-active #drop-overlay {
 }
 /* Paths read as paths: mono, muted while empty. */
 .field.is-path > :is(input, .field-value) {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
 }
 .field.is-path > input:placeholder-shown {
@@ -7027,7 +6957,7 @@ body.drag-active #drop-overlay {
   grid-row: 1;
 }
 #mb-expr {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-literal);
   font-size: var(--text-sm);
 }
 
@@ -7090,7 +7020,7 @@ body.drag-active #drop-overlay {
   grid-row: 3;
   overflow: auto;
   padding: var(--space-1) 0;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
 }
 .mb-ref-body {
@@ -7151,7 +7081,7 @@ body.drag-active #drop-overlay {
   color: var(--del);
 }
 .mb-unrendered .mb-new code {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-style: normal;
 }
 .mb-clash {
@@ -7190,7 +7120,7 @@ body.drag-active #drop-overlay {
   border-spacing: 0;
   width: max-content;
   min-width: 100%;
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-xs);
 }
 .mb-table th,
@@ -7340,7 +7270,7 @@ body.drag-active #drop-overlay {
   height: 11px;
 }
 .hint.mask-hint code {
-  font-family: var(--font-mono-bundled);
+  font-family: var(--font-value);
   font-size: var(--text-2xs);
   color: var(--text);
 }

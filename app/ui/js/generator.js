@@ -599,17 +599,18 @@ for (const context of ['generator', 'online', 'fromname', 'renamer']) {
 }
 // Saved/built-in preset shelves arrive asynchronously on startup.
 new MutationObserver(() => scheduleAutomaticTransformPreview()).observe(el('groups-menu'), { childList: true });
-document.addEventListener('tagrex:live-input', () => {
-  // Tag-only previews (paste, clear, FROM NAME) can become the raw input of
-  // the same pipeline. Preserve an explicit rename/block/artwork operation
-  // instead of silently losing its non-tag effects.
-  if (previewPlan && !isAutomaticTransformPreview() && previewPlan.changes.every(change => !change.rename_to && !change.cover_change && !change.block_changes?.length)) {
-    for (const change of previewPlan.changes) {
-      if (!edits.has(change.path)) edits.set(change.path, new Map());
-      for (const field of change.tag_changes || []) if (!edits.get(change.path).has(field.field)) edits.get(change.path).set(field.field, field.new ?? '');
-    }
-    setPreviewPlan(null); setPreviewSource(null);
+// Transfer a tag-only staged plan before recording its next edit, so reverting
+// a cell to the disk value cannot resurrect the previous proposal.
+function adoptTagOnlyPreview() {
+  if (!previewPlan || isAutomaticTransformPreview() || !previewPlan.changes.every(change => !change.rename_to && !change.cover_change && !change.block_changes?.length)) return;
+  for (const change of previewPlan.changes) {
+    if (!edits.has(change.path)) edits.set(change.path, new Map());
+    for (const field of change.tag_changes || []) if (!edits.get(change.path).has(field.field)) edits.get(change.path).set(field.field, field.new ?? '');
   }
+  setPreviewPlan(null); setPreviewSource(null);
+}
+document.addEventListener('tagrex:live-input', () => {
+  adoptTagOnlyPreview();
   scheduleAutomaticTransformPreview();
 });
 window.addEventListener('pagehide', pauseAutomaticTransformPreview, { once: true });
@@ -640,6 +641,7 @@ el("vinyl-split").addEventListener("click", splitVinylSides);
 // (grip drag), with ↑/↓ as the fallback — no container-level HTML5 DnD (#88).
 
 export {
+  adoptTagOnlyPreview,
   isAutomaticTransformPreview,
   isAutomaticTransformRefresh,
   automaticTransformScope,

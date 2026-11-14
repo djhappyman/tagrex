@@ -13,7 +13,21 @@
   function connect(node: HTMLElement) {
     root = nativeRoot || node;
     root.classList.add('controller-popup-root');
-    const bridge = connectControllerSurface(root, (value) => { open = value; });
+    // Imperative placement owns the viewport budget. Carry that definite length
+    // through the Bits wrapper; max-height: inherit stops at display:contents.
+    const syncAvailableHeight = () => {
+      const available = root.style.maxHeight || 'calc(100dvh - 16px)';
+      if (root.style.getPropertyValue('--controller-available-height') !== available)
+        root.style.setProperty('--controller-available-height', available);
+    };
+    syncAvailableHeight();
+    const placement = new MutationObserver(syncAvailableHeight);
+    placement.observe(root, { attributes: true, attributeFilter: ['style'] });
+    const bridge = connectControllerSurface(root, (value) => {
+      open = value;
+      const anchor = (root as HTMLElement & { returnFocusTo?: HTMLElement }).returnFocusTo;
+      if (!value && anchor?.hasAttribute('aria-expanded')) anchor.setAttribute('aria-expanded', 'false');
+    });
     // This chooser also opens without a Popover.Trigger, from header context
     // clicks. Its retained shell needs its own Escape route and focus return.
     const closeColumns = (event: KeyboardEvent) => {
@@ -25,7 +39,7 @@
       anchor?.focus({ preventScroll: true });
     };
     if (root.id === 'columns-menu') window.addEventListener('keydown', closeColumns, true);
-    return { destroy() { bridge.destroy(); if (root.id === 'columns-menu') window.removeEventListener('keydown', closeColumns, true); } };
+    return { destroy() { placement.disconnect(); bridge.destroy(); if (root.id === 'columns-menu') window.removeEventListener('keydown', closeColumns, true); } };
   }
   function content(host: HTMLElement) {
     host.append(...nodes);
@@ -69,16 +83,34 @@
     } };
   }
   function changed(value: boolean) { if (!value && open) root.hidden = true; }
+  function actionKeys(event: KeyboardEvent) {
+    if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey ||
+        !root.matches('.tk-save-menu, #query-preset-menu, #root-recent-menu') ||
+        !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const items = [...root.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')].filter(node => node.getClientRects().length && node.getAttribute('aria-disabled') !== 'true');
+    if (!items.length) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 :
+      (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next].focus();
+  }
+  function escapePopup(event: KeyboardEvent) {
+    event.stopPropagation();
+    const anchor = (root as HTMLElement & { returnFocusTo?: HTMLElement }).returnFocusTo;
+    if (!preserveFocus && anchor?.isConnected) queueMicrotask(() => anchor.focus({ preventScroll: true }));
+  }
 </script>
 
 <div {id} class={className} hidden={!nativeRoot ? true : undefined} use:connect>
   <Popover.Root {open} onOpenChange={changed}>
     <Popover.Content forceMount portalProps={{ disabled: true }} class="controller-popover-content"
       data-controller-popup data-i18n-aria-label={labelKey} aria-label={label || nativeRoot?.getAttribute('aria-label') || id || 'Options'}
-      trapFocus={false} preventScroll={false}
+      trapFocus={false} preventScroll={false} onkeydown={actionKeys}
       onInteractOutside={(event) => { if (root?.id === 'columns-menu' && event.target instanceof Element && event.target.closest('#columns-btn')) event.preventDefault(); }}
       onOpenAutoFocus={(event) => { if (preserveFocus) event.preventDefault(); }} onCloseAutoFocus={(event) => event.preventDefault()}
-      onEscapeKeydown={(event) => event.stopPropagation()}>
+      onEscapeKeydown={escapePopup}>
       <div class="controller-popover-body" use:content>{@render children?.()}</div>
     </Popover.Content>
   </Popover.Root>

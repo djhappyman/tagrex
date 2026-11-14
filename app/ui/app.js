@@ -1,3 +1,4 @@
+import { initStaging, renderStaging } from "./js/staging.js";
 import { connectWorkspaceController, publishWorkspaceMode, publishWorkspaceSubtab } from './lib/workspace-state';
 import { compileQuery, normalizeConditions, conditionLabel, coverState } from "./js/filter-query.js";
 import { createGroupMotion } from "./js/group-motion.js";
@@ -14,6 +15,7 @@ import {
   ico,
   confirmDialog,
   placeFloating,
+  placeContextMenu,
   closePlanReport,
   dismissStickyToast,
   report,
@@ -88,7 +90,7 @@ import {
   stopLoading,
 } from "./js/online.js";
 import {
-  refreshGenerator, syncTransformPlacement, isAutomaticTransformPreview, isAutomaticTransformRefresh,
+  refreshGenerator, syncTransformPlacement, adoptTagOnlyPreview, isAutomaticTransformPreview, isAutomaticTransformRefresh,
   automaticTransformScope, scheduleAutomaticTransformPreview,
   dismissAutomaticTransformPreview, pauseAutomaticTransformPreview,
   resumeAutomaticTransformPreview, invalidateAutomaticTransformPreview,
@@ -111,6 +113,7 @@ import {
 import {
   currentFieldValue,
   refreshFieldEditor,
+  refreshTagFormats,
   resetFieldEditor,
   validateFieldValue,
 } from "./js/editor.js";
@@ -172,8 +175,6 @@ import {
   applyBadgeFont,
   groupByPref,
   saveGroupBy,
-  showOldValues,
-  saveShowOldValues,
 } from "./js/prefs.js";
 import {
   fmtTime,
@@ -238,6 +239,37 @@ const rootInput = el("root");
 const tableWrap = el("files-view");
 const tracksBody = el("tracks-body");
 const tracksEmpty = el("tracks-empty");
+let stagedView = false;
+let stagedMembershipPending = false;
+let excludedApplyPaths = new Set();
+const fileViewScroll = { files: { top:0, left:0 }, staged: { top:0, left:0 } };
+function editablePreview() {
+  return !previewPlan || !diffByPath || isAutomaticTransformPreview() || previewPlan.changes.every(change => !change.rename_to && !change.cover_change && !change.block_changes?.length);
+}
+function setFileView(staged) {
+  if (applying || undoing) return;
+  if (stagedView === staged) return;
+  const active = tracksBody.querySelector('[contenteditable="true"]');
+  if (active) active.blur();
+  fileViewScroll[stagedView ? 'staged' : 'files'] = { top:tableWrap.scrollTop, left:tableWrap.scrollLeft };
+  stagedView = staged;
+  stagedMembershipPending = false;
+  syncFileView();
+  renderTracks();
+  const scroll = fileViewScroll[stagedView ? 'staged' : 'files'];
+  tableWrap.scrollTop = scroll.top; tableWrap.scrollLeft = scroll.left;
+  renderWindow({force:true});
+  document.dispatchEvent(new CustomEvent('tagrex:reveal-module',{detail:'files'}));
+}
+function syncFileView() {
+  document.body.classList.toggle('staged-view',stagedView);
+  el('tracks').classList.toggle('show-old',stagedView);
+  for (const [id,on] of [['files-tab',!stagedView],['staged-tab',stagedView]]) {
+    const tab=el(id); tab.setAttribute('aria-selected',String(on)); tab.tabIndex=on?0:-1;
+  }
+  tableWrap.setAttribute('aria-labelledby',stagedView?'staged-tab':'files-tab');
+  tracksEmpty.textContent = stagedView ? msg('staging.empty') : msg('table.empty');
+}
 const applyBtn = el("diff-apply");
 const undoBtn = el("undo");
 const selectAll = el("select-all");
@@ -724,8 +756,8 @@ function buildTrackRow(track, groupKey) {
 function fillDiffRow(tr, track) {
   const change = diffByPath.get(track.path);
   const pending = edits.get(track.path);
-  const automatic = isAutomaticTransformPreview();
-  if ((automatic ? selection : applySelection).has(track.path)) tr.classList.add('selected');
+  const automatic = editablePreview();
+  if ((isAutomaticTransformPreview() ? selection : applySelection).has(track.path)) tr.classList.add('selected');
   if (!change) {
     // Untouched row: current values, no apply tick, no editing/selection.
     tr.classList.add("untouched");
@@ -994,7 +1026,8 @@ function buildViewModel(preparedFilter = null) {
   const visible = tracks.filter((track) => {
     const matches = preparedFilter ? preparedFilter.has(track.path) : matchesFilter(track);
     if (matches) matchingTrackCount += 1;
-    return (diffByPath && !isAutomaticTransformPreview() && diffByPath.has(track.path)) || matches;
+    if (stagedView) return !!diffByPath?.has(track.path); // every pending file, regardless of the Files filter
+    return matches;
   });
   viewItems = [];
   viewPaths = [];
@@ -1008,7 +1041,7 @@ function buildViewModel(preparedFilter = null) {
     if (shown) navPaths.push(track.path);
   };
   destGrouping = Boolean(
-    diffByPath &&
+    stagedView && diffByPath &&
       [...diffByPath.values()].some((c) => c.rename_to && diffDir(c.rename_to) !== diffDir(c.path)),
   );
   destGroups = new Map();
@@ -1337,7 +1370,8 @@ function renderTracks({ preparedFilter = null } = {}) {
   filterRenderVersion++;
   filterPending = false;
   updateSortIndicators();
-  tracksEmpty.hidden = tracks.length > 0;
+  tracksEmpty.hidden = stagedView ? !!diffByPath?.size : tracks.length > 0;
+  tracksEmpty.textContent = stagedView ? msg('staging.empty') : msg('table.empty');
   headHeight = el("tracks").tHead?.offsetHeight || headHeight;
   buildViewModel(preparedFilter);
   renderWindow({ force: true, refreshGrid: false });
@@ -1397,6 +1431,7 @@ function remapEditsAfterRename(plan) {
 }
 
 function onCellEdit(td) {
+  prepareTagCellEdit();
   const {path,field,original} = td.dataset;
   const value = td.textContent.trim();
   const valid = validateFieldValue(field,value,[path]).ok;
@@ -1419,18 +1454,37 @@ function commitCellEdit(td) {
     td.textContent = cell.text;
     td.classList.toggle('dirty', cell.cls.split(' ').includes('dirty'));
     td.classList.toggle('error', cell.cls.split(' ').includes('error'));
+    td.classList.toggle('unchanged', cell.cls.split(' ').includes('unchanged'));
+    td.classList.toggle('cleared', cell.cls.split(' ').includes('cleared'));
+    if (cell.old && stagedView) {
+      const old=document.createElement('span'); old.className='cell-old'; old.textContent=cell.old; td.append(old);
+    }
   }
+  if (stagedView && stagedMembershipPending) {
+    stagedMembershipPending = false;
+    queueMicrotask(() => { if (!tracksBody.querySelector('[contenteditable="true"]')) { if (!diffByPath?.size) exitDiffState(); else renderTracks(); } });
+  }
+  if (diffByPath && !diffByPath.size) queueMicrotask(() => { if (!tracksBody.querySelector('[contenteditable="true"]')) exitDiffState(); });
   updateDiffBar();
 }
 
 // Escape leaves a cell as it was: the typed value is dropped and nothing is
 // written.
 function cancelCellEdit(td) {
+  prepareTagCellEdit();
   const {path,field,original} = td.dataset;
   const value = td.dataset.editOriginal ?? original;
   td.textContent = value;
   td.classList.remove('dirty','error');
   recordLiveField([path],field,value,validateFieldValue(field,value,[path]).ok);
+}
+
+function prepareTagCellEdit() {
+  const excluded = previewPlan && !isAutomaticTransformPreview()
+    ? [...(diffByPath?.keys() || [])].filter(path => !applySelection.has(path)) : null;
+  adoptTagOnlyPreview();
+  // Changing review mode must not silently re-include files the user excluded.
+  if (excluded && !previewPlan) excludedApplyPaths = new Set(excluded);
 }
 
 // Reveal the file table. The Preview view is gone (#117): a staged plan now
@@ -1456,19 +1510,35 @@ function discardPreview() {
 // Stage `previewPlan` into the file table's diff-state (#117). Named renderPreview
 // still because every mutating mode funnels its plan here; there is no separate
 // Preview view any more — the same #tracks table shows the change in place with a
-// floating Apply/Discard bar. An empty plan just leaves the table untouched.
+// persistent Apply/Discard footer. An empty plan just leaves the table untouched.
 function renderPreview(plan) {
+  renderStaging(plan);
+  // Reverting the last cell can empty the plan before the editor loses focus.
+  // Keep that DOM node attached until commit/blur, then remove its pending row.
+  if (!plan?.changes.length && isAutomaticTransformRefresh() && tracksBody.querySelector('[contenteditable="true"]')) {
+    setDiffByPath(new Map()); setApplySelection(new Set());
+    stagedMembershipPending = true;
+    updateDiffBar();
+    return;
+  }
   // Live typing changes values, not table membership. Keep an actively edited
   // cell attached and patch only affected visible rows; grouping and virtual
   // prefix sums do not need rebuilding on every keystroke.
-  if (plan?.changes.length && (diffByPath || tracksBody.querySelector('[contenteditable="true"]')) && isAutomaticTransformRefresh() &&
+  if (plan && (diffByPath || tracksBody.querySelector('[contenteditable="true"]')) && isAutomaticTransformRefresh() &&
       !plan.changes.some(change => change.rename_to) && ![...(diffByPath?.values() || [])].some(change => change.rename_to)) {
     const previous = diffByPath || new Map();
     const next = new Map(plan.changes.map(change => [change.path,change]));
     setDiffByPath(next);
-    setApplySelection(new Set(next.keys()));
+    setApplySelection(new Set([...next.keys()].filter(path => !excludedApplyPaths.has(path))));
+    const membershipChanged = previous.size !== next.size || [...previous.keys()].some(path => !next.has(path));
+    const editing = tracksBody.querySelector('[contenteditable="true"]');
+    if (!next.size && !editing) { exitDiffState(); return; }
+    if (stagedView && membershipChanged) {
+      if (editing) stagedMembershipPending = true;
+      else { stagedMembershipPending = false; renderTracks(); }
+    }
     document.body.classList.add('diffing','automatic-transform-preview');
-    el('tracks').classList.toggle('show-old', el('diff-show-old').checked);
+    syncFileView();
     for (const [path,row] of renderedRows) {
       const displaySignature = change => JSON.stringify([change?.tag_changes, !!change?.cover_change, change?.cover_change?.new?.length]);
       if (displaySignature(previous.get(path)) === displaySignature(next.get(path))) continue;
@@ -1509,7 +1579,7 @@ function renderPreview(plan) {
 // cheap and the patching layer went away with it.
 
 // Enter the in-table diff-state: build the path->change map, tick every changed
-// file for apply by default, show the change in the table, and float the bar.
+// file for apply by default, show the change in the table and reveal the action footer.
 // The operation without the pattern it ran, but WITH whatever the backend
 // appended after it: `Tags from name: %artist% - %title% · cleaned up` is three
 // facts, and only the middle one is redundant here (#232).
@@ -1522,10 +1592,11 @@ function shortPlanDescription(description) {
 
 function enterDiffState() {
   setDiffByPath(new Map(previewPlan.changes.map((c) => [c.path, c])));
-  setApplySelection(new Set(diffByPath.keys()));
+  if (!isAutomaticTransformPreview()) excludedApplyPaths.clear();
+  setApplySelection(new Set([...diffByPath.keys()].filter(path => !excludedApplyPaths.has(path))));
   document.body.classList.add("diffing");
   document.body.classList.toggle('automatic-transform-preview', isAutomaticTransformPreview());
-  el("tracks").classList.toggle("show-old", el("diff-show-old").checked);
+  syncFileView();
   showView("files"); // never diff over the dedup view
   if (isAutomaticTransformPreview() && currentMode === 'deduplicator') {
     el('duplicates-view').hidden = true;
@@ -1543,6 +1614,7 @@ function enterDiffState() {
   const kind = previewSource === "spreadsheet" ? spreadsheetBatchKind : "";
   const description = [kind, backendDescription].filter(Boolean).join(" · ");
   plan.textContent = description ? ` · ${shortPlanDescription(description)}` : "";
+  el("diff-actionbar").title = description;
   if (description && description !== shortPlanDescription(description)) {
     plan.title = description;
   } else {
@@ -1571,19 +1643,21 @@ function renderLockedSkips() {
   const parts = skips.map((s) =>
     msg("locks.fieldOnFiles", { field: diffLabel(s.field), files: tn("unit.file", s.files) })
   );
-  note.textContent = ` · ${msg("locks.lockedList", { fields: parts.join(", ") })}`;
+  note.textContent = msg("locks.lockedList", { fields: parts.join(", ") });
   note.title = msg(parts.length === 1 ? "locks.lockedTitleOne" : "locks.lockedTitleMany");
 }
 
 // Leave the diff-state: drop the plan + apply scope and put the plain rows back.
 function exitDiffState() {
+  excludedApplyPaths.clear();
+  renderStaging(null);
   spreadsheetBatchKind = "";
   setPreviewPlan(null);
   setPreviewSource(null);
   setDiffByPath(null);
   setApplySelection(new Set());
   document.body.classList.remove("diffing", 'automatic-transform-preview');
-  el("tracks").classList.remove("show-old");
+  syncFileView();
   el("diff-actionbar").hidden = true;
   closePlanReport(); // a report about this plan goes with it (#562)
   renderTracks();
@@ -1622,7 +1696,7 @@ function syncPanelCellMin() {
   document.documentElement.style.setProperty("--panel-cell-min", `${Math.ceil(widest + chrome + 2)}px`);
 }
 
-// Sync the floating action bar (apply count + enabled) and the header select-all
+// Sync the action footer (apply count + enabled) and the header select-all
 // tri-state to `applySelection`. Every changed file starts ticked; unticking
 // some narrows what a single Apply writes (#81).
 function updateDiffBar(scope) {
@@ -1631,7 +1705,17 @@ function updateDiffBar(scope) {
   const staged = diffByPath.size;
   const n = applySelection.size;
   el("ab-count").textContent = String(n);
+  const applyLabel = msg("diff.applyFiles", { files: tn("unit.file", n) });
+  if (applyBtn.getAttribute("aria-label") !== applyLabel) applyBtn.setAttribute("aria-label", applyLabel);
+  const label = el("ab-apply-label");
+  if (label.textContent !== applyLabel) label.textContent = applyLabel;
   applyBtn.disabled = filterPending || !!filterError || n === 0 || !!tracksBody.querySelector('[contenteditable="true"]') || scope.planInvalid || (isAutomaticTransformPreview() && (scope.busy || scope.invalid || scope.failed));
+  const pending = filterPending || (isAutomaticTransformPreview() && scope.busy);
+  const blocked = applyBtn.disabled;
+  el("diff-actionbar").dataset.blocked = String(blocked);
+  const statusKey = blocked ? (pending ? "diff.updating" : "diff.checkChanges") : (n === 1 ? "diff.fileReady" : "diff.filesReady");
+  el("ab-state").dataset.i18n = statusKey;
+  el("ab-state").textContent = msg(statusKey);
   if (isAutomaticTransformPreview()) return; // header ticks still select tracks
   selectAll.checked = n > 0 && n === staged;
   selectAll.indeterminate = n > 0 && n < staged;
@@ -2091,6 +2175,9 @@ async function afterOpen(label, version = openVersion, savedView = null) {
   setApplySelection(new Set());
   document.body.classList.remove("diffing", 'automatic-transform-preview');
   el("diff-actionbar").hidden = true;
+  stagedView = false; stagedMembershipPending = false; excludedApplyPaths.clear();
+  fileViewScroll.files = { top:0, left:0 }; fileViewScroll.staged = { top:0, left:0 };
+  renderStaging(null); syncFileView();
   resetEdits();
   setSortKey(null);
   setSortDir(1);
@@ -2559,12 +2646,9 @@ function showEditCtx(x, y, field) {
       })
       .catch(() => {});
   }
+  editCtx.returnFocusTo = field;
   editCtx.hidden = false;
-  // Measure once visible, then clamp so the menu never spills off-screen.
-  const r = editCtx.getBoundingClientRect();
-  const pad = 8;
-  editCtx.style.left = Math.max(pad, Math.min(x, window.innerWidth - r.width - pad)) + "px";
-  editCtx.style.top = Math.max(pad, Math.min(y, window.innerHeight - r.height - pad)) + "px";
+  placeContextMenu(editCtx, x, y);
 }
 
 document.addEventListener("contextmenu", (e) => {
@@ -2595,6 +2679,20 @@ document.addEventListener("contextmenu", (e) => {
   else hideFileCtx();
 });
 
+// A multi-row selection is a file operation, even over an editable column.
+// Explicit cell ranges and a single data cell retain the spreadsheet menu.
+document.addEventListener('contextmenu', event => {
+  const row = event.target.closest('#tracks-body tr[data-path]:not(.unreadable)');
+  if (!row || applying || undoing || event.target.closest('input, textarea, [contenteditable="true"]')) return;
+  if (spreadsheet?.hasRangeAt(event.target)) return;
+  if (!event.target.closest('td.file') && !(selection.size > 1 && selection.has(row.dataset.path))) return;
+  event.preventDefault(); event.stopPropagation();
+  hideEditCtx(); el('columns-menu').hidden = true;
+  const keyboard = event.clientX === 0 && event.clientY === 0;
+  const rect = row.getBoundingClientRect();
+  showFileCtx(keyboard ? rect.left : event.clientX, keyboard ? rect.bottom : event.clientY, row);
+}, true);
+
 // ---- the file column's context menu (#213) ----
 const fileCtx = el("file-ctx");
 // The paths the open menu acts on, decided when it opens rather than when an
@@ -2619,6 +2717,11 @@ function showFileCtx(x, y, tr) {
     syncSelectionUI();
   }
   fileCtxPaths = selectedPaths();
+  for (const command of ['hide', 'trash']) {
+    const item = fileCtx.querySelector(`[data-cmd="${command}"]`);
+    item.disabled = !!previewPlan;
+    item.title = previewPlan ? msg('staging.applyFirst') : '';
+  }
   const many = fileCtxPaths.length > 1;
   fileCtx.querySelector('[data-cmd="hide"] .ctx-label').textContent = many
     ? msg("ctx.removeN", { files: tn("unit.file", fileCtxPaths.length) })
@@ -2635,11 +2738,9 @@ function showFileCtx(x, y, tr) {
   bpmItem.disabled = bpmRunning() || bpmButton.disabled;
   fileCtx.querySelector('[data-cmd="clear"]').disabled = el("clear-tags").disabled;
   for (const key of fileCtx.querySelectorAll(".ctx-key")) key.textContent = formatCombo(comboOf(key.dataset.action));
+  fileCtx.returnFocusTo = document.activeElement;
   fileCtx.hidden = false;
-  const r = fileCtx.getBoundingClientRect();
-  const pad = 8;
-  fileCtx.style.left = Math.max(pad, Math.min(x, window.innerWidth - r.width - pad)) + "px";
-  fileCtx.style.top = Math.max(pad, Math.min(y, window.innerHeight - r.height - pad)) + "px";
+  placeContextMenu(fileCtx, x, y);
 }
 
 // Drop rows from the table without touching disk. The library is the model, so
@@ -2690,6 +2791,9 @@ fileCtx.addEventListener("click", (e) => {
   } else if (item.dataset.cmd === "bpm") {
     // Opening the menu made `paths` the selection, which is what these act on.
     el("detect-bpm").click();
+  } else if (item.dataset.cmd === "formats") {
+    refreshTagFormats();
+    el("tag-formats-modal").hidden = false;
   } else if (item.dataset.cmd === "clear") {
     el("clear-tags").click();
   }
@@ -2751,20 +2855,16 @@ document.addEventListener("keydown", (e) => {
 
 // ---- diff-state action bar (#117) ----
 el("dup-scan").addEventListener("click", runDuplicateScan);
-el("diff-discard").addEventListener("click", discardPreview);
-// "Show old values" (#80 Q1): reveal the struck-through old value under each
-// changed cell. A density toggle over the default single-line (new-only) diff.
-el("diff-show-old").addEventListener("change", (e) => {
-  el("tracks").classList.toggle("show-old", e.target.checked);
-  saveShowOldValues(e.target.checked);
-  // The toggle changes offscreen row heights too. Cached measurements must
-  // not keep the scrollbar at the old density until each row is visited.
-  itemHeights.fill(null);
-  rowEstimateMeasured = groupEstimateMeasured = false;
-  recomputeItemTops();
-  renderWindow({force:true});
-});
-el('diff-show-old').checked = showOldValues();
+el('diff-preview').addEventListener('click', () => setFileView(true));
+for (const [id,staged] of [['files-tab',false],['staged-tab',true]]) {
+  el(id).addEventListener('click', () => setFileView(staged));
+  el(id).addEventListener('keydown', event => {
+    if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+    event.preventDefault();
+    const next=event.key==='Home'?false:event.key==='End'?true:!staged;
+    setFileView(next); el(next?'staged-tab':'files-tab').focus();
+  });
+}
 
 // ---- wire up ----
 // One button, two roles (#177): what it does is what its label says.
@@ -2785,7 +2885,6 @@ document.addEventListener("click", (e) => {
 applyBtn.addEventListener("click", apply);
 undoBtn.addEventListener("click", undo);
 
-el("fields-clear").addEventListener("click", previewClearTags);
 // Same flow from the table toolbar, so clearing doesn't require opening EDITOR.
 el("clear-tags").addEventListener("click", previewClearTags);
 el("export-kind").addEventListener("click", (e) => {
@@ -3082,6 +3181,7 @@ function updateTransformScope() {
   let hidden = 0;
   for (const path of selectedPaths()) if (!navPathIndex.has(path)) hidden++;
   note.hidden = !scope.enabled && !hasLiveInputs() && !scope.busy;
+  note.dataset.detail = String(Boolean(scope.busy || scope.invalid || scope.failed || scope.blocked || hidden));
   const text = scope.busy ? 'Previewing…' : scope.invalid ? 'Fix invalid values' : scope.failed ? 'Preview failed' : scope.blocked ? 'Review current preview first' : scope.dismissed ? 'Preview cleared' : `${scope.changes} modified${hidden ? ` · ${hidden} selected hidden` : ''}`;
   if (note.textContent !== text) note.textContent = text;
   note.setAttribute('aria-busy', String(scope.busy));
@@ -3166,7 +3266,10 @@ function selectGroup(key, mode = 'replace') {
 
 // Enter edit mode on a cell and select its text (double-click, per the hint).
 function beginCellEdit(cell) {
-  if (isAutomaticTransformPreview() && cell.dataset.field) cell.textContent = currentFieldValue(cell.dataset.path,cell.dataset.field);
+  if (cell.dataset.field) {
+    const field = diffByPath?.get(cell.dataset.path)?.tag_changes.find(change => change.field === cell.dataset.field);
+    cell.textContent = field ? field.new ?? '' : currentFieldValue(cell.dataset.path,cell.dataset.field);
+  }
   cell.dataset.editOriginal = cell.textContent;
   cell.contentEditable = "true";
   cell.focus();
@@ -3262,7 +3365,7 @@ initRowSelection({
 });
 
 tracksBody.addEventListener("dblclick", (e) => {
-  if (diffByPath && !isAutomaticTransformPreview()) return;
+  if (!editablePreview()) return;
   if (e.target.closest("button, input, textarea, select, a")) return;
   if (e.target.closest('tr.group-head') || e.ctrlKey || e.metaKey || e.shiftKey) return;
   // Double-clicking the file name plays the track (the per-row play button was
@@ -3686,7 +3789,7 @@ tracksBody.addEventListener("keydown", (e) => {
     if (e.key === "Escape") cancelCellEdit(e.target);
     e.target.contentEditable = "false";
     e.target.blur();
-    if (e.key === "Enter") commitCellEdit(e.target);
+    commitCellEdit(e.target);
     spreadsheet?.focusActive();
   }
 });
@@ -3765,7 +3868,7 @@ spreadsheet = initSpreadsheet({
     return "";
   },
   validate: (field, value, path) => validateFieldValue(field, value, [path]),
-  isReviewing: () => !!diffByPath && !isAutomaticTransformPreview(),
+  isReviewing: () => !editablePreview(),
   batchProblem: spreadsheetBatchProblem,
   stage: stageSpreadsheetEdits,
   beginEdit: beginCellEdit,
@@ -3910,6 +4013,9 @@ syncTransformPlacement();
 // entry points it needs are exposed deliberately, in one place, instead of the
 // whole file leaking into `window`. Harmless in the native app: it is a handle
 // on functions the UI itself already calls.
+initStaging({ isBusy: () => applying || undoing, onClear:discardPreview });
+syncFileView();
+
 window.tagrex = {
   invoke,
   openLibrary,

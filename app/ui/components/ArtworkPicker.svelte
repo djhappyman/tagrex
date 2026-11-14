@@ -275,16 +275,16 @@
 <style>
   :global(.artwork-backdrop) { z-index: 90; background: rgba(0, 0, 0, .42); backdrop-filter: blur(6px); animation: aw-scrim-in 240ms ease both; }
   :global(.artwork-backdrop[data-state='closed']) { animation: aw-scrim-out 180ms ease both; }
-  :global(.aw-window) { position: fixed; z-index: 91; top: 50%; left: 50%; translate: none; transform: translate(-50%, -50%); display: grid; gap: 0; grid-template-rows: auto minmax(0, 1fr) auto auto; width: min(960px, calc(100vw - 48px)); max-width: none; height: min(820px, calc(100dvh - 48px)); border: 1px solid var(--border); border-radius: 22px; background: var(--bg); color: var(--text); box-shadow: 0 24px 100px rgba(0, 0, 0, .3); padding: 0; outline: none; overflow: hidden; animation: aw-open 280ms cubic-bezier(.2,.8,.2,1) both; }
+  :global(.aw-window) { position: fixed; z-index: 91; top: 50%; left: 50%; translate: none; transform: translate(-50%, -50%); display: grid; gap: 0; grid-template-rows: auto minmax(0, 1fr) auto auto; width: min(960px, calc(100vw - 48px)); max-width: none; height: min(820px, calc(100dvh - 48px)); border: 1px solid var(--border); border-radius: var(--r-dialog); background: var(--bg); color: var(--text); box-shadow: 0 24px 100px rgba(0, 0, 0, .3); padding: 0; outline: none; overflow: hidden; animation: aw-open 280ms cubic-bezier(.2,.8,.2,1) both; }
   :global(.aw-window[data-state='closed']) { animation: aw-close 180ms cubic-bezier(.4,0,1,1) both; pointer-events: none; }
-  .aw-header { display: flex; align-items: center; gap: 16px; padding: 20px 22px 16px; }
+  .aw-header { display: flex; align-items: center; gap: 16px; padding: var(--sp-4) var(--sp-5); }
   .aw-heading { flex: 1; min-width: 0; }
-  :global(.aw-title) { margin: 0 0 4px; color: var(--text); font-size: 14px; font-weight: 600; letter-spacing: 0; }
-  :global(.aw-release) { margin: 0; color: var(--muted); font-size: 12px; overflow: hidden; overflow-wrap: anywhere; line-height: 1.6; }
-  :global(.aw-close) { display: grid; place-items: center; flex: none; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 10px; background: transparent; color: var(--muted); box-shadow: none; transition: background 120ms, color 120ms; }
+  :global(.aw-title) { margin: 0 0 4px; color: var(--text); font-size: var(--type-dialog-size); font-weight: var(--fw-strong); letter-spacing: 0; }
+  :global(.aw-release) { margin: 0; color: var(--muted); font-size: var(--type-help-size); overflow: hidden; overflow-wrap: anywhere; line-height: 1.6; }
+  :global(.aw-close) { display: grid; place-items: center; flex: none; width: var(--ctl-h); height: var(--ctl-h); padding: 0; border: 0; border-radius: var(--r-compact); background: transparent; color: var(--muted); box-shadow: none; transition: background 120ms, color 120ms; }
   :global(.aw-close:hover) { background: var(--row-hover); color: var(--text); }
   svg { width: 16px; height: 16px; flex: none; }
-  :global(.aw-stage) { position: relative; min-height: 0; margin: 0 16px; overflow: hidden; isolation: isolate; border-radius: 14px; background: color-mix(in srgb, var(--text) 3%, var(--bg)); }
+  :global(.aw-stage) { position: relative; min-height: 0; margin: 0 16px; overflow: hidden; isolation: isolate; border-radius: var(--r-inset); background: color-mix(in srgb, var(--text) 3%, var(--bg)); }
   .aw-layers { position: absolute; inset: 0; isolation: isolate; }
   /* Fade the incoming opaque canvas over the preserved previous composition.
      No additive blending or simultaneous fade-out: neither dark dip nor lift.
@@ -302,27 +302,27 @@
   .aw-loading { animation: aw-scrim-in 100ms 140ms both; }
   .aw-error { padding: 16px; background: color-mix(in srgb, var(--bg) 90%, transparent); text-align: center; }
   .aw-error p { margin: 0; }
-  .aw-error :global(button) { pointer-events: auto; border-radius: 10px; padding: 8px 18px; }
+  .aw-error :global(button) { pointer-events: auto; border-radius: var(--r-pill); padding: var(--sp-2) var(--sp-4); }
   .aw-spinner { width: 22px; height: 22px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: aw-spin 650ms linear infinite; }
-  .aw-rail { display: flex; gap: 10px; padding: 16px 22px 12px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
-  .aw-thumb { position: relative; width: 68px; height: 68px; flex: 0 0 68px; display: grid; place-items: center; overflow: hidden; padding: 3px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--text) 3%, var(--bg)); opacity: .68; transition: opacity 160ms, border-color 160ms, box-shadow 180ms, transform 180ms cubic-bezier(.2,.8,.2,1); }
+  .aw-rail { display: flex; gap: var(--sp-2); padding: var(--sp-4) var(--sp-5) var(--sp-3); overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: thin; }
+  .aw-thumb { position: relative; width: 68px; height: 68px; flex: 0 0 68px; display: grid; place-items: center; overflow: hidden; padding: 3px; border: 1px solid var(--border); border-radius: var(--r-control); background: color-mix(in srgb, var(--text) 3%, var(--bg)); opacity: .68; transition: opacity 160ms, border-color 160ms, box-shadow 180ms, transform 180ms cubic-bezier(.2,.8,.2,1); }
   .aw-thumb:hover { opacity: 1; transform: translateY(-2px); }
   .aw-thumb[aria-pressed='true'] { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent); }
-  .aw-thumb img { width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: 6px; animation: aw-scrim-in 180ms ease; }
+  .aw-thumb img { width: 100%; height: 100%; min-height: 0; object-fit: contain; border-radius: calc(var(--r-control) - 4px); animation: aw-scrim-in 180ms ease; }
   .aw-thumb-number { position: absolute; left: 4px; bottom: 3px; min-width: 15px; padding: 0 3px; border-radius: 4px; font-size: 10px; line-height: 16px; background: var(--bg); color: var(--text); }
   .aw-thumb-check { position: absolute; right: 3px; top: 3px; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 5px; background: var(--accent); color: var(--accent-text); }
   .aw-thumb-check svg { width: 12px; height: 12px; }
   .aw-thumb-placeholder { color: var(--muted); }
-  .aw-footer { display: flex; align-items: center; gap: 16px; min-width: 0; padding: 4px 22px 20px; }
-  .aw-readout { display: flex; flex-direction: column; gap: 2px; font-size: 12px; flex: 1; min-width: 0; }
-  .aw-dimensions { color: var(--muted); font-size: 11px; }
-  .aw-hint { color: var(--muted); font-size: 11px; }
-  :global(.aw-use) { display: inline-flex; align-items: center; justify-content: center; gap: 16px; flex: none; min-height: 44px; padding: 0 18px; border: 1px solid var(--accent); border-radius: 999px; background: var(--accent); color: var(--accent-text); font-weight: 600; box-shadow: none; transition: filter 140ms, transform 140ms, opacity 140ms; }
+  .aw-footer { display: flex; align-items: center; gap: 16px; min-width: 0; padding: var(--sp-1) var(--sp-5) var(--sp-4); }
+  .aw-readout { overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 2px; font-size: var(--type-help-size); flex: 1; min-width: 0; }
+  .aw-dimensions { color: var(--muted); font-size: var(--type-meta-size); }
+  .aw-hint { color: var(--muted); font-size: var(--type-help-size); }
+  :global(.aw-use) { display: inline-flex; align-items: center; justify-content: center; gap: 16px; flex: none; min-height: 44px; padding: 0 18px; border: 1px solid var(--accent); border-radius: var(--r-pill); background: var(--accent); color: var(--accent-text); font-weight: var(--fw-strong); box-shadow: none; transition: filter 140ms, transform 140ms, opacity 140ms; }
   :global(.aw-use:hover:not(:disabled)) { background: var(--accent); filter: brightness(1.08); }
   :global(.aw-use:active:not(:disabled)) { transform: scale(.97); }
   :global(.aw-use:disabled) { opacity: .4; }
-  :global(.aw-menu) { z-index: 100; min-width: 180px; padding: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); box-shadow: 0 10px 35px rgba(0, 0, 0, .22); outline: none; animation: aw-menu-in 140ms ease both; }
-  :global(.aw-menu-item) { padding: 9px 12px; border-radius: 7px; font-size: 12px; outline: none; cursor: default; }
+  :global(.aw-menu) { z-index: 100; min-width: 180px; padding: 7px; border: 1px solid var(--border); border-radius: var(--r-menu); background: var(--bg); color: var(--text); box-shadow: 0 10px 35px rgba(0, 0, 0, .22); outline: none; animation: aw-menu-in 140ms ease both; }
+  :global(.aw-menu-item) { min-height: var(--ctl-h); line-height: 1.5; padding: var(--sp-1) var(--sp-3); border-radius: var(--r-menu-item); font-size: var(--type-body-size); outline: none; cursor: default; }
   :global(.aw-menu-item[data-highlighted]) { background: var(--sel-tint); color: var(--accent-ink); }
   :global(.aw-menu-item[data-disabled]) { opacity: .4; }
   @keyframes aw-open { from { opacity: 0; transform: translate(-50%, calc(-50% + 14px)) scale(.97); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
@@ -332,19 +332,19 @@
   @keyframes aw-menu-in { from { opacity: 0; transform: translateY(-3px) scale(.98); } }
   @keyframes aw-spin { to { transform: rotate(360deg); } }
   @media (max-width: 600px) {
-    :global(.aw-window) { width: calc(100vw - 24px); height: calc(100dvh - 24px); border-radius: 18px; }
-    .aw-header { padding: 14px 16px 12px; }
-    :global(.aw-stage) { margin: 0 10px; }
+    :global(.aw-window) { width: calc(100vw - 24px); height: calc(100dvh - 24px); border-radius: var(--r-dialog-compact); }
+    .aw-header { padding: var(--sp-3) var(--sp-4); }
+    :global(.aw-stage) { margin: 0 var(--sp-3); }
     .aw-rail { padding: 12px 16px; }
-    .aw-footer { padding: 0 16px 14px; gap: 10px; }
+    .aw-footer { padding: 0 var(--sp-4) var(--sp-3); gap: var(--sp-2); }
     .aw-hint { display: none; }
   }
   @media (max-height: 520px) {
     :global(.aw-window) { height: calc(100dvh - 20px); }
-    .aw-header { padding: 10px 16px; }
+    .aw-header { padding: var(--sp-2) var(--sp-4); }
     .aw-rail { padding-top: 8px; padding-bottom: 8px; gap: 8px; }
     .aw-thumb { width: 48px; height: 48px; flex-basis: 48px; }
-    .aw-footer { padding-bottom: 10px; }
+    .aw-footer { padding-bottom: var(--sp-2); }
     .aw-hint { display: none; }
   }
   @media (prefers-reduced-motion: reduce) {

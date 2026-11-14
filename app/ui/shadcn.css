@@ -31,9 +31,9 @@
   --color-border: var(--border);
   --color-input: var(--border);
   --color-ring: var(--accent);
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --radius-xl: 22px;
+  --radius-sm: var(--r-compact);
+  --radius-md: var(--r-control);
+  --radius-lg: var(--r-inset);
+  --radius-xl: var(--r-dialog);
   --font-sans: var(--font-ui);
 }

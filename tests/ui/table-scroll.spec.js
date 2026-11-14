@@ -67,6 +67,6 @@ test('horizontal motion retains rows and group labels stay legible and inside th
   expect(await page.evaluate(()=>window.firstScrollRow===document.querySelector('#tracks-body tr[data-path]'))).toBe(true);
   expect(await page.evaluate(()=>window.tableScrollMutations)).toBe(0);
   const band=page.locator('#tracks-body .group-heading-content').first();await expect(band).toBeInViewport();
-  expect(await page.locator('#tracks-body .group-label').first().evaluate(node=>getComputedStyle(node).fontWeight)).toBe('600');
+  expect(await page.locator('#tracks-body .group-label').first().evaluate(node=>getComputedStyle(node).fontWeight)).toBe('500');
   expect(await page.locator('#tracks-body .group-label').first().evaluate(node=>getComputedStyle(node).color)).toBe(await page.evaluate(()=>getComputedStyle(document.body).color));
 });

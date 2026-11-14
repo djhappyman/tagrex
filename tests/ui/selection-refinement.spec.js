@@ -26,10 +26,10 @@ test('highlight is the only row selection indicator including live previews',asy
   expect(await rows(page).locator('input[type="checkbox"]').count()).toBe(0);
   await expect(rows(page).first()).toHaveClass(/selected/);
 });
-test('Show old values keeps the last choice through Discard, a new preview and reload',async({page})=>{
-  await editor(page);await preview(page,'First preview');await page.locator('.toggle-old').click();await expect(page.locator('#diff-show-old')).toBeChecked();
-  await page.locator('#diff-discard').click();await preview(page,'Second preview');await expect(page.locator('#diff-show-old')).toBeChecked();await expect(page.locator('#tracks')).toHaveClass(/show-old/);
-  await page.reload();await expect.poll(()=>page.evaluate(()=>typeof window.tagrex?.openLibrary)).toBe('function');await expect(page.locator('#diff-show-old')).toBeChecked();
+test('comparison belongs to Staged and stays enabled across drafts',async({page})=>{
+  await editor(page);await preview(page,'First preview');await page.locator('#diff-preview').click();await expect(page.locator('#tracks')).toHaveClass(/show-old/);
+  await page.locator('#diff-discard').click();await preview(page,'Second preview');await expect(page.locator('#tracks')).toHaveClass(/show-old/);
+  await page.locator('#files-tab').click();await expect(page.locator('#tracks')).not.toHaveClass(/show-old/);
 });
 test('right-clicking a standard column header opens the column chooser',async({page})=>{
   await page.locator('#tracks thead th[data-sort="title"]').click({button:'right'});await expect(page.locator('#columns-menu')).toBeVisible();

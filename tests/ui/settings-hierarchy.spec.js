@@ -20,12 +20,12 @@ for (const theme of ['light', 'dark']) for (const width of [1280, 540]) {
     await page.locator(`#set-theme [data-theme-mode="${theme}"]`).click();
     const sizes = await page.locator('.settings-group[data-reset-group="general"]').evaluate(group => {
       const heading = group.querySelector('h3'); const field = group.querySelector('.settings-field');
-      return { title: parseFloat(getComputedStyle(heading).fontSize), label: parseFloat(getComputedStyle(field.querySelector('.settings-label')).fontSize), help: parseFloat(getComputedStyle(field.querySelector('.settings-hint')).fontSize), fieldBackground: getComputedStyle(field).backgroundColor, fieldBorder: getComputedStyle(field).borderTopWidth };
+      return { title: parseFloat(getComputedStyle(heading).fontSize), label: parseFloat(getComputedStyle(field.querySelector('label,.settings-label')).fontSize), help: parseFloat(getComputedStyle(field.querySelector('.settings-hint')).fontSize), fieldBackground: getComputedStyle(field).backgroundColor, fieldBorder: getComputedStyle(field).borderTopWidth };
     });
     expect(sizes.title).toBeGreaterThan(sizes.label); expect(sizes.label).toBeGreaterThan(sizes.help);
     expect(sizes.fieldBackground).toBe('rgba(0, 0, 0, 0)'); expect(sizes.fieldBorder).toBe('0px');
     const bounds = await page.locator('.settings-body').boundingBox();
-    for (const selector of ['#set-theme', '#set-accent', '#set-lang-control']) {
+    for (const selector of ['#set-theme', '#set-palette-control', '#set-lang-control']) {
       const b = await page.locator(selector).boundingBox();
       expect(b.x).toBeGreaterThanOrEqual(bounds.x); expect(b.x + b.width).toBeLessThanOrEqual(bounds.x + bounds.width);
     }
@@ -35,9 +35,9 @@ for (const theme of ['light', 'dark']) for (const width of [1280, 540]) {
 }
 test('subsection search retains later matching controls and their heading', async ({ page }) => {
   await page.locator('#settings-search').fill('Appearance');
-  await expect(page.locator('#set-theme')).toBeVisible(); await expect(page.locator('#set-accent')).toBeVisible(); await expect(page.locator('#set-lang-control')).toBeHidden();
-  await page.locator('#settings-search').fill('Accent colour');
-  await expect(page.locator('#set-accent')).toBeVisible(); await expect(page.locator('#set-theme')).toBeHidden();
+  await expect(page.locator('#set-theme')).toBeVisible(); await expect(page.locator('#set-palette-control')).toBeVisible(); await expect(page.locator('#set-lang-control')).toBeHidden();
+  await page.locator('#settings-search').fill('Theme');
+  await expect(page.locator('#set-palette-control')).toBeVisible(); await expect(page.locator('#set-theme')).toBeHidden();
   await expect(page.locator('h4[data-i18n="settings.appearance"]')).toBeVisible();
   await page.locator('#settings-search').fill('JPEG quality');
   await expect(page.locator('#set-cover-quality')).toBeVisible(); await expect(page.locator('h4[data-i18n="editor.coverArt"]')).toBeVisible();

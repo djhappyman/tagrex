@@ -74,6 +74,7 @@ let searchPerPage = searchPerPagePref();
 let searchPage = 0; // last page fetched (0 = none yet)
 let searchHasMore = false; // provider likely has another page
 let searchGen = 0; // generation token
+let searchFailed = false;
 let loadingResults = false; // a page fetch is in flight
 let prefetching = false; // the background per-release detail sweep is running
 
@@ -155,6 +156,7 @@ async function runSearch(reset) {
   const gen = searchGen;
   const page = searchPage + 1;
   loadingResults = true;
+  searchFailed = false;
   updateLoadMoreUi();
   try {
     const hits = await invoke("provider_search", {
@@ -173,6 +175,8 @@ async function runSearch(reset) {
     renderReleaseList();
     prefetchReleaseCounts(added, gen); // count only the newly added page
   } catch (e) {
+    if (gen !== searchGen) return;
+    searchFailed = true;
     toast(String(e), true);
   } finally {
     if (gen === searchGen) {
@@ -185,6 +189,15 @@ async function runSearch(reset) {
 // Show/hide the Load more / Stop footer to match the current loading state.
 function updateLoadMoreUi() {
   const busy = searchBusy();
+  const empty = el("discogs-empty");
+  const heading = el("online-empty-heading");
+  const state = loadingResults ? "searching" : searchFailed ? "searchError" : searchPage ? "searchNone" : "searchEmpty";
+  empty.hidden = releaseCandidates.length > 0;
+  const messageKey = state === "searchEmpty" ? "online.empty" : `inspector.${state}`;
+  empty.dataset.i18n = messageKey;
+  empty.textContent = t(messageKey);
+  heading.dataset.i18n = `inspector.${state}Heading`;
+  heading.textContent = t(heading.dataset.i18n);
   // The search button is one toggling slot (#111): magnifier ⇄ Stop square.
   const btn = el("discogs-search");
   btn.classList.toggle("busy", busy);
@@ -2016,11 +2029,20 @@ el("release-list").addEventListener("click", (e) => {
   } else if (act === "save-menu") {
     // Split-button caret: toggle this card's save menu, closing any other.
     const menu = card.querySelector(".tk-save-menu");
+    const anchor = e.target.closest('[data-act="save-menu"]');
     e.stopPropagation();
     document.querySelectorAll(".tk-save-menu").forEach((m) => {
       if (m !== menu) m.hidden = true;
     });
-    if (menu) menu.hidden = !menu.hidden;
+    if (menu) {
+      menu.hidden = !menu.hidden;
+      anchor.setAttribute("aria-expanded", String(!menu.hidden));
+      if (!menu.hidden) {
+        menu.classList.add("floating");
+        placeFloating(menu, anchor);
+        queueMicrotask(() => menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true }));
+      }
+    }
   } else if (act === "automatch") {
     // One button, two rules (#191), alternating (#199): the label is the rule
     // the next press will use, and each press offers the other one back.
@@ -2064,6 +2086,12 @@ document.addEventListener("click", (e) => {
   document.querySelectorAll(".tk-save-menu:not([hidden])").forEach((menu) => {
     if (!menu.contains(e.target) && !e.target.closest('[data-act="save-menu"]')) menu.hidden = true;
   });
+});
+
+// A family can change width without changing row height. Re-measure only the
+// expanded release cards after the interface face changes/finishes loading.
+document.addEventListener("tagrex:interfacefont", () => {
+  for (const card of releaseList().querySelectorAll('.release-card[aria-expanded="true"]')) fixTrackColumnWidth(card);
 });
 
 // A language switch: the cards and their open tracklists are built at run time, so

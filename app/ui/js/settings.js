@@ -35,10 +35,9 @@ import {
   applyCheckboxCol,
   applyTableFont,
   applyTheme,
-  ACCENT_PRESETS,
-  ACCENT_BRAND_SWATCH,
+  applyThemePreset,
+  paletteMode,
   accentColor,
-  saveAccent,
   applyTracklistFont,
   applyValueFont,
   badgeFont,
@@ -51,6 +50,8 @@ import {
   tracklistFontPx,
   valueFont,
 } from "./prefs.js";
+import { PALETTE_DEFAULT, paletteAccent } from "./palettes.js";
+import { interfaceFont, applyInterfaceFont, INTERFACE_FONT_DEFAULT } from "./interface-fonts.js";
 import { MEDIA_GLYPH_SET_OPTIONS } from "./mediaglyphs.js";
 import { checkUpdateNow } from "./updatecheck.js";
 import { setBpmEnabled } from "./bpm.js";
@@ -130,46 +131,13 @@ function setThemeChoice(mode) {
     .forEach((b) => b.classList.toggle("active", b.dataset.themeMode === mode));
 }
 
-// Accent colour (#431), live like the theme: pick a swatch or a custom colour and
-// the whole UI follows behind the sheet. The swatches are built once from the
-// presets; the row only reflects which one (or the custom input) is current.
-function buildAccentSwatches() {
-  const group = el("set-accent");
-  const custom = group.querySelector(".accent-custom");
-  ACCENT_PRESETS.forEach((preset) => {
-    const b = createComponentElement("button");
-    b.type = "button";
-    b.className = "accent-swatch";
-    b.dataset.accent = preset.hex || "";
-    b.style.background = preset.hex || ACCENT_BRAND_SWATCH;
-    b.setAttribute("role", "radio");
-    // Named through data-i18n-*, so a live language change renames them too.
-    b.dataset.i18nTitle = `settings.accent.${preset.id}`;
-    b.dataset.i18nAriaLabel = `settings.accent.${preset.id}`;
-    group.insertBefore(b, custom);
-  });
-  applyStaticText(group);
+// Opening Settings only reflects the current choice. Each explicit selection
+// applies the whole preset; legacy custom colours remain stored for recovery.
+function setPaletteChoice(mode, choose = false) {
+  if (choose) applyThemePreset(mode);
+  el('set-palette').value = paletteMode();
 }
-function setAccentChoice(hex) {
-  saveAccent(hex);
-  reflectAccentChoice();
-}
-function reflectAccentChoice() {
-  const current = accentColor();
-  const group = el("set-accent");
-  let onPreset = false;
-  group.querySelectorAll(".accent-swatch").forEach((b) => {
-    const on = (b.dataset.accent || null) === current;
-    onPreset = onPreset || on;
-    b.setAttribute("aria-checked", String(on));
-  });
-  const custom = el("set-accent-custom");
-  const customOn = Boolean(current) && !onPreset;
-  custom.parentElement.classList.toggle("active", customOn);
-  custom.parentElement.style.background = customOn ? current : "";
-  if (current) custom.value = current;
-  el("set-accent-reset").hidden = !current;
-}
+
 
 function setBadgeFontChoice(mode) {
   applyBadgeFont(mode);
@@ -185,6 +153,10 @@ function setValueFontChoice(mode) {
   el("set-value-font")
     .querySelectorAll(".seg-btn")
     .forEach((b) => b.classList.toggle("active", b.dataset.valueFont === mode));
+}
+
+function setInterfaceFontChoice(mode) {
+  el("set-interface-font").value = applyInterfaceFont(mode);
 }
 
 // Tag-read priority (#84): the order tag blocks are consulted when a file
@@ -421,10 +393,11 @@ async function openSettings() {
   }
   // Display prefs live in localStorage, not the backend settings.
   setThemeChoice(themeMode());
-  reflectAccentChoice();
+  setPaletteChoice(paletteMode());
   setLanguageChoice(langMode());
   el("set-checkbox-col").checked = checkboxColEnabled();
   setValueFontChoice(valueFont());
+  el("set-interface-font").value = interfaceFont();
   el("set-table-font").value = tableFontPx();
   el("set-table-font-val").textContent = `${tableFontPx()}px`;
   el("set-tracklist-font").value = tracklistFontPx();
@@ -649,14 +622,16 @@ el("set-theme").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-theme-mode]");
   if (btn) setThemeChoice(btn.dataset.themeMode);
 });
-buildAccentSwatches();
-el("set-accent").addEventListener("click", (e) => {
-  const b = e.target.closest(".accent-swatch");
-  if (b) setAccentChoice(b.dataset.accent);
+el('set-palette').addEventListener('change', event => {
+  setPaletteChoice(event.target.value, true);
+  refreshGroupResets();
 });
-el("set-accent-custom").addEventListener("input", (e) => setAccentChoice(e.target.value));
-el("set-accent-reset").addEventListener("click", () => setAccentChoice(null));
 // Value font is live too — swap on click so the effect shows behind the sheet.
+el("set-interface-font").addEventListener("change", event => {
+  setInterfaceFontChoice(event.target.value);
+  refreshGroupResets();
+});
+
 el("set-value-font").addEventListener("click", (e) => {
   const btn = e.target.closest("[data-value-font]");
   if (btn) setValueFontChoice(btn.dataset.valueFont);
@@ -764,13 +739,16 @@ initGroupResets([
     isDefault: () =>
       langMode() === "auto" &&
       themeMode() === "auto" &&
-      accentColor() === null &&
+      paletteMode() === PALETTE_DEFAULT &&
+      interfaceFont() === INTERFACE_FONT_DEFAULT &&
+      accentColor() === paletteAccent(PALETTE_DEFAULT, document.documentElement.dataset.theme) &&
       !el("set-checkbox-col").checked &&
       el("set-check-updates").checked,
     reset: () => {
       setLanguageChoice("auto");
       setThemeChoice("auto");
-      setAccentChoice(null);
+      setPaletteChoice(PALETTE_DEFAULT, true);
+      setInterfaceFontChoice(INTERFACE_FONT_DEFAULT);
       el("set-checkbox-col").checked = false;
       el("set-check-updates").checked = true;
     },

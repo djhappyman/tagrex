@@ -108,3 +108,22 @@ test('late BPM results preserve a different preview created during detection', a
   await finishScan(page);
   expect(await page.evaluate(() => window.tagrex.previewPlan)).toEqual(newer);
 });
+
+test('the desktop footer keeps BPM Stop reachable alongside staged edits', async ({ page }, testInfo) => {
+  await page.setViewportSize({width:1024,height:800});
+  await page.locator('#tracks-body tr[data-path]').first().click();
+  await page.locator('.subtab[data-subtab="editor"]').click();
+  await page.locator('#editor-field-title').fill('Keep this staged title');
+  await expect(page.locator('#diff-apply')).toBeEnabled();
+  await expect(page.locator('#staged-edits')).toBeVisible();
+  await startScan(page);
+  const stop=page.locator('#busy-stop');
+  await expect(stop).toBeVisible();
+  await expect(stop).toBeInViewport({ratio:1});
+  expect(await stop.evaluate(node=>{const b=node.getBoundingClientRect();const hit=document.elementFromPoint(b.x+b.width/2,b.y+b.height/2);return node===hit||node.contains(hit);})).toBe(true);
+  await page.screenshot({path:testInfo.outputPath("bpm-busy-footer.png")});
+  await stop.click();
+  await expect.poll(()=>page.evaluate(()=>window.__bpm.cancels)).toBe(1);
+  await finishScan(page);
+  await expect(page.locator('#editor-field-title')).toHaveValue('Keep this staged title');
+});
