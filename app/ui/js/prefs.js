@@ -7,7 +7,7 @@
 // library data, and they apply themselves by toggling classes and CSS
 // variables on <body>.
 import { filterRegex, filterCase } from "./state.js";
-import { DEFAULT_ACCENT, PALETTE_DEFAULT, normalizePalette } from "./palettes.js";
+import { DEFAULT_ACCENT, PALETTE_DEFAULT, normalizePalette, paletteAccent } from "./palettes.js";
 
 // Data-font preference: file names, tags and tracklists use the selected face.
 // Literal pattern/regex syntax keeps its immutable Mono role. The saved sans
@@ -205,9 +205,8 @@ function applyBadgeFont(mode) {
   }
 }
 
-// Accent colour (#431): the saved colour, brand green, or one of a few presets or
-// any colour the user picks. Only the base `--accent` is a free choice; the two
-// companions are derived so a custom colour stays readable: `--accent-text` is
+// Each complete theme supplies its primary; the legacy custom-colour API remains
+// compatible. The two companions are derived to keep it readable: `--accent-text` is
 // the label on an accent fill (white, with the fill darkened until it clears
 // WCAG AA against it) and `--accent-ink` is the accent used as text on the page
 // surface (shifted darker in the light theme, lighter in the dark one). The
@@ -218,8 +217,8 @@ function applyBadgeFont(mode) {
 // whenever the resolved theme changes because the ink depends on the surface.
 const ACCENT_STORAGE_KEY = "tagrex.accent";
 const PALETTE_STORAGE_KEY = "tagrex.palette";
-// Earlier versions always wrote tagrex.theme at startup. Its presence preserves
-// their implicit brand-green accent; only a fresh preference set starts amber.
+// Keep first-run storage compatible with the legacy custom-colour API. Complete
+// themes use the paired primary below without overwriting existing custom data.
 let freshAccent = null;
 try {
   if (localStorage.getItem("tagrex.theme") === null &&
@@ -230,7 +229,20 @@ try {
   }
 } catch { /* Still show the first-run accent if storage cannot persist it. */ }
 let currentPalette = PALETTE_DEFAULT;
+let presetAccent = true;
+try {
+  presetAccent = localStorage.getItem('tagrex.themeAccent') !== 'custom';
+  if (presetAccent) localStorage.setItem('tagrex.themeAccent', 'preset');
+} catch { /* Still use a complete preset when storage is unavailable. */ }
+function applyThemePreset(mode) {
+  presetAccent = true;
+  try { localStorage.setItem('tagrex.themeAccent', 'preset'); } catch { /* Still apply live. */ }
+  applyPalette(mode);
+}
 function paletteMode() {
+  // The live choice still applies if storage is unavailable or out of quota.
+  const active = document.documentElement.dataset.palette;
+  if (active && normalizePalette(active) === active) return active;
   try {
     return normalizePalette(localStorage.getItem(PALETTE_STORAGE_KEY) || currentPalette);
   } catch {
@@ -335,6 +347,7 @@ function deriveAccent(hex, surface, dark) {
   return { accent: fill, text: "#ffffff", ink };
 }
 function accentColor() {
+  if (presetAccent) return paletteAccent(paletteMode(), document.documentElement.dataset.theme);
   try {
     return normalizeHex(localStorage.getItem(ACCENT_STORAGE_KEY)) || freshAccent;
   } catch (e) {
@@ -369,6 +382,9 @@ function stampAccent() {
 }
 // `null` goes back to the brand green.
 function saveAccent(hex) {
+  // Retained for compatibility; the Settings UI now chooses complete presets.
+  presetAccent = false;
+  try { localStorage.setItem('tagrex.themeAccent', 'custom'); } catch { /* Memory fallback. */ }
   const value = normalizeHex(hex);
   freshAccent = null;
   try {
@@ -518,6 +534,7 @@ export {
   VALUE_FONTS,
   paletteMode,
   applyPalette,
+  applyThemePreset,
   THEME_MODES,
   themeMode,
   LANG_MODES,

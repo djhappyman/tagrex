@@ -50,10 +50,7 @@ test('placeholder colours stay quieter than values and readable in every palette
     for (const surface of ['bg','panel']) assert.ok(contrast(tokens['field-ghost'],tokens[surface])>=4.5, `${name}: placeholder on ${surface}`);
     assert.ok(contrast(tokens['field-ghost'],tokens.bg)<contrast(tokens.muted,tokens.bg),`${name}: placeholder recedes below helper text`);
   }
-  for (const mode of ['dark','light']) {
-    const values=PALETTES.map(p=>luminance(surfaces.get(`${p.id}:${mode}`)['field-ghost']));
-    assert.ok(Math.max(...values)-Math.min(...values)<.006,'matching placeholder tone across palettes');
-  }
+
 });
 
 test('dark palettes retain the approved lifted surfaces and sampled Navy colours', () => {
@@ -70,38 +67,30 @@ test('dark palettes retain the approved lifted surfaces and sampled Navy colours
   }
 });
 
-test('all families keep the same surface ratios and text luminances in both modes', () => {
-  for (const mode of ['light', 'dark']) {
-    const target = surfaces.get(`navy:${mode}`);
-    for (const pair of [['panel', 'bg'], ['bg', 'row-stripe'], ['bg', 'row-hover']]) {
-      const ratios = PALETTES.map(palette => {
-        const tokens = surfaces.get(`${palette.id}:${mode}`);
-        return contrast(tokens[pair[0]], tokens[pair[1]]);
-      });
-      // One 8-bit sRGB channel step accounts for the remaining quantization.
-      assert.ok(Math.max(...ratios) - Math.min(...ratios) < .012, `${mode}: ${pair.join('/')} ratio spread`);
-    }
-    for (const palette of PALETTES) for (const token of ['bg', 'panel', 'row-stripe', 'row-hover', 'border', 'text', 'muted']) {
-      const actual = surfaces.get(`${palette.id}:${mode}`);
-      assert.ok(Math.abs(luminance(actual[token]) - luminance(target[token])) < .0035, `${palette.id}:${mode}: ${token} luminance`);
-    }
+test('named theme core surfaces and primaries match the verified upstream references', async () => {
+  const references=JSON.parse(await readFile(new URL('../../docs/design/theme-references.json',import.meta.url),'utf8'));
+  for(const [id,modes] of Object.entries(references.anchors))for(const [mode,anchor] of Object.entries(modes)) {
+    const tokens=surfaces.get(`${id}:${mode}`);
+    assert.equal(tokens.bg,anchor.bg,`${id}:${mode} background`);assert.equal(tokens.panel,anchor.panel,`${id}:${mode} chrome`);
+    assert.equal(paletteAccent(id,mode),anchor.primary,`${id}:${mode} primary`);
   }
 });
 
-test('fresh preferences start navy with amber; older implicit green stays green', async () => {
-  for (const [seed, accent] of [[{}, DEFAULT_ACCENT], [{ 'tagrex.theme': 'auto' }, null], [{ 'tagrex.theme': 'dark', 'tagrex.accent': '#123abc' }, '#123abc']]) {
-    const app = await appearance(seed);
+test('fresh and legacy preferences migrate to complete Navy without erasing stored custom colours', async () => {
+  for (const seed of [{}, {'tagrex.theme':'auto'}, {'tagrex.theme':'dark','tagrex.accent':'#123abc'}]) {
+    const app=await appearance(seed);
     try {
-      assert.equal(app.root.dataset.palette, 'navy');
-      assert.equal(app.prefs.accentColor(), accent);
-      assert.equal(app.values.get('tagrex.accent') || null, accent);
-    } finally { app.restore(); }
+      assert.equal(app.root.dataset.palette,'navy');assert.equal(app.prefs.accentColor(),DEFAULT_ACCENT);
+      assert.equal(app.values.get('tagrex.themeAccent'),'preset');
+      if(seed['tagrex.accent'])assert.equal(app.values.get('tagrex.accent'),seed['tagrex.accent']);
+    } finally {app.restore();}
   }
 });
 
 test('surface choices preserve explicit accents and emit the shared appearance event', async () => {
   const app = await appearance({ 'tagrex.theme': 'dark', 'tagrex.accent': '#123abc' });
   try {
+    app.prefs.saveAccent('#123abc');
     const count = app.events.length;
     app.prefs.applyPalette('forest');
     assert.equal(app.root.dataset.palette, 'forest');
@@ -122,6 +111,7 @@ test('surface choices preserve explicit accents and emit the shared appearance e
 test('saved palettes survive reload, invalid values fall back, and Auto keeps following the OS', async () => {
   const app = await appearance({ 'tagrex.palette': 'forest', 'tagrex.theme': 'auto', 'tagrex.accent': '#aabbcc' }, false);
   try {
+    app.prefs.saveAccent('#aabbcc');
     assert.equal(app.root.dataset.palette, 'forest');
     assert.equal(app.root.dataset.theme, 'light');
     app.media.matches = true;
@@ -151,4 +141,39 @@ test('preset and extreme custom accents retain readable ink and button labels on
       }
     }
   } finally { app.restore(); }
+});
+
+test('complete presets own coordinated accents in both modes while preserving the legacy custom preference',async()=>{
+ const app=await appearance({'tagrex.theme':'auto','tagrex.accent':'#123abc'},false);
+ try {
+  assert.equal(PALETTES.length,10);
+  for(const palette of PALETTES){
+   app.prefs.applyThemePreset(palette.id);
+   assert.equal(app.prefs.accentColor(),palette.lightAccent);
+   assert.equal(app.values.get('tagrex.accent'),'#123abc');
+   app.prefs.applyTheme('dark');assert.equal(app.prefs.accentColor(),palette.accent);
+   app.prefs.applyTheme('light');assert.equal(app.prefs.accentColor(),palette.lightAccent);
+  }
+  app.prefs.applyTheme('auto');app.media.matches=true;app.media.change();
+  assert.equal(app.prefs.accentColor(),PALETTES.at(-1).accent);
+  assert.equal(app.values.get('tagrex.themeAccent'),'preset');
+ }finally{app.restore();}
+});
+
+test('error and success text remain readable on their validation tints in every theme',()=>{
+ const mix=(a,b,n)=>'#'+a.slice(1).match(/../g).map((v,i)=>Math.round(parseInt(v,16)*(1-n)+parseInt(b.slice(1+i*2,3+i*2),16)*n).toString(16).padStart(2,'0')).join('');
+ for(const [name,tokens]of surfaces)for(const role of ['del','add'])for(const surface of ['bg','panel','row-hover','row-stripe']){
+  assert.ok(contrast(tokens[role],tokens[surface])>=4.5,`${name} ${role} on ${surface}`);
+  assert.ok(contrast(tokens[role],mix(tokens[surface],tokens[role],.12))>=4.5,`${name} ${role} on its tint`);
+ }
+});
+
+test('a preset remains a complete live choice when storage writes fail',async()=>{
+ const app=await appearance({'tagrex.palette':'navy','tagrex.theme':'dark'});
+ try{
+  localStorage.setItem=()=>{throw new Error('quota');};
+  app.prefs.applyThemePreset('cupertino');
+  assert.equal(app.root.dataset.palette,'cupertino');assert.equal(app.prefs.paletteMode(),'cupertino');
+  assert.equal(app.prefs.accentColor(),paletteAccent('cupertino','dark'));
+ }finally{app.restore();}
 });

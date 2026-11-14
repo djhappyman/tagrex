@@ -1,7 +1,7 @@
 <script lang="ts">
   import NativeCheckbox from './controls/NativeCheckbox.svelte';
   import NativeSlider from './controls/NativeSlider.svelte';
-  import NativeColor from './controls/NativeColor.svelte';
+  import { PALETTES } from '../js/palettes.js';
   import { Button } from '$lib/components/ui/button/index.js';
   import { Input } from '$lib/components/ui/input/index.js';
   import { NativeSelect, NativeSelectOption } from '$lib/components/ui/native-select/index.js';
@@ -29,8 +29,19 @@
             <h4 class="settings-sub" data-i18n="settings.appearance">Appearance</h4>
             <div class="settings-field">
               <div class="settings-row">
-                <span class="settings-label" data-i18n="settings.theme">Theme</span>
-                <div class="seg" id="set-theme" role="tablist" data-i18n-aria-label="settings.theme" aria-label="Theme">
+                <label for="set-palette" data-i18n="settings.theme">Theme</label>
+                <NativeSelect id="set-palette" aria-label="Theme" data-i18n-aria-label="settings.theme">
+                  {#each PALETTES as theme (theme.id)}
+                    <NativeSelectOption value={theme.id}>{theme.name}</NativeSelectOption>
+                  {/each}
+                </NativeSelect>
+              </div>
+              <p class="settings-hint" data-i18n="settings.themePresetHint">Colours and accent, matched for light and dark.</p>
+            </div>
+            <div class="settings-field">
+              <div class="settings-row">
+                <span class="settings-label" data-i18n="settings.appearance">Appearance</span>
+                <div class="seg" id="set-theme" role="tablist" data-i18n-aria-label="settings.appearance" aria-label="Appearance">
                   <Button variant="ghost" size="sm" class="seg-btn" type="button" data-theme-mode="auto" data-i18n="settings.language.auto">Auto</Button>
                   <Button variant="ghost" size="sm" class="seg-btn" type="button" data-theme-mode="light" data-i18n="settings.theme.light">Light</Button>
                   <Button variant="ghost" size="sm" class="seg-btn" type="button" data-theme-mode="dark" data-i18n="settings.theme.dark">Dark</Button>
@@ -49,31 +60,6 @@
                 </NativeSelect>
               </div>
               <p class="settings-hint" data-i18n="settings.interfaceFontHint">Controls and labels. Saves immediately; your data font stays separate.</p>
-            </div>
-            <div class="settings-field">
-              <div class="settings-row col">
-                <span class="settings-label" data-i18n="settings.palette">Surface palette</span>
-                <div class="palette-picker" id="set-palette" role="group" data-i18n-aria-label="settings.palette" aria-label="Surface palette">
-                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="navy" aria-pressed="true"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.navy">Navy</span></Button>
-                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="graphite" aria-pressed="false"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.graphite">Graphite</span></Button>
-                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="forest" aria-pressed="false"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.forest">Forest</span></Button>
-                  <Button variant="ghost" size="sm" class="palette-choice" type="button" data-palette-choice="plum" aria-pressed="false"><span class="palette-preview" aria-hidden="true"></span><span data-i18n="settings.palette.plum">Plum</span></Button>
-                </div>
-              </div>
-              <p class="settings-hint" data-i18n="settings.paletteHint">Changes surfaces and saves immediately. Your accent stays the same.</p>
-              <Button variant="ghost" size="sm" class="text-btn" id="set-palette-accent" type="button" data-i18n="settings.paletteAccent">Use palette accent</Button>
-            </div>
-            <div class="settings-field">
-              <div class="settings-row">
-                <span class="settings-label" data-i18n="settings.accent">Accent colour</span>
-                <div class="accent-picker" id="set-accent" role="radiogroup" data-i18n-aria-label="settings.accent" aria-label="Accent colour">
-                  <label class="accent-custom" data-i18n-title="settings.accent.custom" title="Custom colour">
-                    <NativeColor id="set-accent-custom" value="#0b6b53" data-i18n-aria-label="settings.accent.custom" aria-label="Custom colour" />
-                  </label>
-                  <Button variant="ghost" size="sm" class="accent-reset" id="set-accent-reset" type="button" data-i18n="settings.accent.reset">Reset</Button>
-                </div>
-              </div>
-              <p class="settings-hint" data-i18n="settings.accentHint">Colours buttons, selections, links and focus outlines. Text stays readable. Success and error colours stay unchanged.</p>
             </div>
             <h4 class="settings-sub" data-i18n="settings.language">Language</h4>
             <div class="settings-field">

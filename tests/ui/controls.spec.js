@@ -103,19 +103,11 @@ test('shadcn sliders preserve native value updates, focus, input events and live
   await expect(slider).toHaveAttribute('aria-disabled', 'true');
 });
 
-test('custom accent colour uses an app popover and keeps the native colour contract', async ({ page }) => {
-  await settings(page);
-  await page.locator('#set-accent-custom-control').click();
-  await expect(page.getByRole('textbox', { name: 'Hex colour' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Hex colour' }).fill('#1a674f');
-  await expect(page.locator('#set-accent-custom')).toHaveValue('#1a674f');
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())).toBe('#1a674f');
-  await page.evaluate(() => { document.getElementById('set-accent-custom').value = '#a23345'; });
-  await expect(page.getByRole('textbox', { name: 'Hex colour' })).toHaveValue('#a23345');
-  await page.keyboard.press('Escape');
-  await expect(page.getByRole('textbox', { name: 'Hex colour' })).toHaveCount(0);
-  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
-  await expect(page.locator('#set-accent-custom-control')).toBeFocused();
+test('a complete theme uses the shared select control and retains keyboard focus',async({page})=>{
+  await settings(page);const picker=page.locator('#set-palette-control');await picker.focus();await picker.press('Enter');
+  await page.getByRole('option',{name:'Cupertino',exact:true}).click();
+  await expect(page.locator('#set-palette')).toHaveValue('cupertino');await expect(picker).toBeFocused();
+  await expect(page.getByRole('dialog',{name:'Settings',exact:true})).toBeVisible();
 });
 
 test('native form reset synchronizes the rendered checkbox and slider', async ({ page }) => {

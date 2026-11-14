@@ -1388,4 +1388,5 @@ export const es = {
   "staging.empty": "No hay cambios pendientes",
   "staging.tagFormats": "Formatos de etiquetas…",
   "staging.applyFirst": "Aplica o descarta los cambios pendientes antes de quitar archivos.",
+  "settings.themePresetHint": "Colores y acento coordinados para los modos claro y oscuro.",
 };

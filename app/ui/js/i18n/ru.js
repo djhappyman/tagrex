@@ -1389,4 +1389,5 @@ export const ru = {
   "staging.empty": "Нет ожидающих изменений",
   "staging.tagFormats": "Форматы тегов…",
   "staging.applyFirst": "Примените или сбросьте изменения перед удалением файлов из списка.",
+  "settings.themePresetHint": "Цвета и акцент подобраны для светлого и тёмного режима.",
 };
