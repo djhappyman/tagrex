@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Each track the backend lists names the field that holds its compilation flag in that file's own tag format, so an interface can offer the flag and write it through the ordinary Preview and Apply. A WAV, AIFF or MP3 whose tags cannot hold the flag is given the key of the ID3v2 tag a write adds ([#761](https://github.com/tagrex/tagrex/pull/761)).
+
 ### Changed
 
 - File and library commands no longer run on the interface thread: they go to a background worker, so the window keeps responding while a long one runs. Each online source keeps its own queue, and quick successive clicks on field locks are applied in the order they were made ([#737](https://github.com/tagrex/tagrex/pull/737)).
@@ -16,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Rename, move and file-name cleanup previews list each folder once to find the companion files that travel with a track, instead of once per track, and check a file's type only for names that match. A preview over 2000 tracks in 20 folders went from about a second to about a tenth of one; the plans are the same ([#751](https://github.com/tagrex/tagrex/pull/751)).
 - Putting files in folder order compares the numbers in their names without copying them first, so sorting a large folder is about a quarter faster; the order is the same ([#750](https://github.com/tagrex/tagrex/pull/750)).
 - Tags read for the table are kept in memory and reused by previews and column renders until the file changes on disk, so a second listing or a preview over 2000 files takes milliseconds instead of re-reading every file. Writes and Undo clear the memory, and the check before a write still reads each file afresh ([#741](https://github.com/tagrex/tagrex/pull/741)).
+- Playlists, CUE sheets, reports and exported covers are written to a temporary file first and only then put in place, so a failed export leaves the previous file as it was. An export refuses to write through a link or into a folder that resolves outside the library, and never replaces a file that appeared in the meantime. This works on FAT and exFAT volumes such as USB sticks too ([#743](https://github.com/tagrex/tagrex/pull/743)).
 
 ### Fixed
 
@@ -24,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Dependency update proposals no longer offer a new major version of `zbus` on its own: it stays on the major version the single-instance plugin builds, so the Linux build carries one copy of it ([#759](https://github.com/tagrex/tagrex/issues/759)).
 - On a FAT or exFAT volume such as a USB stick, the hidden `._` companion files macOS writes next to every file are no longer listed as extra, unreadable tracks ([#755](https://github.com/tagrex/tagrex/issues/755)).
 - The Linux build keeps moving files to the Trash with the 5.3 release of the trash library, which made its Linux backend a feature of its own; without it the build failed ([#760](https://github.com/tagrex/tagrex/issues/760)).
+- An Ogg file holding FLAC instead of Vorbis is listed as an unsupported format and never written. It used to be taken for AAC: its tags did not show, and a tag edit put an ID3v2 tag in front of the Ogg stream. A file already damaged that way is refused too ([#762](https://github.com/tagrex/tagrex/issues/762)).
 
 ## [1.5.0] - 2026-11-13
 

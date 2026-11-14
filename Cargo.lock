@@ -4686,6 +4686,7 @@ version = "1.5.0"
 dependencies = [
  "base64 0.23.1",
  "regex",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
@@ -4697,6 +4698,7 @@ dependencies = [
  "tagrex-providers-soundeo",
  "thiserror 2.0.21",
  "trash",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -13,6 +13,7 @@
 //! keys use [`TagField`]'s lossless storage-key codec.
 
 mod cover_encoding;
+mod output;
 mod read_cache;
 mod sidecars;
 
@@ -73,6 +74,9 @@ pub struct TrackDto {
     /// that genuinely has no tags at all — which is itself worth seeing.
     #[serde(default)]
     pub tag_blocks: Vec<TagBlockDto>,
+    /// Native compilation-flag storage key, when supported by the read tag block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compilation_field: Option<String>,
     /// Whether any tag block carries a picture (#447), from the same probe. Only
     /// a file that was read says `false`; one whose cover is not known (an
     /// unreadable file, a conversion from tags alone) says `true`, so it is never
@@ -126,6 +130,7 @@ impl TrackDto {
             unreadable: true,
             duration_secs: None,
             tag_blocks: Vec::new(),
+            compilation_field: None,
             has_cover: true,
         }
     }
@@ -2363,6 +2368,7 @@ impl App {
             Ok(read) => TrackDto {
                 duration_secs: Some(read.props.duration_secs),
                 tag_blocks: read.blocks.iter().map(TagBlockDto::from).collect(),
+                compilation_field: read.compilation_field().map(|field| field.to_storage_key()),
                 has_cover: read.has_cover,
                 ..TrackDto::from(read.file)
             },
@@ -4801,7 +4807,7 @@ impl App {
                     if !seen_targets.insert(canonical_target) {
                         continue;
                     }
-                    std::fs::write(&target, &cover.data)?;
+                    self.write_output(&target, &cover.data)?;
                     written.push(target.to_string_lossy().into_owned());
                 }
                 None => skipped_no_cover.push(path.to_string_lossy().into_owned()),
@@ -4822,6 +4828,17 @@ impl App {
             return Err(AppError::InvalidFileName(file_name.to_string()));
         }
         Ok(self.library_root.join(name))
+    }
+
+    /// Stage and replace one export beneath the library root through the
+    /// confined output publisher. Separate calls are separate transactions.
+    fn write_output(&self, target: &Path, bytes: &[u8]) -> Result<(), AppError> {
+        output::write_batch(
+            &self.library_root,
+            &[(target.to_path_buf(), bytes.to_vec())],
+            true,
+        )?;
+        Ok(())
     }
 
     /// How an exported file refers to a track: relative to the library root when
@@ -4861,7 +4878,7 @@ impl App {
         let target = self.export_target(file_name)?;
         let root = std::fs::canonicalize(&self.library_root)?;
         let entries = self.playlist_entries(&root, paths);
-        std::fs::write(&target, export::m3u(&entries))?;
+        self.write_output(&target, export::m3u(&entries).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -4959,7 +4976,7 @@ impl App {
             let name = self.playlist_name(&mask, &members[0], &mut taken)?;
             let target = self.export_target(&name)?;
             let entries = self.playlist_entries(&root, members);
-            std::fs::write(&target, export::m3u(&entries))?;
+            self.write_output(&target, export::m3u(&entries).as_bytes())?;
             written.push(target.to_string_lossy().into_owned());
         }
         Ok(written)
@@ -5031,7 +5048,7 @@ impl App {
                 })
             })
             .collect();
-        std::fs::write(&target, export::cue(&entries))?;
+        self.write_output(&target, export::cue(&entries).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -5039,7 +5056,7 @@ impl App {
     pub fn export_csv(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::csv(&tracks))?;
+        self.write_output(&target, export::csv(&tracks).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -5047,7 +5064,7 @@ impl App {
     pub fn export_html(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::html(&tracks))?;
+        self.write_output(&target, export::html(&tracks).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -5055,7 +5072,7 @@ impl App {
     pub fn export_xml(&self, paths: &[PathBuf], file_name: &str) -> Result<String, AppError> {
         let target = self.export_target(file_name)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::xml(&tracks))?;
+        self.write_output(&target, export::xml(&tracks).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -5070,7 +5087,7 @@ impl App {
         let target = self.export_target(file_name)?;
         let mask = Mask::parse(mask_pattern)?;
         let tracks = read_tracks(paths);
-        std::fs::write(&target, export::report(&tracks, &mask))?;
+        self.write_output(&target, export::report(&tracks, &mask).as_bytes())?;
         Ok(target.to_string_lossy().into_owned())
     }
 
@@ -5293,21 +5310,30 @@ impl App {
                 (dir.join(name), image.data.clone())
             })
             .collect();
-        let conflicts: Vec<String> = planned
-            .iter()
-            .filter(|(target, _)| target.exists())
-            .filter_map(|(target, _)| target.file_name())
-            .map(|name| name.to_string_lossy().into_owned())
-            .collect();
+        let mut conflicts = Vec::new();
+        for (target, _) in &planned {
+            match std::fs::symlink_metadata(target) {
+                Ok(metadata) => {
+                    if !metadata.is_file() || metadata.file_type().is_symlink() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            "image output target is not a regular file",
+                        )
+                        .into());
+                    }
+                    conflicts.push(target.file_name().unwrap().to_string_lossy().into_owned());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
         if !conflicts.is_empty() && !overwrite {
             return Ok(SaveImagesDto {
                 written: Vec::new(),
                 conflicts,
             });
         }
-        for (target, data) in &planned {
-            std::fs::write(target, data)?;
-        }
+        output::write_batch(&self.library_root, &planned, overwrite)?;
         Ok(SaveImagesDto {
             written: planned
                 .iter()
@@ -6975,6 +7001,7 @@ impl From<tagrex_core::model::TrackFile> for TrackDto {
             // nor which blocks the file carries.
             duration_secs: None,
             tag_blocks: Vec::new(),
+            compilation_field: None,
             has_cover: true,
         }
     }
@@ -8760,6 +8787,22 @@ mod tests {
         );
         // And the collapsed pair really is one chain: upper then title = title.
         assert_eq!(runs[0].1.apply("as 5606"), "As 5606");
+    }
+
+    #[test]
+    fn cached_rows_keep_the_native_compilation_field() {
+        let dir = TempDir::new("compilation-metadata-cache");
+        dir.tagged_flac("track.flac", "Artist", "Title");
+        let app = open_app(&dir);
+        for _ in 0..2 {
+            let rows = app.list_tracks();
+            assert_eq!(rows.len(), 1);
+            assert!(!rows[0].unreadable);
+            assert_eq!(
+                rows[0].compilation_field.as_deref(),
+                Some("custom:COMPILATION")
+            );
+        }
     }
 
     #[test]
@@ -12348,6 +12391,44 @@ mod tests {
 
         let plan = app.preview_rename("%album% - %title%", &[track]).unwrap();
         assert!(plan.changes.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn confined_exports_never_follow_existing_or_dangling_links() {
+        let dir = TempDir::new("confined-exports");
+        let library = dir.0.join("library");
+        std::fs::create_dir(&library).unwrap();
+        let outside = dir.0.join("outside.txt");
+        std::fs::write(&outside, b"original").unwrap();
+        let app = App::open(&library, &dir.0.join("journal.sqlite")).unwrap();
+        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
+        assert!(app.export_playlist(&[], "list.m3u").is_err());
+        assert_eq!(std::fs::read(&outside).unwrap(), b"original");
+        std::fs::remove_file(library.join("list.m3u")).unwrap();
+        std::fs::remove_file(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, library.join("list.m3u")).unwrap();
+        assert!(app.export_playlist(&[], "list.m3u").is_err());
+        assert!(!outside.exists());
+    }
+
+    #[test]
+    fn fetched_image_batch_refuses_special_targets_without_partial_outputs() {
+        let dir = TempDir::new("images-atomic");
+        let app = App::open(&dir.0, &dir.0.join("journal.sqlite")).unwrap();
+        std::fs::write(dir.0.join("folder.jpg"), b"original").unwrap();
+        std::fs::create_dir(dir.0.join("cover.jpg")).unwrap();
+        let image = || FetchedImage {
+            mime: "image/jpeg".into(),
+            data: vec![1, 2, 3],
+        };
+        assert!(app
+            .save_fetched_release_images(&dir.0.join("track.flac"), &[image(), image()], true)
+            .is_err());
+        assert_eq!(
+            std::fs::read(dir.0.join("folder.jpg")).unwrap(),
+            b"original"
+        );
     }
 
     #[test]
